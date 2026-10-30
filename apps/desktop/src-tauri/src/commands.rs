@@ -1,0 +1,212 @@
+//! Everything the interface can ask of the core. A failure comes back as a
+//! string error, so no provider or agent problem can take the shell down.
+
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+
+use agent_adapters::{AgentInfo, Sessions, StartRequest};
+use ai_core::{ChatEvent, ChatRequest, Capabilities, Endpoint, Kind, LocalServer, Message, ModelInfo, ProviderDef};
+use serde::Serialize;
+use tauri::ipc::Channel;
+use tauri::{AppHandle, Manager, State};
+use tokio_util::sync::CancellationToken;
+
+use crate::island::{self, Gate, Rect};
+use crate::settings::{self, Settings};
+use crate::{glass, secrets};
+
+pub struct Core {
+    pub settings: Mutex<Settings>,
+    pub gate: Arc<Gate>,
+    pub sessions: Sessions,
+    pub chats: Mutex<HashMap<String, CancellationToken>>,
+}
+
+fn stringify(err: impl std::fmt::Display) -> String {
+    err.to_string()
+}
+
+// ── Island ──────────────────────────────────────────────────────────────────
+
+/// Runs on the main thread, which owns the composition objects.
+#[tauri::command]
+pub fn island_set_rect(core: State<'_, Core>, rect: Rect) {
+    *core.gate.rect.lock().unwrap() = rect;
+    let d = rect.dpr;
+    glass::place((rect.x * d) as f32, (rect.y * d) as f32, (rect.w * d) as f32, (rect.h * d) as f32, (rect.r * d) as f32);
+}
+
+#[tauri::command]
+pub fn island_set_interactive(app: AppHandle, core: State<'_, Core>, on: bool) {
+    if let Some(win) = app.get_webview_window(island::LABEL) {
+        island::set_interactive(&win, &core.gate, on);
+    }
+}
+
+#[tauri::command]
+pub fn glass_active() -> bool {
+    glass::active()
+}
+
+// ── Settings ────────────────────────────────────────────────────────────────
+
+#[tauri::command]
+pub fn settings_get(core: State<'_, Core>) -> Settings {
+    core.settings.lock().unwrap().clone()
+}
+
+#[tauri::command]
+pub fn settings_save(app: AppHandle, core: State<'_, Core>, settings: Settings) -> Result<(), String> {
+    let path = settings::path(&app).ok_or("No settings folder")?;
+    settings::save(&path, &settings).map_err(stringify)?;
+    *core.settings.lock().unwrap() = settings;
+    Ok(())
+}
+
+// ── Providers ───────────────────────────────────────────────────────────────
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderInfo {
+    id: &'static str,
+    name: &'static str,
+    kind: Kind,
+    base_url: String,
+    needs_key: bool,
+    has_key: bool,
+    capabilities: Capabilities,
+}
+
+fn base_url(core: &Core, def: &ProviderDef) -> String {
+    let settings = core.settings.lock().unwrap();
+    settings.provider_base_urls.get(def.id).cloned().unwrap_or_else(|| def.base_url.to_string())
+}
+
+/// Everything needed to call a provider. Local-only mode is enforced here, on
+/// the resolved address, so no interface path can get around it.
+fn resolve(core: &Core, id: &str) -> Result<(&'static ProviderDef, Endpoint), String> {
+    let def = ai_core::find(id).ok_or_else(|| format!("Unknown provider {id}"))?;
+    let url = base_url(core, def);
+    if url.is_empty() {
+        return Err(format!("{} has no endpoint set.", def.name));
+    }
+    if core.settings.lock().unwrap().local_only && !ai_core::is_loopback(&url) {
+        return Err(format!("Local-only mode is on, so {} is blocked.", def.name));
+    }
+    Ok((def, Endpoint { base_url: url, api_key: secrets::get(id) }))
+}
+
+fn provider(core: &Core, id: &str) -> Result<Box<dyn ai_core::Provider>, String> {
+    let (def, endpoint) = resolve(core, id)?;
+    ai_core::client(def.protocol, endpoint).map_err(stringify)
+}
+
+#[tauri::command]
+pub fn providers_list(core: State<'_, Core>) -> Vec<ProviderInfo> {
+    ai_core::catalog()
+        .iter()
+        .map(|def| ProviderInfo {
+            id: def.id,
+            name: def.name,
+            kind: def.kind,
+            base_url: base_url(&core, def),
+            needs_key: def.needs_key,
+            has_key: secrets::get(def.id).is_some(),
+            capabilities: def.capabilities,
+        })
+        .collect()
+}
+
+#[tauri::command]
+pub fn provider_set_key(id: String, key: String) -> Result<(), String> {
+    secrets::set(&id, key.trim())
+}
+
+#[tauri::command]
+pub fn provider_clear_key(id: String) -> Result<(), String> {
+    secrets::clear(&id)
+}
+
+#[tauri::command]
+pub async fn provider_models(core: State<'_, Core>, id: String) -> Result<Vec<ModelInfo>, String> {
+    provider(&core, &id)?.models().await.map_err(stringify)
+}
+
+#[tauri::command]
+pub async fn provider_test(core: State<'_, Core>, id: String) -> Result<String, String> {
+    ai_core::test_connection(provider(&core, &id)?.as_ref()).await.map_err(stringify)
+}
+
+#[tauri::command]
+pub async fn providers_discover(core: State<'_, Core>) -> Result<Vec<LocalServer>, String> {
+    let overrides = core.settings.lock().unwrap().provider_base_urls.clone();
+    Ok(ai_core::discover(|id| overrides.get(id).cloned()).await)
+}
+
+#[tauri::command]
+pub async fn chat_stream(
+    core: State<'_, Core>,
+    request_id: String,
+    provider: String,
+    model: String,
+    messages: Vec<Message>,
+    channel: Channel<ChatEvent>,
+) -> Result<(), String> {
+    let client = self::provider(&core, &provider)?;
+    let cancel = CancellationToken::new();
+    core.chats.lock().unwrap().insert(request_id.clone(), cancel.clone());
+    let request = ChatRequest { model, messages };
+    let mut sink = |event: ChatEvent| {
+        let _ = channel.send(event);
+    };
+    ai_core::run_chat(client.as_ref(), &request, &mut sink, &cancel).await;
+    core.chats.lock().unwrap().remove(&request_id);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn chat_cancel(core: State<'_, Core>, request_id: String) {
+    if let Some(token) = core.chats.lock().unwrap().get(&request_id) {
+        token.cancel();
+    }
+}
+
+// ── Agents ──────────────────────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn agents_detect() -> Vec<AgentInfo> {
+    agent_adapters::detect().await
+}
+
+#[tauri::command]
+pub async fn session_start(core: State<'_, Core>, request: StartRequest) -> Result<String, String> {
+    core.sessions.start(request).map_err(stringify)
+}
+
+#[tauri::command]
+pub async fn session_send(core: State<'_, Core>, id: String, text: String) -> Result<(), String> {
+    core.sessions.send(&id, text).map_err(stringify)
+}
+
+#[tauri::command]
+pub async fn session_cancel(core: State<'_, Core>, id: String) -> Result<(), String> {
+    core.sessions.cancel(&id).map_err(stringify)
+}
+
+#[tauri::command]
+pub async fn session_answer(
+    core: State<'_, Core>,
+    session_id: String,
+    approval_id: String,
+    allow: bool,
+) -> Result<(), String> {
+    core.sessions.answer(&session_id, &approval_id, allow).map_err(stringify)
+}
+
+#[tauri::command]
+pub fn open_project(cwd: String) -> Result<(), String> {
+    if !std::path::Path::new(&cwd).is_dir() {
+        return Err("That folder no longer exists.".into());
+    }
+    std::process::Command::new("explorer").arg(&cwd).spawn().map(|_| ()).map_err(stringify)
+}

@@ -1,0 +1,13 @@
+[package]
+name = "agent-adapters"
+description = "Independent adapters for coding-agent CLIs behind one session model"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+uuid = { version = "1", features = ["v4"] }

@@ -1,0 +1,10 @@
+{
+  "name": "@meridian/design-system",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./tokens.css": "./src/tokens.css",
+    "./motion": "./src/motion.ts"
+  }
+}

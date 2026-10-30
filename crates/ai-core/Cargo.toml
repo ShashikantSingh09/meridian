@@ -1,0 +1,16 @@
+[package]
+name = "ai-core"
+description = "Provider-agnostic AI client: catalog, capabilities, streaming chat, local discovery"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+futures-util.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true

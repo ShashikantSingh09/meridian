@@ -1,0 +1,121 @@
+// Wire types shared with the Rust core. Keep in step with crates/ai-core and
+// crates/agent-adapters: field names there are serialised in camelCase.
+
+export interface Capabilities {
+  streaming: boolean;
+  tools: boolean;
+  vision: boolean;
+  modelDiscovery: boolean;
+  usage: boolean;
+}
+
+export type ProviderKind = "cloud" | "local" | "custom";
+
+export interface ProviderInfo {
+  id: string;
+  name: string;
+  kind: ProviderKind;
+  baseUrl: string;
+  needsKey: boolean;
+  hasKey: boolean;
+  capabilities: Capabilities;
+}
+
+export interface ModelInfo {
+  id: string;
+  label: string;
+}
+
+export interface ChatMessage {
+  role: "user" | "assistant" | "system";
+  content: string;
+}
+
+export type ChatEvent =
+  | { type: "delta"; text: string }
+  | { type: "usage"; input: number; output: number }
+  | { type: "done" }
+  | { type: "error"; kind: ErrorKind; message: string };
+
+export type ErrorKind =
+  | "auth"
+  | "rateLimit"
+  | "unavailable"
+  | "badRequest"
+  | "network"
+  | "cancelled"
+  | "other";
+
+export interface LocalServer {
+  providerId: string;
+  baseUrl: string;
+  models: string[];
+}
+
+export type AgentId = "claude-code" | "codex";
+
+export interface AgentInfo {
+  id: AgentId;
+  name: string;
+  installed: boolean;
+  path: string | null;
+  version: string | null;
+  capabilities: {
+    approvals: boolean;
+    resume: boolean;
+    usage: boolean;
+    progress: boolean;
+  };
+}
+
+export type SessionStatus =
+  | "starting"
+  | "running"
+  | "waiting"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+export interface Approval {
+  id: string;
+  tool: string;
+  summary: string;
+}
+
+export type AgentEvent =
+  | { type: "started"; nativeId: string | null; model: string | null }
+  | { type: "status"; status: SessionStatus; message?: string | null }
+  | { type: "text"; text: string }
+  | { type: "activity"; label: string }
+  | { type: "approval"; approval: Approval }
+  | { type: "approvalResolved"; id: string }
+  | { type: "usage"; input: number; output: number; costUsd: number | null };
+
+export interface AgentEnvelope {
+  sessionId: string;
+  event: AgentEvent;
+}
+
+export interface Settings {
+  theme: "system" | "dark" | "light";
+  motion: "system" | "full" | "reduced";
+  ambient: boolean;
+  autostart: boolean;
+  defaultProvider: string | null;
+  defaultModel: string | null;
+  providerBaseUrls: Record<string, string>;
+  systemPrompt: string;
+  localOnly: boolean;
+}
+
+export const defaultSettings: Settings = {
+  theme: "system",
+  motion: "system",
+  ambient: true,
+  autostart: false,
+  defaultProvider: null,
+  defaultModel: null,
+  providerBaseUrls: {},
+  systemPrompt: "",
+  localOnly: false,
+};

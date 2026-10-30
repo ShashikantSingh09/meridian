@@ -1,0 +1,14 @@
+{
+  "name": "meridian",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": ["apps/*", "packages/*"],
+  "scripts": {
+    "dev": "npm run tauri dev -w apps/desktop",
+    "build": "npm run tauri build -w apps/desktop",
+    "web": "npm run dev -w apps/desktop",
+    "test": "npm run test -w apps/desktop && cargo test --workspace",
+    "test:e2e": "npm run e2e -w apps/desktop",
+    "typecheck": "npm run typecheck -w apps/desktop"
+  }
+}

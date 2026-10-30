@@ -1,0 +1,45 @@
+[package]
+name = "meridian"
+description = "Meridian: a universal AI companion for the Windows desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "meridian_lib"
+crate-type = ["rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+agent-adapters = { path = "../../../crates/agent-adapters" }
+ai-core = { path = "../../../crates/ai-core" }
+serde.workspace = true
+serde_json.workspace = true
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-autostart = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-single-instance = "2"
+tokio.workspace = true
+tokio-util.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+keyring = { version = "3", features = ["windows-native"] }
+# The same versions wry already builds, so nothing is compiled twice.
+webview2-com = "0.39"
+windows-numerics = "0.3"
+windows = { version = "0.62", features = [
+  "Foundation",
+  "System",
+  "UI",
+  "UI_Composition",
+  "UI_Composition_Desktop",
+  "Win32_Foundation",
+  "Win32_Graphics_Dwm",
+  "Win32_System_WinRT",
+  "Win32_System_WinRT_Composition",
+  "Win32_UI_Shell",
+  "Win32_UI_WindowsAndMessaging",
+] }
