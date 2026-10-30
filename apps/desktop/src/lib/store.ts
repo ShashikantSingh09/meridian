@@ -1290,6 +1290,7 @@ export async function boot() {
   ]);
   // The first state was sent before anything here was listening.
   void bridge.mediaAction({ action: "refresh" });
+  void bridge.refreshRunning();
 }
 
 export const newSessionDefaults = (): Pick<StartSession, "agent"> | null => {

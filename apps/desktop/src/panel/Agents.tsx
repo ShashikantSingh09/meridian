@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { bridge } from "../lib/bridge";
 import { Icon } from "../lib/icons";
-import { answerApproval, cancelSession, sendToSession, startSession, useApp, type SessionDetail } from "../lib/store";
+import { answerApproval, cancelSession, sendToSession, startSession, useApp, type SessionDetail, openSettings } from "../lib/store";
 import { AgentMark } from "../island/marks";
 import { LogLine } from "./LogLine";
 import type { AgentId } from "../lib/types";
@@ -9,6 +9,7 @@ import type { AgentId } from "../lib/types";
 const LIVE = ["starting", "running", "waiting"];
 
 function Session({ session }: { session: SessionDetail }) {
+  const watching = useApp((s) => s.watching);
   const live = LIVE.includes(session.status);
   const [text, setText] = useState("");
   const log = useRef<HTMLDivElement>(null);
@@ -41,6 +42,13 @@ function Session({ session }: { session: SessionDetail }) {
           </button>
         )}
       </header>
+
+      {session.watched && !watching && (
+        <div className="auth-banner" role="status">
+          <span className="grow meta">Seen running in your terminal. To answer its questions from here, turn on following, then start a new session.</span>
+          <button className="ghost" onClick={() => openSettings("agents")}>Turn on</button>
+        </div>
+      )}
 
       {session.approval && (
         <div className="approval">

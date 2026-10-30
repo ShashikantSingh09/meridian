@@ -10,6 +10,15 @@
 - **Chat and screen are one surface** (D46).
 - **Expressions** (D47).
 - **Long song names** slide while the pointer is on them. The browser's own tooltip is gone from the bar.
+- **Claude Code with no setup** (D49). A running session shows on the island with nothing changed on the machine.
+
+### Proved on the real app
+
+| Check | Result |
+|---|---|
+| A session already running in a terminal, with no hooks | Shown as working, with its live activity |
+| A chat after the app was fully stopped and started | Told a word, restarted, then asked: it answered MANGO |
+| Tests | 518 Rust, 46 unit, 55 UI |
 
 ## 2026-10-31: Real music end to end, a calmer island, and ideas from Coucou
 

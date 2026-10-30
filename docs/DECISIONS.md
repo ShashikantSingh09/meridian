@@ -410,3 +410,15 @@ and not one every frame.
 
 Voice, charging, volume and brightness, and the next features from Coucou are on the design canvas, and none of them are built. A first
 volume display was started and taken out again when the owner asked to review it first.
+
+## D49. Claude Code is seen with no setup
+
+Following was the only way to see Claude Code, it was off by default, and nothing said so, so to the owner the app simply missed a
+running session. Hooks also cannot be the whole answer, because Claude Code reads them when it starts, so a session already running
+never picks them up. Claude Code keeps a small record of each running session, saying whether it is busy, and its transcript names the
+tool in use. Reading those shows any session at work with nothing changed on the user's machine.
+
+So the app now watches those records, every 2 seconds. Hooks remain, because only they can answer a request. A session they report is
+left to them. Records are checked against a live process, because one can outlive a crash, and runs started by tools are skipped, which
+includes this app's own. Key files beside the records are never opened. These are Claude Code's own files and not a promised format,
+so if they change, sessions simply stop showing, and following still works.

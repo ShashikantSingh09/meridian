@@ -14,6 +14,7 @@ mod claude;
 mod codex;
 mod detect;
 mod process;
+pub mod running;
 pub mod watch;
 
 pub use detect::{auth_status, detect, open_login, AgentInfo, AuthStatus, Capabilities};
@@ -76,7 +77,7 @@ pub enum AgentEvent {
 }
 
 impl AgentEvent {
-    pub(crate) fn status(status: SessionStatus) -> Self {
+    pub fn status(status: SessionStatus) -> Self {
         Self::Status { status, message: None }
     }
 

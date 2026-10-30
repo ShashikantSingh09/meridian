@@ -2,10 +2,14 @@
 //! the user owns, so it happens only from the switch in Settings, and turning it
 //! off removes exactly what was added.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+use std::time::Duration;
 
 use agent_adapters::watch::{self, Watcher, HOOK_PATH};
+use agent_adapters::{running, AgentEvent, Envelope, SessionStatus};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use serde::{Deserialize, Serialize};
@@ -16,6 +20,8 @@ use crate::island;
 /// Hooks name a fixed address, so the port and token outlive a restart.
 pub type Answers = serde_json::Map<String, serde_json::Value>;
 
+const CHECK_RUNNING_EVERY: Duration = Duration::from_secs(2);
+
 #[derive(Clone, Serialize, Deserialize)]
 struct Address {
     port: u16,
@@ -24,6 +30,7 @@ struct Address {
 
 pub struct Following {
     watcher: Mutex<Option<Watcher>>,
+    resend: AtomicBool,
     /// Claude Code's settings file. None if there is no home folder to find it in.
     settings: Option<PathBuf>,
     address: PathBuf,
@@ -96,6 +103,10 @@ impl Following {
         Ok(())
     }
 
+    fn hears(&self, session_id: &str) -> bool {
+        self.watcher.lock().unwrap().as_ref().is_some_and(|w| w.hears(session_id))
+    }
+
     fn on(&self) -> bool {
         self.settings.as_deref().is_some_and(watch::installed)
     }
@@ -109,9 +120,70 @@ impl Following {
 pub fn state(app: &tauri::App) -> Result<Following, Box<dyn std::error::Error>> {
     Ok(Following {
         watcher: Mutex::new(None),
+        resend: AtomicBool::new(false),
         settings: claude_settings(app.handle()),
         address: app.path().app_config_dir()?.join("following.json"),
     })
+}
+
+/// True if the process is still running. A record can outlive a crash.
+fn alive(pid: u32) -> bool {
+    use windows::Win32::Foundation::{CloseHandle, STILL_ACTIVE};
+    use windows::Win32::System::Threading::{GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
+    unsafe {
+        let Ok(process) = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid) else { return false };
+        let mut code = 0;
+        let read = GetExitCodeProcess(process, &mut code);
+        let _ = CloseHandle(process);
+        read.is_ok() && code == STILL_ACTIVE.0 as u32
+    }
+}
+
+/// Shows Claude Code at work in any terminal, whether or not following is on. Hooks tell more and
+/// can be answered, so a session they report is left to them. This has to exist beside them
+/// because Claude Code reads hooks when it starts: a running session never picks them up.
+pub fn watch_running(app: &AppHandle) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let following = app.state::<Following>();
+        let Some(dir) = following.settings.as_ref().and_then(|s| s.parent()).map(PathBuf::from) else { return };
+        let send = |session_id: &str, event: AgentEvent| {
+            let _ = app.emit_to(island::LABEL, "agent-event", Envelope { session_id: session_id.to_string(), event });
+        };
+        let mut shown: HashMap<String, Option<String>> = HashMap::new();
+        loop {
+            if following.resend.swap(false, Ordering::Relaxed) {
+                shown.clear();
+            }
+            let busy = running::busy(&dir, alive);
+            for session in &busy {
+                let id = &session.session;
+                if following.hears(id) {
+                    shown.remove(id);
+                    continue;
+                }
+                let before = shown.get(id);
+                if before.is_none() {
+                    send(id, AgentEvent::Watched { agent: "Claude Code".into(), cwd: session.cwd.clone(), title: session.title.clone() });
+                    send(id, AgentEvent::status(SessionStatus::Running));
+                }
+                if before.is_none_or(|known| *known != session.activity) {
+                    if let Some(label) = &session.activity {
+                        send(id, AgentEvent::Activity { label: label.clone() });
+                    }
+                }
+                shown.insert(id.clone(), session.activity.clone());
+            }
+            shown.retain(|id, _| {
+                let still = busy.iter().any(|session| session.session == *id);
+                if !still {
+                    send(id, AgentEvent::status(SessionStatus::Completed));
+                }
+                still
+            });
+            std::thread::sleep(CHECK_RUNNING_EVERY);
+        }
+    });
 }
 
 /// Hooks stay in place between runs, so a running app has to answer them.
@@ -125,6 +197,12 @@ pub fn resume(app: &AppHandle) {
             }
         }
     });
+}
+
+/// The first look happens before the interface is listening, so it asks once it is.
+#[tauri::command]
+pub fn running_refresh(following: State<'_, Following>) {
+    following.resend.store(true, Ordering::Relaxed);
 }
 
 /// What turning following on or off would change. Writes nothing.

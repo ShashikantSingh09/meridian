@@ -163,6 +163,7 @@ fn setup(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     island::spawn_poll(handle.clone(), gate);
     watch::spawn(handle.clone());
     following::resume(&handle);
+    following::watch_running(&handle);
     life::spawn(handle);
 
     build_tray(app)?;
@@ -230,6 +231,7 @@ pub fn run() {
             commands::update_check,
             commands::update_install,
             commands::open_logs,
+            following::running_refresh,
             following::watch_preview,
             following::watch_status,
             following::watch_set,

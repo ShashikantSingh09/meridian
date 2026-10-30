@@ -320,6 +320,11 @@ fn approval_summary(tool: &str, input: &Value) -> String {
     }
 }
 
+/// What the interface calls a session running in the user's own terminal.
+pub fn session_id(native: &str) -> String {
+    format!("{SESSION_PREFIX}{native}")
+}
+
 /// What came back from the island.
 struct Reply {
     allow: bool,
@@ -539,7 +544,7 @@ async fn handle(mut socket: TcpStream, shared: Arc<Shared>) {
     let (Some(native), Some(name)) = (hook["session_id"].as_str(), hook["hook_event_name"].as_str()) else {
         return respond(&mut socket, "200 OK", "").await;
     };
-    let session = format!("{SESSION_PREFIX}{native}");
+    let session = session_id(native);
     if name == "PermissionRequest" {
         return ask(socket, &shared, session, &hook).await;
     }
@@ -605,6 +610,11 @@ impl Watcher {
     }
 
     /// True if this session id belongs to the watcher.
+    /// True once a session's hooks have been heard from.
+    pub fn hears(&self, session_id: &str) -> bool {
+        self.shared.state.lock().unwrap().sessions.contains_key(session_id)
+    }
+
     pub fn owns(session_id: &str) -> bool {
         session_id.starts_with(SESSION_PREFIX)
     }
