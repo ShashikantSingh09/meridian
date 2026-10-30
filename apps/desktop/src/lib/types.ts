@@ -101,10 +101,27 @@ export type SessionStatus =
   | "failed"
   | "cancelled";
 
+export interface Question {
+  text: string;
+  options: string[];
+  multi: boolean;
+}
+
 export interface Approval {
   id: string;
   tool: string;
   summary: string;
+  /** Something to choose, when Claude Code asks a question. */
+  questions?: Question[];
+  /** The plan to approve. */
+  plan?: string;
+}
+
+/** What a change to a settings file would do, shown before it is made. */
+export interface SettingsChange {
+  path: string;
+  backup: string;
+  lines: { kind: "added" | "removed" | "plain" | "gap"; text: string }[];
 }
 
 export type AgentEvent =

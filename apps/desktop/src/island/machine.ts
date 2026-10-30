@@ -128,18 +128,21 @@ const PANELS: Record<string, Geometry> = {
   settings: EXPANDED,
 };
 
+/** Everything small and active shares one height, so moving between them only changes the width. */
+const BAR = { h: 46, r: 19 };
+
 const SIZES: Record<IslandView, Geometry> = {
   idle: { w: 104, h: 34, r: 15 },
-  listening: { w: 340, h: 50, r: 20 },
-  thinking: { w: 270, h: 50, r: 20 },
-  working: { w: 372, h: 50, r: 20 },
+  listening: { w: 340, ...BAR },
+  thinking: { w: 270, ...BAR },
+  working: { w: 372, ...BAR },
   notification: { w: 392, h: 62, r: 22 },
   expanded: EXPANDED,
   contextual: { w: 420, h: 112, r: 24 },
   multitask: { w: 392, h: 0, r: 22 },
-  screen: { w: 264, h: 46, r: 18 },
-  media: { w: 196, h: 36, r: 14 },
-  live: { w: 232, h: 36, r: 14 },
+  screen: { w: 264, ...BAR },
+  media: { w: 340, ...BAR },
+  live: { w: 300, ...BAR },
   error: { w: 392, h: 58, r: 21 },
 };
 
@@ -147,8 +150,12 @@ const IDLE_HOVER: Geometry = { w: 380, h: 118, r: 26 };
 const GREETING: Geometry = { w: 224, h: 40, r: 17 };
 const LIVE_OPEN: Geometry = { w: 408, h: 148, r: 28 };
 const LIVE_OPEN_SHORT: Geometry = { w: 408, h: 122, r: 28 };
-const MEDIA_OPEN: Geometry = { w: 372, h: 150, r: 26 };
+const MEDIA_OPEN: Geometry = { w: 388, h: 160, r: 28 };
 const APPROVAL: Geometry = { w: 430, h: 132, r: 26 };
+const PLAN: Geometry = { w: 470, h: 320, r: 28 };
+/** Room for a question, plus this much per option. */
+const QUESTION_BASE = 112;
+const QUESTION_ROW = 40;
 const MULTITASK_ROW = 34;
 const MULTITASK_PAD = 18;
 export const MULTITASK_MAX_ROWS = 4;
@@ -162,6 +169,8 @@ export interface GeometryContext {
   hovered: boolean;
   rows: number;
   approval: boolean;
+  /** What is waiting, when it needs more room than a command does. */
+  asking?: Approval | null;
   clock?: boolean;
   /** Idle with auto-hide on: only a sliver remains until the pointer arrives. */
   sliver?: boolean;
@@ -183,6 +192,11 @@ export function geometryFor(view: IslandView, ctx: GeometryContext): Geometry {
   if (view === "idle" && ctx.hovered) return IDLE_HOVER;
   if (view === "idle" && ctx.sliver) return SLIVER;
   if (view === "idle" && ctx.clock) return IDLE_CLOCK;
+  if (view === "working" && ctx.asking?.plan) return PLAN;
+  if (view === "working" && ctx.asking?.questions?.length) {
+    const most = Math.max(...ctx.asking.questions.map((q) => Math.min(q.options.length, 4)));
+    return { ...APPROVAL, h: QUESTION_BASE + most * QUESTION_ROW };
+  }
   if (view === "working" && ctx.approval) return APPROVAL;
   if (view === "working" && ctx.hovered) return WORKING_HOVER;
   if (view === "media" && ctx.mediaOpen) return MEDIA_OPEN;

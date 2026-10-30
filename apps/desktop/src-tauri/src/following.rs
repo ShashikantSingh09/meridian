@@ -14,6 +14,8 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use crate::island;
 
 /// Hooks name a fixed address, so the port and token outlive a restart.
+pub type Answers = serde_json::Map<String, serde_json::Value>;
+
 #[derive(Clone, Serialize, Deserialize)]
 struct Address {
     port: u16,
@@ -98,8 +100,8 @@ impl Following {
         self.settings.as_deref().is_some_and(watch::installed)
     }
 
-    pub fn answer(&self, session_id: &str, approval_id: &str, allow: bool) -> Result<(), String> {
-        let answered = self.watcher.lock().unwrap().as_ref().is_some_and(|w| w.answer(session_id, approval_id, allow));
+    pub fn answer(&self, session_id: &str, approval_id: &str, allow: bool, answers: Option<Answers>) -> Result<(), String> {
+        let answered = self.watcher.lock().unwrap().as_ref().is_some_and(|w| w.answer(session_id, approval_id, allow, answers));
         answered.then_some(()).ok_or_else(|| "That request has already been answered in the terminal.".into())
     }
 }
@@ -123,6 +125,16 @@ pub fn resume(app: &AppHandle) {
             }
         }
     });
+}
+
+/// What turning following on or off would change. Writes nothing.
+#[tauri::command]
+pub fn watch_preview(following: State<'_, Following>, on: bool) -> Result<watch::SettingsChange, String> {
+    let settings = following.settings.as_ref().ok_or("Could not find your Claude Code settings.")?;
+    let port = following.saved().map_or(0, |address| address.port);
+    let url = format!("http://127.0.0.1:{port}{HOOK_PATH}");
+    // The token is written to the file but has no reason to be on the screen.
+    watch::preview(settings, on.then_some((url.as_str(), "(a private token)"))).map_err(stringify)
 }
 
 #[tauri::command]

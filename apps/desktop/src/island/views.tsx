@@ -1,7 +1,9 @@
 // What sits inside the island for each compact state. The face leads in every one of
 // them; text only says what the face cannot.
 
+import type { Approval } from "../lib/types";
 import { useEffect, useMemo, useState } from "react";
+import { Markdown } from "../panel/Markdown";
 import { Icon } from "../lib/icons";
 import {
   answerApproval,
@@ -12,7 +14,6 @@ import {
   dismissNotice,
   dismissReminder,
   ignoreSuggestion,
-  mediaAction,
   openLink,
   openPanel,
   setListening,
@@ -24,7 +25,7 @@ import { Face, type Mood } from "./faces";
 import type { LineSegment } from "./line";
 import { focusActivity } from "./live";
 import { activeSessions, MULTITASK_MAX_ROWS, waitingApproval } from "./machine";
-import { AgentMark, Bars, Sparks } from "./marks";
+import { AgentMark, Bars, Sparks, Transport } from "./marks";
 import { MeridianLine } from "./MeridianLine";
 import { Progress } from "./Progress";
 import { useMicLevel } from "./useMicLevel";
@@ -155,6 +156,53 @@ export function ThinkingView({ reduced }: { reduced: boolean }) {
   );
 }
 
+/** Claude Code has asked something. Each question gets its own step, then they all go back together. */
+function QuestionCard({ sessionId, approval }: { sessionId: string; approval: Approval }) {
+  const questions = approval.questions!;
+  const [answers, setAnswers] = useState<Record<string, string | string[]>>({});
+  const [picked, setPicked] = useState<string[]>([]);
+  const step = questions.length === 1 ? 0 : Object.keys(answers).length;
+  const question = questions[Math.min(step, questions.length - 1)]!;
+
+  const finish = (pick: string | string[]) => {
+    const next = { ...answers, [question.text]: pick };
+    setPicked([]);
+    if (Object.keys(next).length === questions.length) answerApproval(sessionId, approval.id, true, next);
+    else setAnswers(next);
+  };
+  const toggle = (option: string) => setPicked((p) => (p.includes(option) ? p.filter((o) => o !== option) : [...p, option]));
+
+  return (
+    <>
+      <p className="question-text" title={question.text}>{question.text}</p>
+      <div className="question-options" role="group" aria-label={question.text}>
+        {question.options.slice(0, 4).map((option) => (
+          <button key={option} className="question-option" aria-pressed={question.multi ? picked.includes(option) : undefined} onClick={() => (question.multi ? toggle(option) : finish(option))}>
+            <span className="truncate">{option}</span>
+          </button>
+        ))}
+      </div>
+      <div className="row end">
+        {questions.length > 1 && <span className="meta grow tabular">{step + 1} of {questions.length}</span>}
+        <button className="ghost" onClick={() => answerApproval(sessionId, approval.id, false)}>Skip</button>
+        {question.multi && <button className="allow" disabled={picked.length === 0} onClick={() => finish(picked)}>Done</button>}
+      </div>
+    </>
+  );
+}
+
+function PlanCard({ sessionId, approval }: { sessionId: string; approval: Approval }) {
+  return (
+    <>
+      <div className="plan-text"><Markdown text={approval.plan!} /></div>
+      <div className="row end">
+        <button className="ghost" onClick={() => answerApproval(sessionId, approval.id, false)}>Keep planning</button>
+        <button className="allow" onClick={() => answerApproval(sessionId, approval.id, true)}>Approve plan</button>
+      </div>
+    </>
+  );
+}
+
 export function WorkingView({ reduced, hovered }: { reduced: boolean; hovered: boolean }) {
   const sessions = useApp((s) => s.sessions);
   const blocked = waitingApproval(sessions);
@@ -163,18 +211,27 @@ export function WorkingView({ reduced, hovered }: { reduced: boolean; hovered: b
 
   if (blocked?.approval) {
     const { approval } = blocked;
+    const asks = approval.questions?.length ? "asks" : approval.plan ? "has a plan" : `wants to run ${approval.tool}`;
     return (
       <div className="stack pad-card">
         <div className="row">
           <Mine mood="needs" scale={0.56} reduced={reduced} />
-          <span className="grow label truncate">{blocked.agent} wants to run {approval.tool}</span>
+          <span className="grow label truncate">{blocked.agent} {asks}</span>
           <span className="meta">{blocked.project}</span>
         </div>
-        <code className="command" title={approval.summary}>{approval.summary}</code>
-        <div className="row end">
-          <button className="ghost" onClick={() => answerApproval(blocked.id, approval.id, false)}>Deny</button>
-          <button className="allow" onClick={() => answerApproval(blocked.id, approval.id, true)}>Allow</button>
-        </div>
+        {approval.questions?.length ? (
+          <QuestionCard key={approval.id} sessionId={blocked.id} approval={approval} />
+        ) : approval.plan ? (
+          <PlanCard sessionId={blocked.id} approval={approval} />
+        ) : (
+          <>
+            <code className="command" title={approval.summary}>{approval.summary}</code>
+            <div className="row end">
+              <button className="ghost" onClick={() => answerApproval(blocked.id, approval.id, false)}>Deny</button>
+              <button className="allow" onClick={() => answerApproval(blocked.id, approval.id, true)}>Allow</button>
+            </div>
+          </>
+        )}
       </div>
     );
   }
@@ -335,15 +392,19 @@ export function MediaView({ open }: { open: boolean }) {
   if (!open) {
     return (
       <button className="media-closed" aria-label={`Now playing: ${track.title || track.app}. Open the player`} title={track.title} onClick={() => setMediaOpen(true)}>
-        <Artwork src={track.artwork} size={24} />
-        <Bars playing={track.playing} />
+        <Artwork src={track.artwork} size={32} />
+        <span className="stacked grow">
+          <span className="label truncate">{track.title || track.app}</span>
+          <span className="meta truncate">{track.artist || track.app}</span>
+        </span>
+        <Bars playing={track.playing} height={18} />
       </button>
     );
   }
   return (
     <div className="media-open">
       <div className="row">
-        <Artwork src={track.artwork} size={56} />
+        <Artwork src={track.artwork} size={64} />
         <button className="grow text-button stacked" onClick={() => openPanel("media")}>
           <span className="media-title truncate">{track.title || track.app}</span>
           <span className="meta truncate">{track.artist || track.app}</span>
@@ -351,11 +412,7 @@ export function MediaView({ open }: { open: boolean }) {
         <Bars playing={track.playing} height={22} />
       </div>
       <Progress />
-      <div className="row media-controls">
-        {iconButton("Previous", "previous", () => mediaAction({ action: "previous" }), !track.canPrevious)}
-        {iconButton(track.playing ? "Pause" : "Play", track.playing ? "pause" : "play", () => mediaAction({ action: "toggle" }), !track.canToggle)}
-        {iconButton("Next", "next", () => mediaAction({ action: "next" }), !track.canNext)}
-      </div>
+      <Transport track={track} />
     </div>
   );
 }

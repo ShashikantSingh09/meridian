@@ -164,7 +164,7 @@ async fn handle(mut socket: TcpStream, state: Arc<Mutex<State>>) {
     let summary = summarize(&tool, &payload["tool_input"]);
     let (tx, rx) = oneshot::channel();
     state.lock().unwrap().waiting.insert(id.clone(), tx);
-    emit(AgentEvent::Approval { approval: Approval { id: id.clone(), tool, summary } });
+    emit(AgentEvent::Approval { approval: Approval { id: id.clone(), tool, summary, ..Default::default() } });
 
     let decision = tokio::time::timeout(DECISION_TIMEOUT, rx).await;
     state.lock().unwrap().waiting.remove(&id);

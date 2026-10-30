@@ -51,7 +51,7 @@ async fn real_hooks_reach_the_island_and_an_answer_reaches_the_terminal() {
         let Some(envelope) = next else { break };
         println!("{:?}", envelope.event);
         if let AgentEvent::Approval { approval } = &envelope.event {
-            assert!(watcher.answer(&envelope.session_id, &approval.id, true));
+            assert!(watcher.answer(&envelope.session_id, &approval.id, true, None));
             approved = true;
         }
         let finished = matches!(&envelope.event, AgentEvent::Status { status: SessionStatus::Completed | SessionStatus::Failed, .. });

@@ -34,7 +34,7 @@ const ARTWORK_LIMIT: u32 = 2 * 1024 * 1024;
 /// One tick of .NET-style time span, in 100 ns units.
 const TICKS_PER_MS: i64 = 10_000;
 /// How often to look again when nothing has reported a change.
-const HEARTBEAT: Duration = Duration::from_secs(3);
+const HEARTBEAT: Duration = Duration::from_secs(2);
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -46,6 +46,9 @@ pub struct Track {
     pub artist: String,
     pub album: String,
     pub playing: bool,
+    /// The player itself says it is paused, which a moment of quiet does not contradict.
+    #[serde(skip)]
+    pub paused: bool,
     pub position_ms: Option<u64>,
     pub duration_ms: Option<u64>,
     pub can_toggle: bool,
@@ -133,6 +136,18 @@ fn ms(ticks: i64) -> Option<u64> {
     (ticks > 0).then_some((ticks / TICKS_PER_MS) as u64)
 }
 
+/// What an image is, from its first bytes. A player's own label cannot be used: JioSaavn's is
+/// a comma-separated list of types, which makes a data URL no browser will load.
+fn image_type(bytes: &[u8]) -> &'static str {
+    match bytes {
+        [0x89, b'P', b'N', b'G', ..] => "image/png",
+        [b'G', b'I', b'F', ..] => "image/gif",
+        [b'R', b'I', b'F', b'F', _, _, _, _, b'W', b'E', b'B', b'P', ..] => "image/webp",
+        [b'B', b'M', ..] => "image/bmp",
+        _ => "image/jpeg",
+    }
+}
+
 fn artwork(session: &Session) -> Option<String> {
     let props = session.TryGetMediaPropertiesAsync().ok()?.join().ok()?;
     let stream = props.Thumbnail().ok()?.OpenReadAsync().ok()?.join().ok()?;
@@ -144,9 +159,7 @@ fn artwork(session: &Session) -> Option<String> {
     reader.LoadAsync(size).ok()?.join().ok()?;
     let mut bytes = vec![0u8; size as usize];
     reader.ReadBytes(&mut bytes).ok()?;
-    let kind = stream.ContentType().map(|t| t.to_string()).unwrap_or_default();
-    let kind = if kind.is_empty() { "image/jpeg".to_string() } else { kind };
-    Some(format!("data:{kind};base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes)))
+    Some(format!("data:{};base64,{}", image_type(&bytes), base64::engine::general_purpose::STANDARD.encode(&bytes)))
 }
 
 /// Artwork for what is on. It can be megabytes and this runs every few seconds, so it is read
@@ -188,6 +201,7 @@ fn read(session: &Session) -> Result<Track> {
         artist: text(Properties::Artist),
         album: text(Properties::AlbumTitle),
         playing: info.PlaybackStatus()? == Status::Playing,
+        paused: info.PlaybackStatus()? == Status::Paused,
         position_ms: ms(position).or(if end > 0 { Some(0) } else { None }),
         duration_ms: ms(end),
         can_toggle: can(Controls::IsPlayPauseToggleEnabled) || can(Controls::IsPlayEnabled) || can(Controls::IsPauseEnabled),
@@ -235,21 +249,22 @@ fn add(list: &mut Vec<Track>, track: Track) {
     }
 }
 
-/// Sound outranks what a player reports. One Windows calls paused or idle is playing if
-/// it can be heard this moment, and one it does not list at all is added. Only a sound
-/// heard just now counts against a pause, so that pausing takes effect at once.
+/// Sound outranks what a player reports. One Windows calls paused or idle is playing if it
+/// can be heard this moment, and one it does not list at all is added if it is a named player.
+/// Only a sound heard just now counts against a stated pause, so that pausing takes effect at
+/// once, while a quiet moment in a song does not make a player that never says it is playing
+/// vanish. JioSaavn only ever says `Opened`.
 fn apply_heard(list: &mut Vec<Track>, heard: Vec<audio::Heard>) {
-    for audio::Heard { track, now } in heard {
-        let exe = track.session.to_lowercase();
-        match list.iter_mut().find(|t| t.session.to_lowercase().contains(&exe)) {
+    for audio::Heard { id, track, now } in heard {
+        match list.iter_mut().find(|t| t.session.to_lowercase().contains(&id)) {
             Some(known) => {
-                known.playing |= now;
-                if known.title.is_empty() {
+                known.playing |= now || !known.paused;
+                if let Some(track) = track.filter(|_| known.title.is_empty()) {
                     known.title = track.title;
                     known.artist = track.artist;
                 }
             }
-            None => list.push(track),
+            None => list.extend(track),
         }
     }
 }
@@ -439,6 +454,7 @@ mod tests {
             artist: String::new(),
             album: String::new(),
             playing,
+            paused: false,
             position_ms: None,
             duration_ms: None,
             can_toggle: false,
@@ -451,19 +467,29 @@ mod tests {
 
     #[test]
     fn sound_outranks_what_a_player_reports() {
+        // The sound comes from a system host, known only by the package it runs for.
         let store = "Saavn.SaavnMusicRadio_ax02tpqam95xr!App";
+        let host = || "saavn.saavnmusicradio_ax02tpqam95xr".to_string();
         let mut list = vec![track(store, "", false)];
-        apply_heard(&mut list, vec![audio::Heard { track: track("Saavn", "", true), now: true }]);
-        assert!(list[0].playing, "Windows said paused, but it can be heard");
+        apply_heard(&mut list, vec![audio::Heard { id: host(), track: None, now: true }]);
+        assert!(list[0].playing, "Windows said only Opened, but it can be heard");
         assert_eq!(list.len(), 1);
 
         let mut list = vec![track(store, "Song", false)];
-        apply_heard(&mut list, vec![audio::Heard { track: track("Saavn", "", true), now: false }]);
-        assert!(!list[0].playing, "a pause takes effect without waiting out the hold");
+        apply_heard(&mut list, vec![audio::Heard { id: host(), track: None, now: false }]);
+        assert!(list[0].playing, "a quiet moment does not stop a player that never says it is playing");
+
+        let mut list = vec![Track { paused: true, ..track(store, "Song", false) }];
+        apply_heard(&mut list, vec![audio::Heard { id: host(), track: None, now: false }]);
+        assert!(!list[0].playing, "a stated pause takes effect without waiting out the hold");
 
         let mut list = Vec::new();
-        apply_heard(&mut list, vec![audio::Heard { track: track("vlc", "Song", true), now: false }]);
+        apply_heard(&mut list, vec![audio::Heard { id: "vlc".into(), track: Some(track("vlc", "Song", true)), now: false }]);
         assert_eq!(list.len(), 1, "a player Windows never lists is still shown");
+
+        let mut list = Vec::new();
+        apply_heard(&mut list, vec![audio::Heard { id: "microsoft.teams_abc".into(), track: None, now: true }]);
+        assert!(list.is_empty(), "a Store app with no media session is not music");
     }
 
     #[test]
@@ -475,6 +501,14 @@ mod tests {
         add(&mut list, track("", false));
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].title, "Song");
+    }
+
+    #[test]
+    fn an_image_is_named_by_what_it_is_not_what_it_says() {
+        assert_eq!(image_type(&[0xff, 0xd8, 0xff, 0xe0]), "image/jpeg");
+        assert_eq!(image_type(&[0x89, b'P', b'N', b'G', 0x0d]), "image/png");
+        assert_eq!(image_type(b"RIFF1234WEBPVP8 "), "image/webp");
+        assert_eq!(image_type(b"GIF89a"), "image/gif");
     }
 
     #[test]

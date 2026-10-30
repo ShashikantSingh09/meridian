@@ -700,10 +700,10 @@ let lastAnswerAt = 0;
 
 /** The next request can appear under the button that was just pressed, so the second
  *  half of a double click must not approve something nobody has read. */
-export function answerApproval(sessionId: string, approvalId: string, allow: boolean) {
+export function answerApproval(sessionId: string, approvalId: string, allow: boolean, answers?: Record<string, string | string[]>) {
   if (Date.now() - lastAnswerAt < ANSWER_GAP_MS) return;
   lastAnswerAt = Date.now();
-  void bridge.answerApproval(sessionId, approvalId, allow).catch((err) => pushError({ title: "That request has gone", body: describe(err) }));
+  void bridge.answerApproval(sessionId, approvalId, allow, answers).catch((err) => pushError({ title: "That request has gone", body: describe(err) }));
 }
 
 export async function sendToSession(id: string, text: string, images: string[] = []) {
@@ -950,7 +950,16 @@ export async function setWatching(on: boolean) {
 
 const RECENT_TRACKS = 8;
 
-/** The album's average colour, taken from a tiny copy of its art. */
+/** A colour to show on black, from an average that may be nearly black itself. Keeps only the hue. */
+export function vivid(r: number, g: number, b: number) {
+  const high = Math.max(r, g, b);
+  const range = high - Math.min(r, g, b);
+  if (range < 12) return "hsl(0 0% 78%)";
+  const hue = high === r ? ((g - b) / range + 6) % 6 : high === g ? (b - r) / range + 2 : (r - g) / range + 4;
+  return `hsl(${Math.round(hue * 60)} 72% 66%)`;
+}
+
+/** The album's colour, taken from a tiny copy of its art. */
 function tintOf(src: string, done: (tint: string) => void) {
   const image = new Image();
   image.onload = () => {
@@ -962,7 +971,7 @@ function tintOf(src: string, done: (tint: string) => void) {
     const pixels = context.getImageData(0, 0, 8, 8).data;
     const sum = [0, 0, 0];
     for (let i = 0; i < pixels.length; i += 4) for (let c = 0; c < 3; c++) sum[c] += pixels[i + c];
-    done(`rgb(${sum.map((v) => Math.round(v / 64)).join(", ")})`);
+    done(vivid(sum[0]! / 64, sum[1]! / 64, sum[2]! / 64));
   };
   image.src = src;
 }
@@ -1125,6 +1134,8 @@ export const PREVIEWS: Preview[] = [
   { name: "idle", apply: () => clear },
   { name: "listening", apply: () => ({ ...clear, listening: true }) },
   { name: "thinking", apply: () => ({ ...clear, chatPending: true }) },
+  { name: "question", apply: () => ({ ...clear, sessions: [{ ...previewSession("p1", "Claude Code", "dock-agent", "Waiting"), approval: { id: "pq", tool: "AskUserQuestion", summary: "Which database should this use?", questions: [{ text: "Which database should this use?", options: ["SQLite", "Postgres", "Keep it in memory"], multi: false }] } }] }) },
+  { name: "plan", apply: () => ({ ...clear, sessions: [{ ...previewSession("p1", "Claude Code", "dock-agent", "Waiting"), approval: { id: "pp", tool: "ExitPlanMode", summary: "Add a settings page", plan: "## Add a settings page\n\n1. Create `Settings.tsx`\n2. Save choices with **updateSettings**\n3. Add it to the dock\n\nThis touches three files and needs no new packages." } }] }) },
   { name: "working", apply: () => ({ ...clear, sessions: [previewSession("p1", "Claude Code", "dock-agent", "Editing island/machine.ts")] }) },
   {
     name: "approval",

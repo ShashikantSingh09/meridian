@@ -37,11 +37,24 @@ pub enum SessionStatus {
     Cancelled,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct Approval {
     pub id: String,
     pub tool: String,
     pub summary: String,
+    /// What Claude Code is asking the user to choose, for AskUserQuestion.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub questions: Vec<Question>,
+    /// The plan to approve, for ExitPlanMode.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plan: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Question {
+    pub text: String,
+    pub options: Vec<String>,
+    pub multi: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]

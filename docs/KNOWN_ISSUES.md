@@ -18,7 +18,7 @@ The 20 criteria from the enhancement brief, as they stand.
 | 7 | Analysis of the current screen | Done | Live: capture, OCR, and an image read by Claude Code |
 | 8 | Identifies visible errors | Done | Live on a real terminal and a test window |
 | 9 | Screen awareness pausable | Done | Settings, tray, tests |
-| 10 | Media sessions detected | Done | Live with a silent session, and JioSaavn's real sessions read in the real app, paused. **Not yet seen while JioSaavn is audibly playing** |
+| 10 | Media sessions detected | Done | Seen in the real app with JioSaavn really playing, with its title, artist and album art. Spotify, Apple Music and VLC not tried |
 | 11 | Media controls | Done | Live: controls reached the session |
 | 12 | Connect email accounts | **Not verified** | Tested against canned servers. Needs your app registration |
 | 13 | Booking and delivery extraction | Done | Live from a pasted email, plus fixtures. Not from a real mailbox |
@@ -28,7 +28,7 @@ The 20 criteria from the enhancement brief, as they stand.
 | 17 | Prioritized and deduplicated | Done | Unit tests on the engine and store, live reschedule |
 | 18 | Permissions and disconnect | Done in code, with one edge case | Unit tests. Not with a real account. See below |
 | 19 | No data sent without authorization | Done by design | One share path; no network code in `screen` |
-| 20 | Existing features still work | Done | 507 Rust, 35 unit and 50 UI tests pass. Live claude, deny, cancel, engine, resume, activity and chat pass on the M3 code. Screen, vision and media were not rerun: this code did not change, and they would capture the desktop in use |
+| 20 | Existing features still work | Done | 513 Rust, 46 unit and 52 UI tests pass. Live claude, deny, cancel, engine, resume, activity and chat pass on the M3 code. Screen, vision and media were not rerun: this code did not change, and they would capture the desktop in use |
 
 ## Milestone 3 brief
 
@@ -157,6 +157,14 @@ What stands between this build and a stranger installing it. Only the owner can 
 - **Gemini CLI, Aider and Continue adapters.**
 
 ## Behaviour to be aware of
+
+- Questions and plans answered on the island follow Anthropic's documented format and have unit tests, but have not been tried
+  against a live Claude Code session. Claude Code offers neither tool without a terminal, so it needs one real try by hand.
+- A player that publishes nothing and is not named in `PLAYERS` in `crates/media/src/audio.rs` is not detected. Store apps do not
+  need listing. Others do.
+- Claude Code in another terminal cannot be matched to a Store app's sound if the app has no media session at all. It then shows
+  nothing, which is the safe failure.
+- A player that sends no timeline, such as JioSaavn, has no progress bar.
 
 - Hide when idle shrinks the island to a sliver with no face. It has turned on twice in the owner's settings file with no known
   cause, and the second time was saved at 01:01 on 2026-10-31. Nothing in the code or tests sets it by itself, so a click is the

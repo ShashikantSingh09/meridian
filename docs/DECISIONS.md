@@ -301,7 +301,7 @@ needs no registration, and local models.
 
 ## D37. Music is small until it is clicked
 
-Closed, it is 196 by 36: artwork and bars, as on a Mac. A click opens 372 by 150 with the album and controls, and it closes when
+Sizes replaced by D43. Closed, it is 196 by 36: artwork and bars, as on a Mac. A click opens 372 by 150 with the album and controls, and it closes when
 the pointer leaves. Those sizes sit inside Apple's Live Activity range of 84 to 160 tall and about 371 to 408 wide.
 
 ## D38. Every page sets its own size
@@ -340,8 +340,9 @@ grey hairline ran straight up between each curve and the rectangle, and the shad
 see the curves and the body as separate parts. Tuning the pieces could not fix that, because the join was built in.
 
 The shape is now one line, `notchPath` in `island/notch.ts`, driven by the same spring values as before. There is no hairline at
-rest, only black, which is what a hardware notch looks like. Its shadow follows the whole outline. While something is happening the
-outline shows a faint rim in the state colour, and a light runs along the same path, so it follows the curves too. The light is a
+rest, only black, which is what a hardware notch looks like. Its shadow follows the whole outline, and it is only ever a black
+shadow: the owner found a coloured glow around the shape too much, and neither TwoCode nor Coucou has one. While something is
+happening the outline shows a very faint rim in the state colour, and a thin light runs along the same path, so it follows the curves too. The light is a
 CSS animation on the path, and it replaces a spinning 1100 pixel gradient. Morphs still measure 180 frames a second, with a worst
 frame of 11 ms.
 
@@ -356,3 +357,29 @@ The shape follows Coucou's Windows workflow, which is also Tauri. Checking that 
 Actions are pinned to commits, since this workflow can hold signing keys. Optional secrets are passed on only when they have a
 value: the app reads them with `option_env!`, where an empty string counts as set, and a blank client ID would otherwise offer a
 sign-in that can only fail.
+
+## D43. Every small state is one height, and music shows the song
+
+The owner found the music bar too small beside the other states, and it hid the song. So every small active state, music, live
+activities, working, thinking, listening and screen reading, is now 46 tall with the same corners. Moving between them changes only
+the width, which is what makes the island feel like one thing. Music is 340 wide, with the cover, the song and the artist always
+showing. This goes past Apple's compact Live Activity size, on purpose: the song's name matters more here than matching a phone.
+
+Music looks the same everywhere it appears. The island and the Music page share one set of controls: solid white symbols with no
+circle behind them and play the largest, as on an iPhone and in TwoCode. The bars take the album's colour, using its hue at a fixed
+brightness, because the average of a dark cover is close to black.
+
+## D44. Plans and questions are answered on the island
+
+Claude Code's permission hook also covers two tools a bare Allow cannot answer. Anthropic's documentation says AskUserQuestion and
+ExitPlanMode need `updatedInput` with the allow. A plan now shows in full and goes back unchanged on approval. A question shows its
+options and goes back with the user's answers added, joined with commas for a multiple choice, and only if every answer is one that
+was offered. Any other tool's input can never be changed from here. If a question gets no valid answer, the reply is no decision,
+which leaves it to the terminal's own dialog. These replies have not been tried against a live session, because Claude Code offers
+neither tool without a terminal, so no scripted run can reach them.
+
+## D45. Changes to the user's own files are shown first
+
+PRD rule 9 asks for a backup, a shown diff and explicit confirmation before changing agent configuration, and following Claude Code
+had only the backup. The switch now shows the exact lines, the file and the backup's path, and writes nothing until confirmed, in
+both directions and during onboarding. The access token is replaced with a label in what is shown.

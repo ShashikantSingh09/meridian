@@ -1,5 +1,37 @@
 # Development ledger
 
+## 2026-10-31: Real music end to end, a calmer island, and ideas from Coucou
+
+### Completed
+
+- **Music, for real this time.** Checked against JioSaavn actually playing, which found two bugs every test had missed. Its sound
+  comes from `Windows.Media.BackgroundPlayback`, not `Saavn.exe`, so no name could match it. Package identity does, with no list
+  needed for Store apps. And its image is labelled with a comma-separated list of types, which made a data URL no browser would
+  load. That was the missing album art. Image types now come from the image's own first bytes.
+- **Music bar.** 340 by 46, with the song and artist always showing (D43).
+- **Island.** Every small state is one height. The coloured glow is gone, leaving a faint rim and a thin moving light (D41).
+- **Controls.** Solid iPhone-style symbols, shared by the island and the Music page.
+- **From Coucou.** Plans and questions on the island, Markdown in chat, and a shown diff before changing Claude Code's settings.
+  See `docs/research/COUCOU_REVIEW.md`.
+
+### Found by testing
+
+- All suites passed while JioSaavn was still invisible. Only listing the system's audio sessions while it played showed why.
+- A test image passed while real art failed, because its label was clean. Tests of this kind cannot stand in for the real player.
+- Claude Code run with `-p` has neither AskUserQuestion nor ExitPlanMode, so those replies cannot be proved by a script.
+
+### Testing status
+
+| Check | Result |
+|---|---|
+| Rust | 513 passed |
+| Unit | 46 passed |
+| UI, Playwright | 52 passed |
+| Real player | JioSaavn playing: title, artist, playing state and a 150 by 150 cover in the real window |
+| GitHub | Release workflow passed on a clean machine in 23 minutes |
+| Idle | 0.26% of one core with the webview, measured over 30 seconds |
+| Not tried | Questions and plans in a live session, Spotify, Apple Music, VLC |
+
 ## 2026-10-31: One-path island, album art, release automation
 
 ### Completed

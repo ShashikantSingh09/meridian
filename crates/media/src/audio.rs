@@ -2,19 +2,26 @@
 //! system media controls, and with some the controls are wrong: when JioSaavn's second
 //! session starts playing, Windows drops that session from its list and keeps the idle one.
 //! Windows also lists every app with an open audio stream and how loud it is, and that
-//! cannot be wrong. Only the apps named in `PLAYERS` are reported, so a game or a call
-//! never shows as music, and the title of that app's window is all that is read from it.
+//! cannot be wrong.
+//!
+//! Sound is matched to a player in two ways. A Store app has a package identity, which also
+//! covers the system host that plays its audio in the background: JioSaavn's sound comes from
+//! `Windows.Media.BackgroundPlayback`, never from `Saavn.exe`, while its session says only
+//! `Opened`. That identity matches its media session exactly, so no list is needed. Anything
+//! else counts only if named in `PLAYERS`, so a game or a call never shows as music, and the
+//! title of that app's window is all that is read from it.
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use windows::core::{Interface, Result, BOOL, PWSTR};
-use windows::Win32::Foundation::{CloseHandle, HWND, LPARAM};
+use windows::Win32::Foundation::{CloseHandle, ERROR_SUCCESS, HWND, LPARAM};
 use windows::Win32::Media::Audio::Endpoints::IAudioMeterInformation;
 use windows::Win32::Media::Audio::{
     eRender, AudioSessionStateActive, IAudioSessionControl2, IAudioSessionManager2, IMMDeviceEnumerator,
     MMDeviceEnumerator, DEVICE_STATE_ACTIVE,
 };
+use windows::Win32::Storage::Packaging::Appx::GetPackageFamilyName;
 use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL};
 use windows::Win32::System::Threading::{
     OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
@@ -92,18 +99,26 @@ fn audible() -> Result<Vec<u32>> {
     Ok(out)
 }
 
-fn exe_name(pid: u32) -> Option<String> {
+/// A process's executable name, and the package it belongs to if it is a Store app.
+fn identify(pid: u32) -> Option<(String, Option<String>)> {
     let mut buffer = [0u16; 512];
     let mut len = buffer.len() as u32;
-    unsafe {
+    let mut family = [0u16; 256];
+    let mut family_len = family.len() as u32;
+    let (done, packaged) = unsafe {
         let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
         let done = QueryFullProcessImageNameW(process, PROCESS_NAME_WIN32, PWSTR(buffer.as_mut_ptr()), &mut len);
+        let packaged = GetPackageFamilyName(process, &mut family_len, Some(PWSTR(family.as_mut_ptr())));
         let _ = CloseHandle(process);
-        done.ok()?;
-    }
+        (done, packaged)
+    };
+    done.ok()?;
     let path = String::from_utf16_lossy(&buffer[..len as usize]);
     let file = path.rsplit('\\').next()?;
-    Some(file.rsplit_once('.').map_or(file, |(stem, _)| stem).to_string())
+    let exe = file.rsplit_once('.').map_or(file, |(stem, _)| stem).to_string();
+    // The length counts the terminator.
+    let package = (packaged == ERROR_SUCCESS).then(|| String::from_utf16_lossy(&family[..(family_len as usize).saturating_sub(1)]));
+    Some((exe, package))
 }
 
 fn window_title(pid: u32) -> Option<String> {
@@ -132,9 +147,13 @@ fn window_title(pid: u32) -> Option<String> {
     search.title
 }
 
-/// A player that was heard, and whether that was just now rather than a moment ago.
+/// A player that was heard.
 pub(crate) struct Heard {
-    pub track: Track,
+    /// Lower case, and found inside the id of this player's media session if it has one.
+    pub id: String,
+    /// What to show if it has no session. Only for a player named in `PLAYERS`.
+    pub track: Option<Track>,
+    /// Heard just now, rather than a moment ago.
     pub now: bool,
 }
 
@@ -148,33 +167,37 @@ impl Ears {
     pub(crate) fn players(&mut self) -> Vec<Heard> {
         let now = Instant::now();
         for pid in audible().unwrap_or_default() {
-            if exe_name(pid).is_some_and(|exe| known(&exe).is_some()) {
-                self.heard.insert(pid, now);
-            }
+            self.heard.insert(pid, now);
         }
         self.heard.retain(|_, at| now.duration_since(*at) < HOLD);
         self.heard
             .iter()
             .filter_map(|(&pid, &at)| {
-                let exe = exe_name(pid)?;
-                let (_, app, suffix) = known(&exe)?;
-                let (title, artist) = window_title(pid).map(|w| parse_title(&w, suffix)).unwrap_or_default();
-                let track = Track {
-                    session: exe,
-                    app: (*app).to_string(),
-                    title,
-                    artist,
-                    album: String::new(),
-                    playing: true,
-                    position_ms: None,
-                    duration_ms: None,
-                    can_toggle: false,
-                    can_next: false,
-                    can_previous: false,
-                    can_seek: false,
-                    artwork: None,
-                };
-                Some(Heard { track, now: at == now })
+                let (exe, package) = identify(pid)?;
+                let player = known(&exe);
+                if package.is_none() && player.is_none() {
+                    return None;
+                }
+                let track = player.map(|(_, app, suffix)| {
+                    let (title, artist) = window_title(pid).map(|w| parse_title(&w, suffix)).unwrap_or_default();
+                    Track {
+                        session: exe.clone(),
+                        app: (*app).to_string(),
+                        title,
+                        artist,
+                        album: String::new(),
+                        playing: true,
+                        paused: false,
+                        position_ms: None,
+                        duration_ms: None,
+                        can_toggle: false,
+                        can_next: false,
+                        can_previous: false,
+                        can_seek: false,
+                        artwork: None,
+                    }
+                });
+                Some(Heard { id: package.unwrap_or(exe).to_lowercase(), track, now: at == now })
             })
             .collect()
     }

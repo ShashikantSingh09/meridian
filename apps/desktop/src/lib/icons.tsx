@@ -73,6 +73,12 @@ const paths: Record<string, ReactNode> = {
     </>
   ),
   plane: <path d="M17 3c-.8-.8-2.1-.7-3 .2l-2.8 2.8L4 3.9 2.6 5.3l5.9 3.5-2.9 2.9-2.3-.3-1 1 3 1.9 1.9 3 1-1-.3-2.3 2.9-2.9 3.5 5.9 1.4-1.4-2.1-7.2 2.8-2.8c.9-.9 1-2.2.2-3Z" fill="currentColor" stroke="none" />,
+  copy: (
+    <>
+      <rect x="7" y="7" width="9.5" height="9.5" rx="2" />
+      <path d="M13 4.5A1.5 1.5 0 0 0 11.5 3.5h-6a2 2 0 0 0-2 2v6A1.5 1.5 0 0 0 4.5 13" />
+    </>
+  ),
   window: (
     <>
       <rect x="2.8" y="4" width="14.4" height="12" rx="2" />

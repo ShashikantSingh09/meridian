@@ -1,6 +1,7 @@
 import { rowEnter } from "@meridian/design-system/motion";
 import { motion } from "motion/react";
 import type { LogEntry } from "../lib/store";
+import { Markdown } from "./Markdown";
 
 /** One step of a session. Code changes and commands show what really happened. */
 export function LogLine({ entry }: { entry: LogEntry }) {
@@ -21,5 +22,6 @@ export function LogLine({ entry }: { entry: LogEntry }) {
       </motion.div>
     );
   }
+  if (entry.kind === "text") return <Markdown text={entry.text} />;
   return <p className={`log-${entry.kind}`}>{entry.text}</p>;
 }

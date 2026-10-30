@@ -281,9 +281,10 @@ pub async fn session_answer(
     session_id: String,
     approval_id: String,
     allow: bool,
+    answers: Option<crate::following::Answers>,
 ) -> Result<(), String> {
     if Watcher::owns(&session_id) {
-        return following.answer(&session_id, &approval_id, allow);
+        return following.answer(&session_id, &approval_id, allow, answers);
     }
     core.sessions.answer(&session_id, &approval_id, allow).map_err(stringify)
 }

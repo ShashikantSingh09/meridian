@@ -151,13 +151,14 @@ test("playing media takes over an idle island and answers its controls", async (
   await publish(true);
   await expect(island(page)).toHaveAttribute("data-view", "media");
   await settled(page);
-  expect((await island(page).boundingBox())!.height).toBeCloseTo(36, 0);
-  await expect(island(page)).not.toContainText("Northern Lights");
+  expect((await island(page).boundingBox())!.height).toBeCloseTo(46, 0);
+  await expect(island(page)).toContainText("Northern Lights");
+  await expect(island(page).getByRole("button", { name: "Pause" })).toHaveCount(0);
 
   await page.getByRole("button", { name: /Open the player/ }).click();
-  await expect(island(page)).toContainText("Northern Lights");
+  await expect(island(page).getByRole("button", { name: "Pause" })).toBeVisible();
   await settled(page);
-  expect((await island(page).boundingBox())!.height).toBeCloseTo(150, 0);
+  expect((await island(page).boundingBox())!.height).toBeCloseTo(160, 0);
 
   await page.getByRole("button", { name: "Pause" }).click();
   await expect(island(page)).toHaveAttribute("data-view", "idle");
@@ -537,8 +538,50 @@ test.describe("panel", () => {
       const toggle = page.getByRole("switch", { name: /Follow my Claude Code sessions/ });
       await expect(toggle).not.toBeChecked();
       await expect(page.locator(".settings-body")).toContainText("keeps a backup");
-      await toggle.check();
+
+      // Nothing is written until the exact change has been shown and confirmed.
+      await toggle.click();
+      const review = page.getByRole("group", { name: "Review this change" });
+      await expect(review).toContainText("This will add these lines");
+      await expect(review).toContainText("127.0.0.1");
+      await expect(review).toContainText(".meridian-backup");
+      await review.getByRole("button", { name: "Cancel" }).click();
+      await expect(toggle).not.toBeChecked();
+      expect(await page.evaluate(() => (window as never as { __mock: { watching(): boolean } }).__mock.watching())).toBe(false);
+
+      await toggle.click();
+      await page.getByRole("button", { name: "Add hooks" }).click();
       await expect(toggle).toBeChecked();
+      expect(await page.evaluate(() => (window as never as { __mock: { watching(): boolean } }).__mock.watching())).toBe(true);
+    });
+
+    test("a question is answered on the island, one step at a time", async ({ page }) => {
+      await page.keyboard.press("Escape");
+      await page.locator(".island").evaluate(() => {
+        const mock = (window as never as { __mock: { publishWatched(id: string): void; publishWatchedQuestion(id: string): void } }).__mock;
+        mock.publishWatched("watch:q");
+        mock.publishWatchedQuestion("watch:q");
+      });
+      const island = page.locator(".island");
+      await expect(island).toContainText("Which one?");
+      await island.getByRole("button", { name: "Amber" }).click();
+      await expect(island).toContainText("And then?");
+      await island.getByRole("button", { name: "Ship it" }).click();
+      await expect.poll(() => page.evaluate(() => (window as never as { __mock: { lastAnswers(): unknown } }).__mock.lastAnswers())).toEqual({ "Which one?": "Amber", "And then?": "Ship it" });
+    });
+
+    test("a plan is read and approved on the island", async ({ page }) => {
+      await page.keyboard.press("Escape");
+      await page.locator(".island").evaluate(() => {
+        const mock = (window as never as { __mock: { publishWatched(id: string): void; publishWatchedPlan(id: string): void } }).__mock;
+        mock.publishWatched("watch:p");
+        mock.publishWatchedPlan("watch:p");
+      });
+      const island = page.locator(".island");
+      await expect(island).toContainText("has a plan");
+      await expect(island.locator(".plan-text li")).toHaveCount(2);
+      await island.getByRole("button", { name: "Approve plan" }).click();
+      await expect(island.getByRole("button", { name: "Approve plan" })).toHaveCount(0);
     });
 
     test("appears as a session that can be followed but not steered", async ({ page }) => {

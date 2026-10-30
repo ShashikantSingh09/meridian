@@ -101,6 +101,7 @@ export function Island() {
     hovered,
     rows: activeSessions(snapshot.sessions).length,
     approval: waitingApproval(snapshot.sessions) !== null,
+    asking: waitingApproval(snapshot.sessions)?.approval,
     clock,
     sliver,
     actions: (snapshot.notices[0]?.actions?.length ?? 0) > 0 || snapshot.notices[0]?.eventId !== undefined,

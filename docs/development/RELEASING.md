@@ -21,6 +21,9 @@ run for 7 days. Commit your work first: the script refuses to run with uncommitt
 
 This repository is private, so its releases can be downloaded only by people with access to it.
 
+Before publishing, scan the installers with Windows Defender. A new unsigned build can trip its machine-learning model, and the MSI
+is the fallback if the setup exe is flagged.
+
 ## What the workflow needs
 
 Nothing, for a working unsigned build. These optional secrets, set under Settings, Secrets and variables, Actions, turn more on:

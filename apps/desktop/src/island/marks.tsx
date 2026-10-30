@@ -1,6 +1,8 @@
 // Small moving pieces shared by the island and the panel.
 
 import { useMemo } from "react";
+import { mediaAction } from "../lib/store";
+import type { MediaAction, Track } from "../lib/types";
 
 /** Our own spark, drawn here. It is not the official Claude logo: that is Anthropic's mark,
  *  and a public release would need their permission to use it. See DECISIONS, D34. */
@@ -49,6 +51,44 @@ export function Bars({ playing, count = 5, height = 16 }: { playing: boolean; co
         <i key={i} style={{ animationDuration: `${0.5 + ((i * 7) % 5) * 0.09}s`, animationDelay: `${-i * 0.17}s` }} />
       ))}
     </span>
+  );
+}
+
+const GLYPHS = {
+  play: <path d="M7 4.7c0-1.2 1.3-1.9 2.3-1.3l11.6 7.3c.9.6.9 2 0 2.6L9.3 20.6c-1 .6-2.3-.1-2.3-1.3z" />,
+  pause: (
+    <>
+      <rect x="5.4" y="3.6" width="4.9" height="16.8" rx="1.7" />
+      <rect x="13.7" y="3.6" width="4.9" height="16.8" rx="1.7" />
+    </>
+  ),
+  next: (
+    <>
+      <path d="M2.4 6.6c0-1.1 1.2-1.8 2.2-1.2l8 5.4c.8.6.8 1.8 0 2.4l-8 5.4c-1 .6-2.2-.1-2.2-1.2z" />
+      <path d="M11.8 6.6c0-1.1 1.2-1.8 2.2-1.2l8 5.4c.8.6.8 1.8 0 2.4l-8 5.4c-1 .6-2.2-.1-2.2-1.2z" />
+    </>
+  ),
+  previous: (
+    <g transform="matrix(-1 0 0 1 24 0)">
+      <path d="M2.4 6.6c0-1.1 1.2-1.8 2.2-1.2l8 5.4c.8.6.8 1.8 0 2.4l-8 5.4c-1 .6-2.2-.1-2.2-1.2z" />
+      <path d="M11.8 6.6c0-1.1 1.2-1.8 2.2-1.2l8 5.4c.8.6.8 1.8 0 2.4l-8 5.4c-1 .6-2.2-.1-2.2-1.2z" />
+    </g>
+  ),
+};
+
+/** Previous, play and next, the same wherever music appears: solid white, with play the largest. */
+export function Transport({ track, size = 24 }: { track: Track; size?: number }) {
+  const key = (label: string, glyph: keyof typeof GLYPHS, action: MediaAction, disabled: boolean, px: number) => (
+    <button className="transport-key" aria-label={label} title={label} disabled={disabled} onClick={() => mediaAction(action)}>
+      <svg width={px} height={px} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">{GLYPHS[glyph]}</svg>
+    </button>
+  );
+  return (
+    <div className="transport">
+      {key("Previous", "previous", { action: "previous" }, !track.canPrevious, size)}
+      {key(track.playing ? "Pause" : "Play", track.playing ? "pause" : "play", { action: "toggle" }, !track.canToggle, Math.round(size * 1.34))}
+      {key("Next", "next", { action: "next" }, !track.canNext, size)}
+    </div>
   );
 }
 

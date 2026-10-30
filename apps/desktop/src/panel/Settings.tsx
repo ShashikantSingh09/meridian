@@ -1,9 +1,10 @@
+import { FollowSwitch } from "./Follow";
 import { spring } from "@meridian/design-system/motion";
 import { motion } from "motion/react";
 import { useState } from "react";
 import { Face, FACES } from "../island/faces";
 import { bridge } from "../lib/bridge";
-import { clearHistory, PREVIEWS, refreshAuth, setSettingsSection, setWatching, showPreview, updateSettings, useApp, type SettingsSection } from "../lib/store";
+import { clearHistory, PREVIEWS, refreshAuth, setSettingsSection, showPreview, updateSettings, useApp, type SettingsSection } from "../lib/store";
 import type { AgentInfo, Settings } from "../lib/types";
 import { Integrations } from "./Integrations";
 import { Providers } from "./Providers";
@@ -159,10 +160,8 @@ function AgentRow({ agent }: { agent: AgentInfo }) {
 
 function AgentsSection() {
   const agents = useApp((s) => s.agents);
-  const watching = useApp((s) => s.watching);
   const defaultDir = useApp((s) => s.settings.agentDefaultDir);
   const [picking, setPicking] = useState(false);
-  const [status, setStatus] = useState<string | null>(null);
 
   const pickDir = async () => {
     setPicking(true);
@@ -171,30 +170,11 @@ function AgentsSection() {
     if (dir) void updateSettings({ agentDefaultDir: dir });
   };
 
-  const toggle = async (on: boolean) => {
-    setStatus(null);
-    try {
-      await setWatching(on);
-    } catch (err) {
-      setStatus(String(err));
-    }
-  };
-
   return (
     <section className="stack-lg">
       <h1>Coding agents</h1>
       <div className="stack">
-        <label className="setting toggle">
-          <span className="stacked grow">
-            <span className="label">Follow my Claude Code sessions</span>
-            <span className="meta">
-              Shows sessions started in any terminal, and lets you answer permission requests from the island. Adds hooks
-              to your Claude Code settings file and keeps a backup. Turning this off removes them. Nothing leaves this PC.
-            </span>
-          </span>
-          <input type="checkbox" role="switch" checked={watching} onChange={(e) => void toggle(e.target.checked)} />
-        </label>
-        {status && <p className="meta bad" role="status">{status}</p>}
+        <FollowSwitch explain="Shows sessions started in any terminal, and lets you answer permission requests, questions and plans from the island. Adds hooks to your Claude Code settings file and keeps a backup. Turning this off removes them. Nothing leaves this PC." />
       </div>
       <div className="stack">
         {agents.map((a) => (

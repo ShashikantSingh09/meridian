@@ -26,6 +26,7 @@ import {
 import type { AgentId } from "../lib/types";
 import { Face } from "../island/faces";
 import { LogLine } from "./LogLine";
+import { Markdown } from "./Markdown";
 import { Menu } from "./Menu";
 
 const LIVE = ["starting", "running", "waiting"];
@@ -279,7 +280,7 @@ function ApiChat() {
         {chat.messages.map((m, i) => (
           <div key={i} className="message" data-role={m.role}>
             {m.images?.map((src, n) => <img key={n} className="message-image" src={src} alt="Shared from your screen" />)}
-            {m.content || (pending && <span className="meta">Thinking</span>)}
+            {m.role === "assistant" && m.content ? <Markdown text={m.content} /> : m.content || (pending && <span className="meta">Thinking</span>)}
           </div>
         ))}
       </div>

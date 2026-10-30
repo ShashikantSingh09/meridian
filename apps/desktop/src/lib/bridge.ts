@@ -27,6 +27,7 @@ import type {
   ReminderLogEntry,
   ScreenSuggestion,
   Settings,
+  SettingsChange,
 } from "./types";
 
 export const native = isTauri();
@@ -89,10 +90,10 @@ export const bridge = {
   sendToSession: (id: string, text: string, images: string[] = []) =>
     native ? invoke<void>("session_send", { id, text, images }) : mock.sendToSession(id, text),
   cancelSession: (id: string) => (native ? invoke<void>("session_cancel", { id }) : mock.cancelSession(id)),
-  answerApproval: (sessionId: string, approvalId: string, allow: boolean) =>
+  answerApproval: (sessionId: string, approvalId: string, allow: boolean, answers?: Record<string, string | string[]>) =>
     native
-      ? invoke<void>("session_answer", { sessionId, approvalId, allow })
-      : mock.answerApproval(sessionId, approvalId, allow),
+      ? invoke<void>("session_answer", { sessionId, approvalId, allow, answers: answers ?? null })
+      : mock.answerApproval(sessionId, approvalId, allow, answers),
   openProject: (cwd: string) => (native ? invoke<void>("open_project", { cwd }) : Promise.resolve()),
 
   mediaAction: (action: MediaAction) => (native ? invoke<void>("media_action", { action }) : mock.mediaAction(action)),
@@ -131,6 +132,7 @@ export const bridge = {
     native ? invoke<Digest>("integration_fetch", { id, tool }) : mock.integrationFetch(id, tool),
 
   watchStatus: () => (native ? invoke<boolean>("watch_status") : Promise.resolve(mock.watching())),
+  watchPreview: (on: boolean) => (native ? invoke<SettingsChange>("watch_preview", { on }) : mock.watchPreview(on)),
   watchSet: (on: boolean) => (native ? invoke<void>("watch_set", { on }) : mock.watchSet(on)),
 
   appVersion: () => (native ? invoke<string>("app_version") : Promise.resolve("0.0.0")),

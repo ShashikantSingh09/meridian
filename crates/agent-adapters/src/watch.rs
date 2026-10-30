@@ -10,7 +10,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use serde_json::{json, Value};
+use serde::Serialize;
+use serde_json::{json, Map, Value};
 use tokio::io::AsyncReadExt;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, oneshot};
@@ -19,7 +20,7 @@ use tokio::task::JoinHandle;
 use crate::approvals::{decision_body, read_request, respond, READ_TIMEOUT};
 use crate::claude::{code_change, command_output};
 use crate::claude::tool_label;
-use crate::{AgentEvent, Approval, Envelope, SessionStatus};
+use crate::{AgentEvent, Approval, Envelope, Question, SessionStatus};
 
 const EVENTS: [&str; 9] = [
     "UserPromptSubmit",
@@ -56,6 +57,7 @@ const STALE_MESSAGE: &str = "No word from this session";
 const TITLE_CHARS: usize = 64;
 const LABEL_CHARS: usize = 80;
 const FAILURE_CHARS: usize = 300;
+const PLAN_CHARS: usize = 6000;
 
 #[derive(Debug, thiserror::Error)]
 pub enum WatchError {
@@ -173,6 +175,81 @@ fn save(path: &Path, before: Option<&Value>, after: &Value) -> Result<(), WatchE
     Ok(written?)
 }
 
+/// One line of what a change to the settings file would do.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChangeLine {
+    /// "added", "removed", "plain" for a line of context, or "gap" for lines left out.
+    pub kind: &'static str,
+    pub text: String,
+}
+
+/// What would change, shown before anything is written.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SettingsChange {
+    pub path: String,
+    pub backup: String,
+    pub lines: Vec<ChangeLine>,
+}
+
+/// The lines that differ, with one line of context on each side. Settings files are small
+/// enough that the plain table is fine, and our hooks sit among the user's own, so a diff
+/// that only trimmed the two ends would show their hooks as changed.
+fn diff_lines(before: &str, after: &str) -> Vec<ChangeLine> {
+    let (old, new): (Vec<&str>, Vec<&str>) = (before.lines().collect(), after.lines().collect());
+    let mut table = vec![vec![0u32; new.len() + 1]; old.len() + 1];
+    for i in (0..old.len()).rev() {
+        for j in (0..new.len()).rev() {
+            table[i][j] = if old[i] == new[j] { table[i + 1][j + 1] + 1 } else { table[i + 1][j].max(table[i][j + 1]) };
+        }
+    }
+    let (mut i, mut j, mut all) = (0, 0, Vec::new());
+    while i < old.len() || j < new.len() {
+        if i < old.len() && j < new.len() && old[i] == new[j] {
+            all.push(("plain", old[i]));
+            (i, j) = (i + 1, j + 1);
+        } else if j < new.len() && (i == old.len() || table[i][j + 1] >= table[i + 1][j]) {
+            all.push(("added", new[j]));
+            j += 1;
+        } else {
+            all.push(("removed", old[i]));
+            i += 1;
+        }
+    }
+    let near = |at: usize| all[at.saturating_sub(1)..(at + 2).min(all.len())].iter().any(|(kind, _)| *kind != "plain");
+    let mut shown = Vec::new();
+    for (at, (kind, text)) in all.iter().enumerate() {
+        if near(at) {
+            shown.push(ChangeLine { kind, text: (*text).to_string() });
+        } else if shown.last().is_some_and(|line: &ChangeLine| line.kind != "gap") {
+            shown.push(ChangeLine { kind: "gap", text: String::new() });
+        }
+    }
+    shown
+}
+
+/// What turning following on or off would do, without writing anything. Passing
+/// `on` gives the address to show, so that the real token never reaches the screen.
+pub fn preview(settings_path: &Path, on: Option<(&str, &str)>) -> Result<SettingsChange, WatchError> {
+    let text = match fs::read_to_string(settings_path) {
+        Ok(text) => text,
+        Err(err) if err.kind() == ErrorKind::NotFound => String::new(),
+        Err(err) => return Err(err.into()),
+    };
+    let mut after = read(settings_path)?.unwrap_or_else(|| json!({}));
+    match on {
+        Some((url, token)) => add(&mut after, url, token)?,
+        None => strip(&mut after)?,
+    }
+    let new = serde_json::to_string_pretty(&after).map_err(std::io::Error::from)? + "\n";
+    Ok(SettingsChange {
+        path: settings_path.display().to_string(),
+        backup: sibling(settings_path, ".meridian-backup").display().to_string(),
+        lines: diff_lines(text.trim_start_matches('\u{feff}'), &new),
+    })
+}
+
 /// Adds our hooks, replacing any earlier ones. `url` must end in [`HOOK_PATH`],
 /// and `token` must hold no `$`: Claude Code expands header values.
 pub fn install(settings_path: &Path, url: &str, token: &str) -> Result<(), WatchError> {
@@ -229,6 +306,9 @@ fn allowed(head: &str, token: &str) -> bool {
 /// One line for the island, with nothing raw from the tool input. A command can
 /// outrun that line, and nobody should approve what they cannot see.
 fn approval_summary(tool: &str, input: &Value) -> String {
+    if let Some(text) = input["plan"].as_str().or(input["questions"][0]["question"].as_str()) {
+        return first_line(text, FAILURE_CHARS);
+    }
     let label = tool_label(tool, input);
     let shown = label.chars().count().saturating_sub("$ ".len());
     match (input["command"].as_str(), input["file_path"].as_str()) {
@@ -238,6 +318,74 @@ fn approval_summary(tool: &str, input: &Value) -> String {
         (None, Some(path)) => format!("{tool}: {}", first_line(path, FAILURE_CHARS)),
         (None, None) => format!("{label} (details in the terminal)"),
     }
+}
+
+/// What came back from the island.
+struct Reply {
+    allow: bool,
+    answers: Option<Map<String, Value>>,
+}
+
+fn questions_of(input: &Value) -> Vec<Question> {
+    let asked = input["questions"].as_array().into_iter().flatten();
+    asked
+        .filter_map(|q| {
+            Some(Question {
+                text: q["question"].as_str()?.to_string(),
+                options: q["options"].as_array()?.iter().filter_map(|o| o["label"].as_str().map(str::to_string)).collect(),
+                multi: q["multiSelect"].as_bool().unwrap_or(false),
+            })
+        })
+        .collect()
+}
+
+/// True when the answers cover exactly what was asked: one per question, each from that
+/// question's own options. A multiple choice is a list of different options.
+fn answers_fit(input: &Value, answers: &Map<String, Value>) -> bool {
+    let questions = questions_of(input);
+    !questions.is_empty()
+        && questions.len() == answers.len()
+        && questions.iter().all(|question| {
+            let offered = |pick: &Value| pick.as_str().is_some_and(|p| question.options.iter().any(|o| o == p));
+            match answers.get(&question.text) {
+                Some(Value::Array(picks)) if question.multi => {
+                    let mut unique: Vec<&str> = picks.iter().filter_map(Value::as_str).collect();
+                    unique.sort_unstable();
+                    unique.dedup();
+                    !picks.is_empty() && unique.len() == picks.len() && picks.iter().all(offered)
+                }
+                Some(pick @ Value::String(_)) if !question.multi => offered(pick),
+                _ => false,
+            }
+        })
+}
+
+/// Claude Code takes a multiple choice as labels joined with commas.
+fn joined(pick: Value) -> Value {
+    match pick {
+        Value::Array(picks) => picks.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", ").into(),
+        single => single,
+    }
+}
+
+/// The answer to a permission request. Only two tools ever get their input back: a plan
+/// unchanged, because Claude Code ignores a bare allow for one, and a question with the
+/// user's answers added, if they fit what was asked. Anything else about a question is no
+/// decision at all, which leaves it to the terminal's own dialog.
+fn reply_body(tool: &str, input: &Value, reply: Reply) -> String {
+    let updated = match tool {
+        _ if !reply.allow => return decision_body(false),
+        "ExitPlanMode" => input.clone(),
+        "AskUserQuestion" => {
+            let Some(answers) = reply.answers.filter(|answers| answers_fit(input, answers)) else { return String::new() };
+            let mut updated = input.clone();
+            updated["answers"] = answers.into_iter().map(|(question, pick)| (question, joined(pick))).collect();
+            updated
+        }
+        _ => return decision_body(true),
+    };
+    let decision = json!({ "behavior": "allow", "updatedInput": updated });
+    json!({ "hookSpecificOutput": { "hookEventName": "PermissionRequest", "decision": decision } }).to_string()
 }
 
 /// What one hook means for the island. Anything not listed only keeps the
@@ -284,7 +432,7 @@ struct State {
     sessions: HashMap<String, Tracked>,
     /// By approval id, so parallel requests in one session stay apart. Each
     /// names its session, so an answer cannot land on another one.
-    waiting: HashMap<String, (String, oneshot::Sender<bool>)>,
+    waiting: HashMap<String, (String, oneshot::Sender<Reply>)>,
 }
 
 struct Shared {
@@ -352,12 +500,16 @@ async fn closed(socket: &mut TcpStream) {
 async fn ask(mut socket: TcpStream, shared: &Shared, session: String, hook: &Value) {
     let id = uuid::Uuid::new_v4().to_string();
     let tool = hook["tool_name"].as_str().unwrap_or("Tool").to_string();
-    let summary = approval_summary(&tool, &hook["tool_input"]);
+    let input = &hook["tool_input"];
+    let summary = approval_summary(&tool, input);
+    let questions = if tool == "AskUserQuestion" { questions_of(input) } else { Vec::new() };
+    let plan = input["plan"].as_str().filter(|_| tool == "ExitPlanMode").map(|plan| plan.chars().take(PLAN_CHARS).collect());
     let (tx, rx) = oneshot::channel();
     shared.observe(&session, "PermissionRequest", hook);
     // Waiting before the app hears of it, so even a fast click finds it.
     shared.state.lock().unwrap().waiting.insert(id.clone(), (session.clone(), tx));
-    shared.send(&session, AgentEvent::Approval { approval: Approval { id: id.clone(), tool, summary } });
+    let approval = Approval { id: id.clone(), tool: tool.clone(), summary, questions, plan };
+    shared.send(&session, AgentEvent::Approval { approval });
 
     let decision = tokio::select! {
         decision = tokio::time::timeout(shared.wait, rx) => decision.ok().and_then(Result::ok),
@@ -366,7 +518,7 @@ async fn ask(mut socket: TcpStream, shared: &Shared, session: String, hook: &Val
     };
     shared.state.lock().unwrap().waiting.remove(&id);
     // No decision leaves Claude Code's own dialog in charge.
-    let body = decision.map(decision_body).unwrap_or_default();
+    let body = decision.map(|reply| reply_body(&tool, input, reply)).unwrap_or_default();
     respond(&mut socket, "200 OK", &body).await;
     shared.send(&session, AgentEvent::ApprovalResolved { id });
 }
@@ -458,12 +610,12 @@ impl Watcher {
     }
 
     /// True when that session was waiting on that approval here.
-    pub fn answer(&self, session_id: &str, approval_id: &str, allow: bool) -> bool {
+    pub fn answer(&self, session_id: &str, approval_id: &str, allow: bool, answers: Option<Map<String, Value>>) -> bool {
         let mut state = self.shared.state.lock().unwrap();
         if !matches!(state.waiting.get(approval_id), Some((owner, _)) if owner == session_id) {
             return false;
         }
-        state.waiting.remove(approval_id).is_some_and(|(_, tx)| tx.send(allow).is_ok())
+        state.waiting.remove(approval_id).is_some_and(|(_, tx)| tx.send(Reply { allow, answers }).is_ok())
     }
 
     /// Stops listening. Held hooks are let go without a decision, so each one
@@ -709,6 +861,75 @@ mod tests {
             assert_eq!(fs::read_to_string(&path).unwrap(), text);
             assert!(!dir.backup().exists(), "{text}");
         }
+    }
+
+    #[test]
+    fn a_plan_goes_back_unchanged_and_nothing_else_does() {
+        let input = json!({ "plan": "Do the thing" });
+        let allow = || Reply { allow: true, answers: None };
+        let body: Value = serde_json::from_str(&reply_body("ExitPlanMode", &input, allow())).unwrap();
+        assert_eq!(body["hookSpecificOutput"]["decision"]["updatedInput"], input);
+        assert_eq!(reply_body("Write", &json!({ "file_path": "x" }), allow()), decision_body(true));
+        assert_eq!(reply_body("ExitPlanMode", &input, Reply { allow: false, answers: None }), decision_body(false));
+    }
+
+    #[test]
+    fn a_question_goes_back_only_with_answers_that_fit() {
+        let input = json!({ "questions": [
+            { "question": "Which?", "options": [{ "label": "A" }, { "label": "B" }], "multiSelect": false },
+            { "question": "Also?", "options": [{ "label": "X" }, { "label": "Y" }], "multiSelect": true },
+        ] });
+        let reply = |answers: Value| Reply { allow: true, answers: answers.as_object().cloned() };
+
+        let good = json!({ "Which?": "B", "Also?": ["X", "Y"] });
+        let body: Value = serde_json::from_str(&reply_body("AskUserQuestion", &input, reply(good.clone()))).unwrap();
+        let decision = &body["hookSpecificOutput"]["decision"];
+        assert_eq!(decision["behavior"], "allow");
+        assert_eq!(decision["updatedInput"]["answers"], json!({ "Which?": "B", "Also?": "X, Y" }));
+        assert_eq!(decision["updatedInput"]["questions"], input["questions"]);
+
+        for wrong in [
+            json!({ "Which?": "Z", "Also?": ["X"] }),
+            json!({ "Which?": "A" }),
+            json!({ "Which?": ["A"], "Also?": ["X"] }),
+            json!({ "Which?": "A", "Also?": ["X", "X"] }),
+            json!({ "Which?": "A", "Also?": [] }),
+        ] {
+            assert_eq!(reply_body("AskUserQuestion", &input, reply(wrong.clone())), "", "{wrong}");
+        }
+        assert_eq!(reply_body("AskUserQuestion", &input, Reply { allow: true, answers: None }), "", "no answer leaves it to the terminal");
+    }
+
+    #[test]
+    fn answers_cannot_change_another_tools_input() {
+        let reply = Reply { allow: true, answers: json!({ "command": "rm -rf /" }).as_object().cloned() };
+        assert_eq!(reply_body("Bash", &json!({ "command": "ls" }), reply), decision_body(true));
+    }
+
+    #[test]
+    fn a_preview_shows_only_what_changes_and_writes_nothing() {
+        let dir = Scratch::new();
+        let path = dir.settings();
+        let original = "{\n  \"model\": \"opus\",\n  \"hooks\": {\n    \"Stop\": [\n      { \"hooks\": [{ \"type\": \"command\", \"command\": \"mine\" }] }\n    ]\n  },\n  \"theme\": \"dark\"\n}\n";
+        fs::write(&path, original).unwrap();
+        let url = format!("http://127.0.0.1:1{HOOK_PATH}");
+        let change = preview(&path, Some((&url, "hidden"))).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), original, "nothing is written");
+        assert!(!dir.backup().exists());
+        assert!(change.backup.ends_with(".meridian-backup"));
+        assert!(change.lines.iter().any(|l| l.kind == "added" && l.text.contains("127.0.0.1")));
+
+        install(&path, &url, "t").unwrap();
+        let removal = preview(&path, None).unwrap();
+        assert!(removal.lines.iter().any(|l| l.kind == "removed" && l.text.contains("127.0.0.1")));
+        assert!(removal.lines.iter().all(|l| l.kind != "added"));
+    }
+
+    #[test]
+    fn a_diff_keeps_the_users_lines_out_of_it() {
+        let lines = diff_lines("a\nb\nc\nd\ne\nf\ng\n", "a\nb\nc\nd\nnew\ne\nf\ng\n");
+        let kinds: Vec<_> = lines.iter().map(|l| (l.kind, l.text.as_str())).collect();
+        assert_eq!(kinds, [("plain", "d"), ("added", "new"), ("plain", "e"), ("gap", "")]);
     }
 
     #[test]
@@ -1112,7 +1333,7 @@ mod tests {
         assert_eq!(approval.summary, "$ rm -rf build");
         assert!(matches!(log.lock().unwrap()[0].event, AgentEvent::Watched { .. }));
 
-        assert!(watcher.answer("watch:s1", &approval.id, true));
+        assert!(watcher.answer("watch:s1", &approval.id, true, None));
         let text = reply(&mut socket).await;
         assert!(text.starts_with("HTTP/1.1 200"), "{text}");
         assert_eq!(body_of(&text), decision_body(true));
@@ -1126,7 +1347,7 @@ mod tests {
         until(&log, has_approvals(1)).await;
         let id = approvals(&log)[0].id.clone();
 
-        assert!(watcher.answer("watch:s1", &id, false));
+        assert!(watcher.answer("watch:s1", &id, false, None));
         assert_eq!(body_of(&reply(&mut socket).await), decision_body(false));
         until(&log, resolved(id)).await;
     }
@@ -1138,9 +1359,9 @@ mod tests {
         until(&log, has_approvals(1)).await;
         let id = approvals(&log)[0].id.clone();
 
-        assert!(!watcher.answer("watch:other", &id, true));
-        assert!(!watcher.answer("watch:s1", "nope", true));
-        assert!(watcher.answer("watch:s1", &id, true), "the wrong answers must not consume it");
+        assert!(!watcher.answer("watch:other", &id, true, None));
+        assert!(!watcher.answer("watch:s1", "nope", true, None));
+        assert!(watcher.answer("watch:s1", &id, true, None), "the wrong answers must not consume it");
         assert_eq!(body_of(&reply(&mut socket).await), decision_body(true));
     }
 
@@ -1155,7 +1376,7 @@ mod tests {
         until(&log, has_approvals(1)).await;
         let id = approvals(&log)[0].id.clone();
         until(&log, resolved(id.clone())).await;
-        assert!(!watcher.answer("watch:s1", &id, true));
+        assert!(!watcher.answer("watch:s1", &id, true, None));
     }
 
     #[tokio::test]
@@ -1167,7 +1388,7 @@ mod tests {
 
         drop(socket);
         until(&log, resolved(id.clone())).await;
-        assert!(!watcher.answer("watch:s1", &id, true));
+        assert!(!watcher.answer("watch:s1", &id, true, None));
         assert!(watcher.shared.state.lock().unwrap().waiting.is_empty());
     }
 
@@ -1183,9 +1404,9 @@ mod tests {
         let open = approvals(&log);
         assert_ne!(open[0].id, open[1].id);
         let id_of = |summary: &str| open.iter().find(|a| a.summary == summary).unwrap().id.clone();
-        assert!(watcher.answer("watch:s1", &id_of("$ git push"), false));
+        assert!(watcher.answer("watch:s1", &id_of("$ git push"), false, None));
         assert_eq!(body_of(&reply(&mut second).await), decision_body(false));
-        assert!(watcher.answer("watch:s1", &id_of("$ rm -rf build"), true));
+        assert!(watcher.answer("watch:s1", &id_of("$ rm -rf build"), true, None));
         assert_eq!(body_of(&reply(&mut first).await), decision_body(true));
         for approval in open.iter() {
             until(&log, resolved(approval.id.clone())).await;

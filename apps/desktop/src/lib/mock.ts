@@ -22,6 +22,7 @@ import type {
   ProviderInfo,
   Reminder,
   Settings,
+  SettingsChange,
 } from "./types";
 import { defaultSettings } from "./types";
 
@@ -39,6 +40,7 @@ let authed = true;
 let pushReminders: (r: Reminder[]) => void = () => {};
 let accounts: ConnectedAccount[] = [];
 let watching = false;
+let lastAnswers: Record<string, string | string[]> | null = null;
 let integrations: Integration[] = [
   { id: "linear", name: "Linear", group: "Work", blurb: "Issues assigned to you.", access: "open", connected: false, account: null, ready: true },
   { id: "slack", name: "Slack", group: "Work", blurb: "Channels you belong to.", access: "registeredApp", connected: false, account: null, ready: false },
@@ -190,6 +192,14 @@ export const mock = {
     };
   },
   watching: () => watching,
+  watchPreview: async (on: boolean): Promise<SettingsChange> => ({
+    path: "C:\\Users\\you\\.claude\\settings.json",
+    backup: "C:\\Users\\you\\.claude\\settings.json.meridian-backup",
+    lines: [
+      { kind: "plain", text: '  "theme": "dark",' },
+      { kind: on ? "added" : "removed", text: '  "hooks": { "Stop": [ { "url": "http://127.0.0.1:4823/hook" } ] }' },
+    ],
+  }),
   watchSet: async (on: boolean) => void (watching = on),
   async onReminders(handler: (r: Reminder[]) => void) {
     pushReminders = handler;
@@ -219,6 +229,15 @@ export const mock = {
   },
   publishWatchedApproval: (sessionId: string) =>
     emit({ sessionId, event: { type: "approval", approval: { id: "w1", tool: "Bash", summary: "npm install stripe" } } }),
+  publishWatchedQuestion: (sessionId: string, multi = false) =>
+    emit({ sessionId, event: { type: "approval", approval: { id: "q1", tool: "AskUserQuestion", summary: "Which one?", questions: [
+      { text: "Which one?", options: ["Teal", "Amber"], multi },
+      { text: "And then?", options: ["Ship it", "Wait"], multi: false },
+    ] } } }),
+  publishWatchedPlan: (sessionId: string) =>
+    emit({ sessionId, event: { type: "approval", approval: { id: "p1", tool: "ExitPlanMode", summary: "Add a page", plan: "## Add a page\n\n1. Write it\n2. Test it" } } }),
+  /** The last answer given to a question, so a test can see what would go back. */
+  lastAnswers: () => lastAnswers,
 
   async startSession(request: { agent: string; cwd: string; prompt: string }) {
     const sessionId = crypto.randomUUID();
@@ -244,7 +263,8 @@ export const mock = {
     return sessionId;
   },
 
-  async answerApproval(sessionId: string, approvalId: string, allow: boolean) {
+  async answerApproval(sessionId: string, approvalId: string, allow: boolean, answers?: Record<string, string | string[]>) {
+    lastAnswers = answers ?? null;
     emit({ sessionId, event: { type: "approvalResolved", id: approvalId } });
     if (approvalId === "a1" && pendingSecond(sessionId)) return;
     if (!allow) return emit({ sessionId, event: { type: "status", status: "cancelled" } });

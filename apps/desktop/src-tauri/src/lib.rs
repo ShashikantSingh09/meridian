@@ -229,6 +229,7 @@ pub fn run() {
             commands::update_check,
             commands::update_install,
             commands::open_logs,
+            following::watch_preview,
             following::watch_status,
             following::watch_set,
             links::integrations_list,
