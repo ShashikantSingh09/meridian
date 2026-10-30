@@ -132,7 +132,6 @@ export function Desktop() {
   return (
     <div className="page-scroll stack-lg">
       <header className="stack-sm">
-        <h1>Desktop awareness</h1>
         <p className="meta">
           {mode === "off"
             ? "Off. Nothing on your screen is read."

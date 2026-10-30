@@ -7,6 +7,7 @@ const preview = (page: Page, name: string | null) =>
 const openModels = async (page: Page) => {
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await page.getByRole("button", { name: "AI models", exact: true }).click();
+  await page.getByRole("button", { name: "Use an API key instead" }).click();
 };
 
 const settled = async (page: Page) => {
@@ -36,7 +37,6 @@ test("every compact state renders its own content and stays on screen", async ({
     ["approval", "working", "Allow"],
     ["notification", "notification", "Claude Code finished"],
     ["contextual", "contextual", "Suggest fix"],
-    ["media", "media", "Northern Lights"],
     ["multitask", "multitask", "Codex"],
     ["error", "error", "Anthropic unreachable"],
   ];
@@ -56,11 +56,10 @@ test("hangs from the top edge of the window with a flat top", async ({ page }) =
   expect(box!.y).toBe(0);
   const corners = await page.locator(".island-shape").evaluate((el) => {
     const style = getComputedStyle(el);
-    return [style.borderTopLeftRadius, style.borderBottomLeftRadius, style.borderTopWidth];
+    return [style.borderTopLeftRadius, style.borderBottomLeftRadius];
   });
   expect(corners[0]).toBe("0px");
   expect(parseFloat(corners[1])).toBeGreaterThan(8);
-  expect(corners[2]).toBe("0px");
   await expect(page.locator(".ear")).toHaveCount(2);
 });
 
@@ -106,11 +105,31 @@ test("the clock and hide options change the idle shape", async ({ page }) => {
 
   await setting({ showClock: true });
   await settled(page);
-  expect(await width()).toBeCloseTo(188, 0);
+  expect(await width()).toBeCloseTo(148, 0);
 
   await setting({ showClock: false, islandAutoHide: true });
   await settled(page);
   expect((await island(page).boundingBox())!.height).toBeCloseTo(6, 0);
+});
+
+test("a flight shows a countdown, and opens to the route when pointed at", async ({ page }) => {
+  await page.evaluate(() => (window as never as { __mock: { addFlight(m: number): void } }).__mock.addFlight(31));
+  await page.evaluate(() => (window as never as { __meridian: { refreshActivity(): Promise<void> } }).__meridian.refreshActivity());
+  await expect(island(page)).toHaveAttribute("data-view", "live");
+  await expect(island(page)).toContainText("DEL");
+  await expect(island(page)).toContainText("31m");
+  await page.evaluate(() => (window as never as { __meridian: { setHovered(v: boolean): void } }).__meridian.setHovered(true));
+  await expect(island(page)).toContainText("Boarding soon");
+  await expect(page.locator(".route")).toContainText("BOM");
+});
+
+test("the face can be changed, and an unknown one falls back", async ({ page }) => {
+  await expect(page.locator(".island .face")).toHaveAttribute("data-face", "soft");
+  const set = (face: string) => page.evaluate((f) => (window as never as { __meridian: { updateSettings(p: object): Promise<void> } }).__meridian.updateSettings({ face: f }), face);
+  await set("cat");
+  await expect(page.locator(".island .face")).toHaveAttribute("data-face", "cat");
+  await set("from-a-newer-version");
+  await expect(page.locator(".island .face")).toHaveAttribute("data-face", "soft");
 });
 
 test("the island can sit left or right, and stays on screen", async ({ page }) => {
@@ -129,7 +148,14 @@ test("playing media takes over an idle island and answers its controls", async (
     page.evaluate((p) => (window as never as { __mock: { publishMedia(p: boolean): void } }).__mock.publishMedia(p), present);
   await publish(true);
   await expect(island(page)).toHaveAttribute("data-view", "media");
+  await settled(page);
+  expect((await island(page).boundingBox())!.height).toBeCloseTo(36, 0);
+  await expect(island(page)).not.toContainText("Northern Lights");
+
+  await page.getByRole("button", { name: /Open the player/ }).click();
   await expect(island(page)).toContainText("Northern Lights");
+  await settled(page);
+  expect((await island(page).boundingBox())!.height).toBeCloseTo(150, 0);
 
   await page.getByRole("button", { name: "Pause" }).click();
   await expect(island(page)).toHaveAttribute("data-view", "idle");
@@ -183,7 +209,7 @@ test.describe("panel", () => {
   });
 
   test("opens from the idle pill and closes with Escape", async ({ page }) => {
-    await expect(page.getByRole("heading", { name: "Command center" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /Good|Hello/ })).toBeVisible();
     await page.keyboard.press("Escape");
     await expect(island(page)).toHaveAttribute("data-view", "idle");
   });
@@ -328,8 +354,6 @@ test.describe("panel", () => {
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page.getByRole("button", { name: "Providers", exact: true }).click();
     await page.getByRole("button", { name: "Gmail", exact: true }).click();
-    await page.getByLabel("Google client ID").fill("test-id.apps.googleusercontent.com");
-    await page.getByLabel("Google client ID").blur();
     await page.getByRole("button", { name: "Connect Gmail" }).click();
     await expect(page.getByRole("button", { name: "Disconnect" })).toBeVisible();
     await page.getByRole("button", { name: "Disconnect" }).click();
@@ -405,7 +429,6 @@ test.describe("panel", () => {
 
     test("lists mail, calendar and MCP services by group", async ({ page }) => {
       const column = page.getByRole("navigation", { name: "Providers" });
-      await expect(column.getByRole("heading", { name: "Mail and calendar" })).toBeVisible();
       for (const name of ["Gmail", "Google Calendar", "Outlook", "Linear", "GitHub"]) {
         await expect(column.getByRole("button", { name })).toBeVisible();
       }
@@ -413,7 +436,7 @@ test.describe("panel", () => {
 
     test("a service with open sign-in connects, then shows what it fetched", async ({ page }) => {
       await page.getByRole("button", { name: "Linear" }).click();
-      await expect(page.getByText("No setup needed")).toBeVisible();
+      await expect(page.locator(".link-detail")).toContainText("own page");
       await page.getByRole("button", { name: "Connect Linear" }).click();
       await expect(page.locator(".fetched-row")).toHaveCount(2);
       await expect(page.locator(".fetched")).toContainText("Fix the island hit area");
@@ -447,16 +470,11 @@ test.describe("panel", () => {
       await expect(page.locator(".fetched-row")).toHaveCount(0);
     });
 
-    test("a service that needs a registered app asks for a client ID first", async ({ page }) => {
+    test("no service ever asks for a key, and one not yet registered says so", async ({ page }) => {
       await page.getByRole("button", { name: "Slack" }).click();
-      await expect(page.getByRole("button", { name: "Connect Slack" })).toBeDisabled();
-      await page.getByLabel("Slack client ID").fill("abc");
-      await expect(page.getByRole("button", { name: "Connect Slack" })).toBeEnabled();
-    });
-
-    test("GitHub takes a token, and never shows it", async ({ page }) => {
-      await page.getByRole("button", { name: "GitHub" }).click();
-      await expect(page.getByLabel("GitHub token")).toHaveAttribute("type", "password");
+      await expect(page.getByRole("button", { name: "Connect Slack" })).toHaveCount(0);
+      await expect(page.locator(".link-detail")).toContainText("Not available yet");
+      await expect(page.locator(".link-detail input")).toHaveCount(0);
     });
   });
 
@@ -538,6 +556,8 @@ test.describe("panel", () => {
   test("settings apply straight away", async ({ page }) => {
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page.getByRole("button", { name: "Island", exact: true }).click();
+    await page.getByRole("button", { name: "Cat", exact: true }).click();
+    await expect(page.locator(".panel-head .face")).toHaveAttribute("data-face", "cat");
     await page.getByRole("button", { name: "Reduced" }).click();
     await expect(page.locator("html")).toHaveAttribute("data-motion", "reduced");
   });

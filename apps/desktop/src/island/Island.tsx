@@ -4,17 +4,19 @@
 // inside re-renders per frame.
 
 import { contentEnter, contentEnterReduced, instant, scaled, spring } from "@meridian/design-system/motion";
-import { AnimatePresence, animate, motion, useMotionValue, useReducedMotion } from "motion/react";
+import { AnimatePresence, animate, motion, useMotionValue, useReducedMotion, useTransform } from "motion/react";
 import { useEffect, useMemo, useRef } from "react";
 import { bridge } from "../lib/bridge";
-import { togglePanel, useApp } from "../lib/store";
+import { reportView, togglePanel, useApp } from "../lib/store";
 import { Panel } from "../panel/Panel";
 import { activeSessions, deriveView, geometryFor, stateToken, waitingApproval, type IslandView, type Snapshot } from "./machine";
 import {
+  Bubble,
   ContextualView,
   ErrorView,
   IdleView,
   ListeningView,
+  LiveView,
   MediaView,
   MultitaskView,
   NotificationView,
@@ -25,6 +27,8 @@ import {
 
 /** What the shape grows out of when the app starts: a dot at the screen's edge. */
 const BIRTH = { w: 18, h: 4 };
+/** Views with a light running round the edge, because something is under way. */
+const LIT: ReadonlySet<IslandView> = new Set(["listening", "thinking", "working", "multitask", "error", "notification"]);
 
 function useReduced() {
   const system = useReducedMotion() ?? false;
@@ -42,13 +46,14 @@ function useSnapshot(): Snapshot {
   const notices = useApp((s) => s.notices);
   const suggestions = useApp((s) => s.suggestions);
   const errors = useApp((s) => s.errors);
+  const live = useApp((s) => s.live);
   return useMemo(
-    () => ({ panelOpen, listening, capturing, mediaPlaying, chatPending, sessions, notices, suggestions, errors }),
-    [panelOpen, listening, capturing, mediaPlaying, chatPending, sessions, notices, suggestions, errors],
+    () => ({ panelOpen, listening, capturing, mediaPlaying, chatPending, sessions, notices, suggestions, errors, live }),
+    [panelOpen, listening, capturing, mediaPlaying, chatPending, sessions, notices, suggestions, errors, live],
   );
 }
 
-function CompactContent({ view, reduced, hovered, sliver }: { view: IslandView; reduced: boolean; hovered: boolean; sliver: boolean }) {
+function CompactContent({ view, reduced, hovered, sliver, mediaOpen }: { view: IslandView; reduced: boolean; hovered: boolean; sliver: boolean; mediaOpen: boolean }) {
   switch (view) {
     case "listening":
       return <ListeningView reduced={reduced} />;
@@ -65,7 +70,9 @@ function CompactContent({ view, reduced, hovered, sliver }: { view: IslandView; 
     case "screen":
       return <ScreenView reduced={reduced} />;
     case "media":
-      return <MediaView reduced={reduced} hovered={hovered} />;
+      return <MediaView open={mediaOpen} />;
+    case "live":
+      return <LiveView hovered={hovered} />;
     case "error":
       return <ErrorView reduced={reduced} />;
     default:
@@ -81,7 +88,13 @@ export function Island() {
   const clock = useApp((s) => s.settings.showClock);
   const sliver = useApp((s) => s.settings.islandAutoHide);
   const align = useApp((s) => s.settings.islandAlign);
+  const tab = useApp((s) => s.tab);
+  const mediaOpen = useApp((s) => s.mediaOpen);
+  const greeting = useApp((s) => s.greeting);
+  const artTint = useApp((s) => s.artTint);
   const view = deriveView(snapshot);
+
+  useEffect(() => reportView(view), [view]);
 
   const target = geometryFor(view, {
     hovered,
@@ -90,11 +103,16 @@ export function Island() {
     clock,
     sliver,
     actions: (snapshot.notices[0]?.actions?.length ?? 0) > 0 || snapshot.notices[0]?.eventId !== undefined,
+    tab,
+    mediaOpen,
+    greeting,
+    liveRich: Boolean(snapshot.live[0]?.route || snapshot.live[0]?.steps),
   });
 
   const width = useMotionValue(reduced ? target.w : BIRTH.w);
   const height = useMotionValue(reduced ? target.h : BIRTH.h);
   const radius = useMotionValue(target.r);
+  const faceRadius = useTransform(radius, (r) => Math.max(0, r - 1));
   const el = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -129,6 +147,9 @@ export function Island() {
 
   const enter = reduced ? contentEnterReduced : contentEnter;
   const expanded = view === "expanded";
+  const lit = LIT.has(view) && !reduced;
+  const glow = view === "media" ? artTint ?? "#ff7a9c" : `var(${stateToken(view, snapshot)})`;
+  const contentKey = expanded ? "panel" : view + (hovered && (view === "idle" || view === "working" || view === "live") ? "-hover" : "") + (view === "media" && mediaOpen ? "-open" : "");
 
   return (
     <motion.div
@@ -137,24 +158,22 @@ export function Island() {
       data-view={view}
       data-align={align}
       data-small={target.h < 12}
-      style={{ width, height, "--glow": `var(${stateToken(view, snapshot)})` } as never}
+      style={{ width, height, "--glow": glow } as never}
       onClick={view === "idle" ? togglePanel : undefined}
     >
       <span className="ear ear-left" aria-hidden="true" />
       <span className="ear ear-right" aria-hidden="true" />
+      <Bubble />
       <motion.div className="island-shape" style={{ borderBottomLeftRadius: radius, borderBottomRightRadius: radius }}>
-        <AnimatePresence initial={false}>
-          <motion.div
-            key={expanded ? "panel" : view + (hovered && (view === "idle" || view === "working" || view === "media") ? "-hover" : "")}
-            className="island-content"
-            style={{ width: target.w, height: target.h }}
-            initial={enter.initial}
-            animate={enter.animate}
-            exit={enter.exit}
-          >
-            {expanded ? <Panel /> : <CompactContent view={view} reduced={reduced} hovered={hovered} sliver={sliver} />}
-          </motion.div>
-        </AnimatePresence>
+        {lit && <span className="edge-light" aria-hidden="true" />}
+        <motion.div className="island-face" style={{ borderBottomLeftRadius: faceRadius, borderBottomRightRadius: faceRadius }}>
+          <span className="island-tint" aria-hidden="true" />
+          <AnimatePresence initial={false}>
+            <motion.div key={contentKey} className="island-content" style={{ width: target.w, height: target.h }} initial={enter.initial} animate={enter.animate} exit={enter.exit}>
+              {expanded ? <Panel /> : <CompactContent view={view} reduced={reduced} hovered={hovered} sliver={sliver} mediaOpen={mediaOpen} />}
+            </motion.div>
+          </AnimatePresence>
+        </motion.div>
       </motion.div>
     </motion.div>
   );

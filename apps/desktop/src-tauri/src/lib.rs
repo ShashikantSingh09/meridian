@@ -232,6 +232,7 @@ pub fn run() {
             following::watch_status,
             following::watch_set,
             links::integrations_list,
+            links::ai_sign_in,
             links::integration_connect,
             links::integration_disconnect,
             links::integration_fetch,

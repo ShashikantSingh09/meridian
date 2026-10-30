@@ -4,7 +4,7 @@
 
 use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::Deserialize;
 use tauri::{AppHandle, Emitter, Manager, Monitor, PhysicalPosition, PhysicalSize, WebviewWindow};
@@ -39,6 +39,10 @@ const NEAR_BAND: f64 = 80.0;
 /// Position and fullscreen state change rarely, and reading the window's
 /// position crosses to the main thread, so neither happens at poll rate.
 const SLOW_EVERY: u32 = 40;
+/// The eyes follow the pointer, in small steps, and a still pointer costs nothing.
+const GAZE_EVERY: Duration = Duration::from_millis(66);
+const GAZE_STEP: f64 = 10.0;
+const GAZE_RANGE: f64 = 900.0;
 
 /// The island in CSS pixels with the ratio that turns them into physical ones.
 #[derive(Debug, Clone, Copy, Default, Deserialize)]
@@ -252,11 +256,19 @@ fn apply_click_through(win: &WebviewWindow, gate: &Gate, accept: bool) {
     }
 }
 
+/// Where the pointer is from the island, as -1 to 1 each way.
+fn gaze(rect: &Rect, x: f64, y: f64) -> (f64, f64) {
+    let reach = GAZE_RANGE * rect.dpr;
+    let side = (x - (rect.x + rect.w / 2.0) * rect.dpr) / reach;
+    ((side).clamp(-1.0, 1.0), (y / reach).clamp(-1.0, 1.0))
+}
+
 pub fn spawn_poll(app: AppHandle, gate: Arc<Gate>) {
     std::thread::spawn(move || {
         let Some(win) = app.get_webview_window(LABEL) else { return };
         let mut tick = 0u32;
         let mut displays = display_signature(&app);
+        let mut gazed = (0.0, 0.0, Instant::now());
         loop {
             if tick % SLOW_EVERY == 0 {
                 gate.fullscreen.store(fullscreen_in_front(), Ordering::Relaxed);
@@ -282,6 +294,10 @@ pub fn spawn_poll(app: AppHandle, gate: Arc<Gate>) {
             if gate.hovered.swap(on_island, Ordering::Relaxed) != on_island {
                 let _ = app.emit_to(LABEL, "island-hover", on_island);
             }
+            if (x - gazed.0).abs() + (y - gazed.1).abs() > GAZE_STEP * rect.dpr && gazed.2.elapsed() >= GAZE_EVERY {
+                gazed = (x, y, Instant::now());
+                let _ = app.emit_to(LABEL, "island-gaze", gaze(&rect, x, y));
+            }
             std::thread::sleep(if rect.contains(x, y, NEAR_BAND) { NEAR } else { FAR });
         }
     });
@@ -303,6 +319,14 @@ mod tests {
     fn the_margin_is_scaled_too() {
         assert!(RECT.contains(95.0 * 1.5, 25.0 * 1.5, 8.0));
         assert!(!RECT.contains(95.0 * 1.5, 25.0 * 1.5, 0.0));
+    }
+
+    #[test]
+    fn the_gaze_is_measured_from_the_middle_of_the_island_and_stays_in_range() {
+        assert_eq!(gaze(&RECT, 200.0 * 1.5, 0.0), (0.0, 0.0));
+        let (side, down) = gaze(&RECT, 1_000_000.0, 1_000_000.0);
+        assert_eq!((side, down), (1.0, 1.0));
+        assert!(gaze(&RECT, 0.0, 0.0).0 < 0.0);
     }
 
     #[test]

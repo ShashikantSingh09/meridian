@@ -1,6 +1,11 @@
 # Design system
 
-## The idea: one line of light
+## The idea: a face, and a shape that breathes
+
+The island's character is now a face. See `docs/DECISIONS.md`, D34. The section below describes the line of light, which
+remains only for listening.
+
+### The line of light
 
 Meridian has no mascot. A single luminous line is the product's character and carries every state, so you can read what
 the app is doing from the corner of your eye, without reading a word. Text only says what the line cannot.

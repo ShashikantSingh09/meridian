@@ -115,7 +115,9 @@ export type AgentEvent =
   | { type: "activity"; label: string }
   | { type: "approval"; approval: Approval }
   | { type: "approvalResolved"; id: string }
-  | { type: "usage"; input: number; output: number; costUsd: number | null };
+  | { type: "usage"; input: number; output: number; costUsd: number | null }
+  | { type: "diff"; path: string; removed: string[]; added: string[] }
+  | { type: "output"; command: string; lines: string[]; failed: boolean };
 
 export interface AgentEnvelope {
   sessionId: string;
@@ -148,6 +150,8 @@ export interface Settings {
   showNextMeeting: boolean;
   sounds: boolean;
   onboarded: boolean;
+  /** Which face lives on the island. */
+  face: string;
 }
 
 /** Where a provider's data comes from and how it signs in. "account" is the direct
@@ -162,6 +166,8 @@ export interface Integration {
   access: IntegrationAccess;
   connected: boolean;
   account: string | null;
+  /** One click works. False until the publisher has registered this service once. */
+  ready: boolean;
 }
 
 export interface FetchedItem {
@@ -308,7 +314,7 @@ export const defaultSettings: Settings = {
   islandMonitor: "primary",
   islandAlign: "center",
   islandAutoHide: false,
-  showClock: false,
+  showClock: true,
   animationSpeed: 1,
   agentDefaultDir: null,
   screenMode: "ondemand",
@@ -322,4 +328,5 @@ export const defaultSettings: Settings = {
   showNextMeeting: true,
   sounds: true,
   onboarded: false,
+  face: "soft",
 };

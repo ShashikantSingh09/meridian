@@ -17,7 +17,7 @@ Scope is M3. Anything that reads more of the desktop must extend this before it 
 | OAuth tokens | Windows Credential Manager, never in SQLite. Disconnect removes the tokens and the events owned by that account. A booking seen in two accounts is one row, see `KNOWN_ISSUES.md`. |
 | Providers over MCP | Read-only tools only, chosen by annotation and name, with write verbs refused whatever the server claims. What a service returns stays in memory, is drawn as text, and is never sent to a model. Tokens stay in Credential Manager. |
 | Chat and session history | Plain text in the webview's storage on this PC, like Claude Code's own transcripts. Images are never kept. Privacy can clear it. |
-| Hook events from Claude Code | Followed in memory. Only a short label and the first line of a prompt leave the watcher. Sessions followed this way are never saved to history. |
+| Hook events from Claude Code | Followed in memory. A short label, the first line of a prompt, the lines of an edit and the end of a command's output reach the interface, to be shown as they happen. Sessions followed this way are never saved to history. |
 | Claude Code settings file | Changed only when the user turns on following. One backup is kept, invalid JSON is refused, and turning it off removes exactly our entries. |
 | Crash log | Local. Credentials and URL queries are removed before writing. |
 | Agent sign-in | Handled entirely by the CLI. The app reads only its status, and drops the account's email and organization. |

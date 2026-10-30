@@ -14,7 +14,7 @@ pub mod sync;
 pub use accounts::gmail::Gmail;
 pub use accounts::google_calendar::GoogleCalendar;
 pub use accounts::graph::Graph;
-pub use accounts::oauth::{exchange_code, refresh_tokens, AuthorizationCode, LoopbackFlow, OAuthConfig, Tokens};
+pub use accounts::oauth::{exchange_code, exchange_for_key, refresh_tokens, AuthorizationCode, LoopbackFlow, OAuthConfig, Tokens};
 pub use accounts::{CalendarChange, Profile, Provider, Session, TokenStore};
 pub use event::{
     Category, ContextEvent, EventKind, EventSource, EventStatus, EventTime, Priority, SourceRef, SuggestedAction,

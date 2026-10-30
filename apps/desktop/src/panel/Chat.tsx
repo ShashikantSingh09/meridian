@@ -21,6 +21,8 @@ import {
   useApp,
 } from "../lib/store";
 import type { AgentId } from "../lib/types";
+import { Face } from "../island/faces";
+import { LogLine } from "./LogLine";
 
 const LIVE = ["starting", "running", "waiting"];
 
@@ -145,7 +147,7 @@ function AgentChat({ agent }: { agent: AgentId }) {
           <code className="command" title={session.approval.summary}>{session.approval.summary}</code>
           <div className="row end">
             <button className="ghost" onClick={() => answerApproval(session.id, session.approval!.id, false)}>Deny</button>
-            <button className="solid" onClick={() => answerApproval(session.id, session.approval!.id, true)}>Allow</button>
+            <button className="allow" onClick={() => answerApproval(session.id, session.approval!.id, true)}>Allow</button>
           </div>
         </div>
       )}
@@ -158,9 +160,7 @@ function AgentChat({ agent }: { agent: AgentId }) {
               : "Project assistant: works in your folder, and asks before it changes anything."}
           </p>
         ) : (
-          session.log.map((entry, i) => (
-            <p key={i} className={`log-${entry.kind}`}>{entry.text}</p>
-          ))
+          session.log.map((entry, i) => <LogLine key={i} entry={entry} />)
         )}
         {live && session?.status !== "waiting" && <p className="meta">{session?.activity || "Working"}</p>}
       </div>
@@ -204,6 +204,7 @@ function AgentChat({ agent }: { agent: AgentId }) {
 }
 
 function ApiChat() {
+  const face = useApp((s) => s.settings.face);
   const chat = useApp((s) => s.chat);
   const providers = useApp((s) => s.providers);
   const localOnline = useApp((s) => s.localOnline);
@@ -263,7 +264,11 @@ function ApiChat() {
               <button className="solid" onClick={() => openSettings("models")}>Set up a provider</button>
             </div>
           ) : (
-            <p className="meta center">Say something to start.</p>
+            <div className="chat-start">
+              <Face id={face} mood="rest" scale={1.2} />
+              <p className="label">What can I help with?</p>
+              <p className="meta">Pick an AI above, or sign in to one in Settings.</p>
+            </div>
           ))}
         {chat.messages.map((m, i) => (
           <div key={i} className="message" data-role={m.role}>

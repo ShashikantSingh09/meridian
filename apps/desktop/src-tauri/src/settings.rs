@@ -42,6 +42,8 @@ pub struct Settings {
     pub sounds: bool,
     /// The welcome steps have been seen.
     pub onboarded: bool,
+    /// Which face lives on the island. The interface falls back if it does not know it.
+    pub face: String,
 }
 
 impl Default for Settings {
@@ -58,7 +60,7 @@ impl Default for Settings {
             island_monitor: "primary".into(),
             island_align: "center".into(),
             island_auto_hide: false,
-            show_clock: false,
+            show_clock: true,
             animation_speed: 1.0,
             agent_default_dir: None,
             screen_mode: "ondemand".into(),
@@ -72,6 +74,7 @@ impl Default for Settings {
             show_next_meeting: true,
             sounds: true,
             onboarded: false,
+            face: "soft".into(),
         }
     }
 }

@@ -34,6 +34,20 @@ Installed copies check at start and show the update under Settings, About. It in
 
 ## Customer sign-in
 
-To let customers connect Gmail, Calendar or Outlook without their own registration, set `MERIDIAN_GOOGLE_CLIENT_ID`,
-`MERIDIAN_GOOGLE_CLIENT_SECRET` and `MERIDIAN_MICROSOFT_CLIENT_ID` at build time. Google requires verification of a published
+Nobody using the app ever types a key. Services that accept only registered apps are registered once, by the publisher, and
+the IDs go in at build time. Until then those rows say they are not available yet.
+
+| Service | Set at build time |
+|---|---|
+| Gmail, Google Calendar, Google Drive | `MERIDIAN_GOOGLE_CLIENT_ID`, `MERIDIAN_GOOGLE_CLIENT_SECRET` |
+| Outlook | `MERIDIAN_MICROSOFT_CLIENT_ID` |
+| GitHub | `MERIDIAN_CLIENT_GITHUB`, `MERIDIAN_SECRET_GITHUB` |
+| Slack | `MERIDIAN_CLIENT_SLACK`, `MERIDIAN_SECRET_SLACK` |
+| Asana | `MERIDIAN_CLIENT_ASANA`, `MERIDIAN_SECRET_ASANA` |
+| HubSpot | `MERIDIAN_CLIENT_HUBSPOT`, `MERIDIAN_SECRET_HUBSPOT` |
+| Box | `MERIDIAN_CLIENT_BOX`, `MERIDIAN_SECRET_BOX` |
+
+The other 16 services register themselves, and need nothing.
+
+Google caps an unverified app at 100 new users. Google requires verification of a published
 app for `gmail.readonly`, including a security assessment, so plan for weeks.

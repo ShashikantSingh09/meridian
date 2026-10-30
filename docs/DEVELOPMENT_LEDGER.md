@@ -1,5 +1,45 @@
 # Development ledger
 
+## 2026-10-31: Milestone 4, a living island
+
+### Completed
+
+- **Reviewed design first.** A Claude Design canvas, revised with the owner's feedback, then approved.
+- **Faces.** Six, with Soft eyes as the default, in a registry that takes more in updates. They blink at random, follow the
+  pointer, sleep after ten minutes and change with mood. Picker in Settings, Island.
+- **Island.** Light running round the edge while work happens, colour rising from the bottom, a greeting at start, a peek card
+  on hover, sparks when something finishes, and an animated spark while Claude Code works.
+- **Music.** 196 by 36 until clicked, then album and controls at 372 by 150.
+- **Live activities.** Flights through every stage, with a plane moving along the route, plus parcels, meetings, tickets and a
+  focus timer. A second activity sits in a bubble beside the island.
+- **Panel.** Bottom dock, a size for each page, and Home rebuilt as live cards.
+- **Sign-in.** No key fields. Providers are one click and a browser login. An AI chooser for Claude, ChatGPT and OpenRouter.
+- **Real work shown.** Edits and command output appear in Agents as they happen.
+
+### Found by looking at the real window
+
+- The first review was done in a test browser. The real app's idle island was a 96 by 6 sliver, because Hide when idle was on.
+  Real-window capture is now part of checking anything visual.
+- Clearing old styles removed the provider tiles' layout. Caught in a real capture.
+
+### Testing status
+
+| Check | Result |
+|---|---|
+| Rust | 502 passed |
+| Unit | 35 passed |
+| UI, Playwright | 48 passed |
+| Real window | Every state captured from WebView2 with no console errors, and the release build checked on the real desktop |
+| Not tried | A real flight email, any real provider sign-in, real album art |
+
+### Measurements
+
+| Measure | Result |
+|---|---|
+| Idle CPU, release, face alive | 0.63% of one core over 30 s |
+| Installer | 4.4 MB |
+| `meridian.exe` | 15 MB |
+
 ## 2026-10-30: Milestone 3, towards customers
 
 ### Completed

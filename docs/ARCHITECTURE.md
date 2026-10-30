@@ -48,7 +48,9 @@ flowchart TB
 | Unit | Owns | Depends on |
 |---|---|---|
 | `island/machine.ts` | Which state shows, and its size, as pure functions | Nothing |
-| `island/line.ts` | The shape of the line of light, as pure functions | Nothing |
+| `island/line.ts` | The shape of the listening line, as pure functions | Nothing |
+| `island/faces.tsx` | The registry of faces, and blinking | Nothing |
+| `island/live.ts` | Live activities, as pure functions of an event and the time | Nothing |
 | `island/Island.tsx` | The morph, and reporting the shape to Rust | Motion, store |
 | `lib/store.ts` | App state and every action | Bridge |
 | `lib/bridge.ts` | The whole IPC surface | Tauri API |
@@ -63,7 +65,8 @@ flowchart TB
 | `crates/mcp` | MCP client, sign-in discovery, service catalog, tool choice, turning results into rows | reqwest, `activity` for OAuth |
 | `src-tauri/watch.rs` | The contextual screen loop | `screen` |
 | `src-tauri/life.rs` | Activity timers, keychain, sign-in, commands | `activity` |
-| `src-tauri/links.rs` | Providers over MCP: saved links and commands | `mcp` |
+| `src-tauri/links.rs` | Providers over MCP, and OpenRouter sign-in | `mcp` |
+| `src-tauri/following.rs` | Following Claude Code from any terminal | `agent-adapters` |
 | `src-tauri/log.rs` | A redacted log of crashes | Nothing |
 
 The frontend never sees a provider or agent wire format. A provider failure comes back as a typed error, and every chat

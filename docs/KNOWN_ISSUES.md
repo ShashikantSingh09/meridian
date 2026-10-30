@@ -1,6 +1,6 @@
 # Known issues and limitations
 
-Honest state of M3. "Not verified" means the code exists and has tests where noted, but the behaviour has not been seen
+Honest state of M4. "Not verified" means the code exists and has tests where noted, but the behaviour has not been seen
 working against the real service.
 
 ## Acceptance criteria
@@ -28,7 +28,7 @@ The 20 criteria from the enhancement brief, as they stand.
 | 17 | Prioritized and deduplicated | Done | Unit tests on the engine and store, live reschedule |
 | 18 | Permissions and disconnect | Done in code, with one edge case | Unit tests. Not with a real account. See below |
 | 19 | No data sent without authorization | Done by design | One share path; no network code in `screen` |
-| 20 | Existing features still work | Done | 498 Rust, 20 unit and 47 UI tests pass. Live claude, deny, cancel, engine, resume, activity and chat pass on the M3 code. Screen, vision and media were not rerun: this code did not change, and they would capture the desktop in use |
+| 20 | Existing features still work | Done | 502 Rust, 35 unit and 48 UI tests pass. Live claude, deny, cancel, engine, resume, activity and chat pass on the M3 code. Screen, vision and media were not rerun: this code did not change, and they would capture the desktop in use |
 
 ## Milestone 3 brief
 
@@ -45,6 +45,21 @@ The 20 criteria from the enhancement brief, as they stand.
 content changed, because exit and enter fades ran together. Text blurred on every change through a filter. The window's
 layered flag was toggled on every pointer crossing. Popup menus had dark text on a dark list. Hover reacted to every passing
 pointer. Tool names were capitalised. A button stretched across My day.
+
+## Milestone 4 brief
+
+| Request | State | Evidence |
+|---|---|---|
+| Design first, reviewed by the owner | Done | Claude Design canvas |
+| Soft eyes, and a face picker that can grow | Done | Six faces, UI tests, unknown faces fall back |
+| Music small, album and controls on click | Done | UI test on both sizes |
+| Animated Claude icon while it works | Done, with our own spark | D34. The official logo needs Anthropic's permission |
+| Flight countdown and time to landing | Done, from the schedule | 18 unit tests on the stages. **No real flight email tried** |
+| Other live notifications | Parcels, meetings, tickets, focus timer | Unit tests |
+| Browser sign-in, no keys | Done for 16 services and for Claude, ChatGPT, OpenRouter | **No real account has signed in through it.** Gmail and six others wait on registration |
+
+**Designed but not built.** Food and cab tracking, because those apps publish no live position to a desktop. The 5-hour usage
+ring, because it needs a status line script installed in Claude Code. Trains, because the extractor does not read them yet.
 
 ## Licensing: read before distributing
 
@@ -143,6 +158,9 @@ What stands between this build and a stranger installing it. Only the owner can 
 
 ## Behaviour to be aware of
 
+- Hide when idle shrinks the island to a sliver with no face. It has turned on twice in the owner's settings file with no known
+  cause, and the second time was saved at 01:01 on 2026-10-31. Nothing in the code or tests sets it by itself, so a click is the
+  likely cause, but this is not proven. If it comes back unasked, it needs looking at.
 - Click-away closes the panel, so it cannot stay open beside your work.
 - Each Claude Code session keeps a process of about 300 MB for 3 minutes after its last turn, so follow-ups are fast. Agents
   were seen to exit within seconds when the app was force-killed with idle sessions. A turn in progress was not tried.

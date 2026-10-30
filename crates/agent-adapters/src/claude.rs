@@ -68,6 +68,42 @@ fn base_name(path: &str) -> &str {
 }
 
 /// What a tool call is doing, in a few words.
+const CHANGE_LINES: usize = 6;
+const OUTPUT_LINES: usize = 3;
+const LINE_CHARS: usize = 200;
+
+fn lines_of(text: &str, limit: usize) -> Vec<String> {
+    text.lines().take(limit).map(|line| line.chars().take(LINE_CHARS).collect()).collect()
+}
+
+/// What an edit changes, so the work can be watched rather than taken on trust.
+pub(crate) fn code_change(tool: &str, input: &Value) -> Option<AgentEvent> {
+    if tool != "Edit" {
+        return None;
+    }
+    let text = |key: &str| input[key].as_str().unwrap_or_default();
+    Some(AgentEvent::Diff {
+        path: base_name(text("file_path")).to_string(),
+        removed: lines_of(text("old_string"), CHANGE_LINES),
+        added: lines_of(text("new_string"), CHANGE_LINES),
+    })
+}
+
+/// The end of what a finished command printed.
+pub(crate) fn command_output(input: &Value, response: &Value) -> Option<AgentEvent> {
+    let command = input["command"].as_str()?;
+    let stdout = response["stdout"].as_str().unwrap_or_default();
+    let stderr = response["stderr"].as_str().unwrap_or_default();
+    let failed = stdout.trim().is_empty() && !stderr.trim().is_empty();
+    let printed: Vec<&str> = if failed { stderr } else { stdout }.lines().collect();
+    let tail = printed[printed.len().saturating_sub(OUTPUT_LINES)..].join("\n");
+    (!tail.is_empty()).then(|| AgentEvent::Output {
+        command: lines_of(command, 1).concat(),
+        lines: lines_of(&tail, OUTPUT_LINES),
+        failed,
+    })
+}
+
 pub fn tool_label(name: &str, input: &Value) -> String {
     let text = |key: &str| input[key].as_str().unwrap_or_default();
     let line = |s: &str| s.lines().next().unwrap_or_default().chars().take(80).collect::<String>();
@@ -134,8 +170,9 @@ pub fn parse(line: &str, interrupted: bool) -> Parsed {
         (Some("assistant"), _) => {
             for block in message["message"]["content"].as_array().into_iter().flatten() {
                 if block["type"] == "tool_use" {
-                    let label = tool_label(block["name"].as_str().unwrap_or("Tool"), &block["input"]);
-                    events.push(AgentEvent::Activity { label });
+                    let tool = block["name"].as_str().unwrap_or("Tool");
+                    events.push(AgentEvent::Activity { label: tool_label(tool, &block["input"]) });
+                    events.extend(code_change(tool, &block["input"]));
                 }
             }
         }

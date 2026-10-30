@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { bridge } from "../lib/bridge";
 import { Icon } from "../lib/icons";
 import { answerApproval, cancelSession, sendToSession, startSession, useApp, type SessionDetail } from "../lib/store";
+import { AgentMark } from "../island/marks";
+import { LogLine } from "./LogLine";
 import type { AgentId } from "../lib/types";
 
 const LIVE = ["starting", "running", "waiting"];
@@ -46,14 +48,14 @@ function Session({ session }: { session: SessionDetail }) {
           <code className="command">{session.approval.summary}</code>
           <div className="row end">
             <button className="ghost" onClick={() => answerApproval(session.id, session.approval!.id, false)}>Deny</button>
-            <button className="solid" onClick={() => answerApproval(session.id, session.approval!.id, true)}>Allow</button>
+            <button className="allow" onClick={() => answerApproval(session.id, session.approval!.id, true)}>Allow</button>
           </div>
         </div>
       )}
 
       <div className="log" ref={log}>
         {session.log.map((entry, i) => (
-          <p key={i} className={`log-${entry.kind}`}>{entry.text}</p>
+          <LogLine key={i} entry={entry} />
         ))}
       </div>
 
@@ -148,7 +150,7 @@ export function Agents() {
         </button>
         {sessions.map((s) => (
           <button key={s.id} className="list-row" data-active={s.id === selected} onClick={() => setSelected(s.id)}>
-            <span className="status-dot" data-status={s.status} />
+            <AgentMark agent={s.agent} size={16} live={s.status === "running" || s.status === "starting"} />
             <span className="stacked grow">
               <span className="label truncate">{s.agent}</span>
               <span className="meta truncate">{s.project}</span>

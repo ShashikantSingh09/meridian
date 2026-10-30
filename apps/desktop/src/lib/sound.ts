@@ -4,6 +4,8 @@
 const NOTES = {
   done: [659.25, 987.77],
   attention: [880, 880],
+  open: [392, 587.33],
+  close: [523.25, 349.23],
 } as const;
 
 let context: AudioContext | null = null;
@@ -18,7 +20,7 @@ export function chime(kind: keyof typeof NOTES) {
     tone.type = "sine";
     tone.frequency.value = frequency;
     level.gain.setValueAtTime(0, at);
-    level.gain.linearRampToValueAtTime(0.07, at + 0.012);
+    level.gain.linearRampToValueAtTime(kind === "open" || kind === "close" ? 0.035 : 0.07, at + 0.012);
     level.gain.exponentialRampToValueAtTime(0.0001, at + 0.34);
     tone.connect(level).connect(context!.destination);
     tone.start(at);

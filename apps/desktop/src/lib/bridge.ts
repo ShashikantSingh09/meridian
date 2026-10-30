@@ -119,11 +119,12 @@ export const bridge = {
     native ? invoke<void>("account_disconnect", { id }) : mock.accountDisconnect(id),
   accountSync: (id: string) => (native ? invoke<string>("account_sync", { id }) : Promise.resolve("Up to date.")),
   openUrl: (url: string) => (native ? invoke<void>("open_url", { url }) : Promise.resolve()),
-  builtInClients: () => (native ? invoke<[boolean, boolean]>("built_in_clients") : Promise.resolve<[boolean, boolean]>([false, false])),
+  builtInClients: () => (native ? invoke<[boolean, boolean]>("built_in_clients") : Promise.resolve<[boolean, boolean]>([true, true])),
+  /** Sends the user to the service's own page, and stores what comes back. */
+  aiSignIn: (id: string) => (native ? invoke<void>("ai_sign_in", { id }) : mock.setProviderKey(id)),
 
   integrationsList: () => (native ? invoke<Integration[]>("integrations_list") : mock.integrationsList()),
-  integrationConnect: (id: string, clientId: string | null, secret: string | null, token: string | null) =>
-    native ? invoke<void>("integration_connect", { id, clientId, secret, token }) : mock.integrationConnect(id),
+  integrationConnect: (id: string) => (native ? invoke<void>("integration_connect", { id }) : mock.integrationConnect(id)),
   integrationDisconnect: (id: string) =>
     native ? invoke<void>("integration_disconnect", { id }) : mock.integrationDisconnect(id),
   integrationFetch: (id: string, tool: string | null) =>
@@ -181,6 +182,15 @@ export const bridge = {
   onAgentEvent(handler: (e: AgentEnvelope) => void) {
     if (!native) return mock.onAgentEvent(handler);
     return listen<AgentEnvelope>("agent-event", (e) => handler(e.payload)).then((un) => un);
+  },
+  /** Where the pointer is, from -1 to 1 each way, so the face can look at it. */
+  onGaze(handler: (x: number, y: number) => void) {
+    if (!native) {
+      const move = (e: MouseEvent) => handler((e.clientX / innerWidth) * 2 - 1, (e.clientY / innerHeight) * 2 - 1);
+      addEventListener("mousemove", move);
+      return Promise.resolve(() => removeEventListener("mousemove", move));
+    }
+    return listen<[number, number]>("island-gaze", (e) => handler(e.payload[0], e.payload[1])).then((un) => un);
   },
   onHover(handler: (hovered: boolean) => void) {
     if (!native) return Promise.resolve(() => {});

@@ -36,7 +36,6 @@ export function Inbox() {
 
   return (
     <div className="page-scroll stack-lg">
-      <h1>Notifications</h1>
 
       <section className="stack">
         <h2>What reaches the island</h2>

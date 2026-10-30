@@ -11,6 +11,7 @@ const base: Snapshot = {
   notices: [],
   suggestions: [],
   errors: [],
+  live: [],
 };
 
 const session = (over: Partial<SessionSummary> = {}): SessionSummary => ({

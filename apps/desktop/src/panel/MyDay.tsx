@@ -145,7 +145,6 @@ export function MyDay() {
   return (
     <div className="page-scroll stack-lg">
       <header className="stack-sm">
-        <h1>My day</h1>
         <p className="meta">
           {accounts.length > 0
             ? `From ${accounts.length} connected ${accounts.length === 1 ? "account" : "accounts"} and your own reminders.`

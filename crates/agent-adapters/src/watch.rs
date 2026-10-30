@@ -17,6 +17,7 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 
 use crate::approvals::{decision_body, read_request, respond, READ_TIMEOUT};
+use crate::claude::{code_change, command_output};
 use crate::claude::tool_label;
 use crate::{AgentEvent, Approval, Envelope, SessionStatus};
 
@@ -239,13 +240,17 @@ fn approval_summary(tool: &str, input: &Value) -> String {
     }
 }
 
-/// What one hook means for the island. `PostToolUse` and anything else not
-/// listed only keeps the session fresh.
+/// What one hook means for the island. Anything not listed only keeps the
+/// session fresh.
 fn events_for(name: &str, hook: &Value, running: bool) -> Vec<AgentEvent> {
     let tool = || tool_label(hook["tool_name"].as_str().unwrap_or("Tool"), &hook["tool_input"]);
     match name {
         "UserPromptSubmit" => vec![AgentEvent::status(SessionStatus::Running)],
-        "PreToolUse" => vec![AgentEvent::status(SessionStatus::Running), AgentEvent::Activity { label: tool() }],
+        "PreToolUse" => {
+            let change = code_change(hook["tool_name"].as_str().unwrap_or_default(), &hook["tool_input"]);
+            [AgentEvent::status(SessionStatus::Running), AgentEvent::Activity { label: tool() }].into_iter().chain(change).collect()
+        }
+        "PostToolUse" => command_output(&hook["tool_input"], &hook["tool_response"]).into_iter().collect(),
         // The error text can quote tool output, so only the call is named.
         "PostToolUseFailure" => vec![AgentEvent::Activity { label: format!("Failed: {}", tool()) }],
         "Notification" => {
@@ -473,6 +478,23 @@ impl Watcher {
 mod tests {
     use super::*;
     use tokio::io::AsyncWriteExt;
+
+    #[test]
+    fn an_edit_shows_its_lines_and_a_command_shows_its_end() {
+        let edit = json!({ "tool_name": "Edit", "tool_input": { "file_path": "C:\\a\\tax.ts", "old_string": "const VAT = 0.19", "new_string": "const VAT = 0.21" } });
+        let events = events_for("PreToolUse", &edit, true);
+        assert!(events.contains(&AgentEvent::Diff { path: "tax.ts".into(), removed: vec!["const VAT = 0.19".into()], added: vec!["const VAT = 0.21".into()] }));
+
+        let run = json!({ "tool_input": { "command": "npm test" }, "tool_response": { "stdout": "a\nb\nc\nPASS 48" } });
+        let events = events_for("PostToolUse", &run, true);
+        assert_eq!(events, [AgentEvent::Output { command: "npm test".into(), lines: vec!["b".into(), "c".into(), "PASS 48".into()], failed: false }]);
+    }
+
+    #[test]
+    fn a_command_that_only_wrote_errors_is_marked_failed() {
+        let run = json!({ "tool_input": { "command": "npm test" }, "tool_response": { "stdout": "", "stderr": "boom" } });
+        assert!(matches!(&events_for("PostToolUse", &run, true)[..], [AgentEvent::Output { failed: true, .. }]));
+    }
 
     #[test]
     fn a_file_approval_shows_the_whole_path() {

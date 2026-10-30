@@ -1,5 +1,6 @@
 import { Icon } from "../lib/icons";
 import { Progress } from "../island/Progress";
+import { Bars } from "../island/marks";
 import { mediaAction, useApp } from "../lib/store";
 
 export function Media() {
@@ -8,8 +9,6 @@ export function Media() {
 
   return (
     <div className="page-scroll stack-lg">
-      <h1>Media</h1>
-
       {track ? (
         <section className="now-playing">
           {track.artwork ? (
@@ -18,7 +17,10 @@ export function Media() {
             <span className="artwork" style={{ width: 120, height: 120 }}><Icon name="music" size={28} /></span>
           )}
           <div className="grow stack">
-            <p className="tile-value truncate" title={track.title}>{track.title || "Unknown title"}</p>
+            <div className="row">
+              <p className="tile-value truncate grow" title={track.title}>{track.title || "Unknown title"}</p>
+              <Bars playing={track.playing} height={24} />
+            </div>
             <p className="meta truncate">{[track.artist, track.album, track.app].filter(Boolean).join(" · ")}</p>
             <Progress />
             <div className="row">

@@ -56,6 +56,10 @@ pub enum AgentEvent {
     Usage { input: u64, output: u64, cost_usd: Option<f64> },
     /// A session this app did not start, heard from for the first time.
     Watched { agent: String, cwd: String, title: Option<String> },
+    /// Lines an edit takes out and puts in, shown while it happens and never saved.
+    Diff { path: String, removed: Vec<String>, added: Vec<String> },
+    /// The end of what a command printed, on the same terms.
+    Output { command: String, lines: Vec<String>, failed: bool },
 }
 
 impl AgentEvent {

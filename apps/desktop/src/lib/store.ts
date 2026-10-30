@@ -1,8 +1,9 @@
 // App state and the actions that change it. One store, read with useApp(selector).
 
 import { useSyncExternalStore } from "react";
-import type { IslandError, Notice, SessionSummary, Suggestion } from "../island/machine";
-import { bridge, type StartSession, type UpdateStatus } from "./bridge";
+import { focusActivity, liveFrom, pickLive, type LiveActivity } from "../island/live";
+import type { IslandError, IslandView, Notice, SessionSummary, Suggestion } from "../island/machine";
+import { bridge, native, type StartSession, type UpdateStatus } from "./bridge";
 import { chime } from "./sound";
 import type {
   AgentEnvelope,
@@ -34,8 +35,14 @@ export type Tab = "home" | "chat" | "agents" | "desktop" | "media" | "day" | "in
 export type SettingsSection = "general" | "island" | "models" | "providers" | "agents" | "privacy" | "about";
 
 export interface LogEntry {
-  kind: "user" | "text" | "activity" | "system";
+  kind: "user" | "text" | "activity" | "system" | "diff" | "output";
   text: string;
+  /** For a diff: the lines taken out and put in. */
+  removed?: string[];
+  added?: string[];
+  /** For a command: the end of what it printed. */
+  lines?: string[];
+  failed?: boolean;
 }
 
 export interface SessionDetail extends SessionSummary {
@@ -101,6 +108,8 @@ export interface ActivityState {
   log: ReminderLogEntry[];
   /** The next meeting, for the island. */
   next: ContextEvent | null;
+  /** Everything current, which is what live activities come from. */
+  all: ContextEvent[];
 }
 
 export interface AppState {
@@ -133,6 +142,16 @@ export interface AppState {
   digests: Record<string, Digest>;
   fetching: string[];
   fetchErrors: Record<string, string>;
+  /** Things under way, most pressing first. */
+  live: LiveActivity[];
+  focus: { endsAt: number; minutes: number } | null;
+  /** The compact player was clicked open. */
+  mediaOpen: boolean;
+  /** Says hello for a moment after the app starts. */
+  greeting: boolean;
+  /** The colour of the album, to light the island with. */
+  artTint: string | null;
+  islandView: IslandView;
   /** Claude Code hooks are installed, so its sessions appear here. */
   watching: boolean;
   version: string;
@@ -141,13 +160,16 @@ export interface AppState {
 
 const LOG_LIMIT = 500;
 const NOTICE_MS = 6000;
+const GREETING_MS = 2600;
 const HOVER_IN_MS = 180;
 const HOVER_OUT_MS = 240;
 const ANSWER_GAP_MS = 400;
+const SIGN_IN_POLLS = 60;
+const SIGN_IN_POLL_MS = 2000;
 
 let state: AppState = {
   panelOpen: false,
-  activity: { category: "today", events: [], accounts: [], log: [], next: null },
+  activity: { category: "today", events: [], accounts: [], log: [], next: null, all: [] },
   media: { current: null, sessions: [], reportedAt: 0, recent: [] },
   screen: { capture: null, capturing: false, question: "", includeImage: true, refused: null },
   tab: "home",
@@ -173,6 +195,12 @@ let state: AppState = {
   digests: {},
   fetching: [],
   fetchErrors: {},
+  live: [],
+  focus: null,
+  mediaOpen: false,
+  greeting: false,
+  artTint: null,
+  islandView: "idle",
   watching: false,
   version: "",
   update: { available: false, message: "" },
@@ -261,12 +289,14 @@ const newId = () => crypto.randomUUID();
 // ── Panel ───────────────────────────────────────────────────────────────────
 
 export function openPanel(tab?: Tab) {
-  set({ panelOpen: true, tab: tab ?? state.tab, notices: [] });
+  if (!state.panelOpen && state.settings.sounds) chime("open");
+  set({ panelOpen: true, tab: tab ?? state.tab, notices: [], mediaOpen: false });
   void bridge.setInteractive(true);
   void refreshLocal();
 }
 
 export function closePanel() {
+  if (state.panelOpen && state.settings.sounds) chime("close");
   set({ panelOpen: false });
   void bridge.setInteractive(false);
 }
@@ -282,7 +312,16 @@ let hoverTimer: ReturnType<typeof setTimeout> | undefined;
  *  one slipping off the edge for a moment should not close it. */
 export function setHovered(hovered: boolean) {
   clearTimeout(hoverTimer);
-  if (hovered !== state.hovered) hoverTimer = setTimeout(() => set({ hovered }), hovered ? HOVER_IN_MS : HOVER_OUT_MS);
+  if (hovered !== state.hovered) {
+    hoverTimer = setTimeout(() => set(hovered ? { hovered } : { hovered, mediaOpen: false }), hovered ? HOVER_IN_MS : HOVER_OUT_MS);
+  }
+}
+
+export const setMediaOpen = (mediaOpen: boolean) => set({ mediaOpen });
+
+/** Other parts of the island ask what is on show. Only a change is news. */
+export function reportView(islandView: IslandView) {
+  if (islandView !== state.islandView) set({ islandView });
 }
 
 export const setListening = (listening: boolean) => set({ listening, preview: null });
@@ -555,6 +594,12 @@ export function applyAgentEvent(envelope: AgentEnvelope) {
         usage: { input: event.input, output: event.output, costUsd: event.costUsd },
       }));
       break;
+    case "diff":
+      patchSession(sessionId, (s) => ({ ...s, log: [...s.log, { kind: "diff" as const, text: event.path, removed: event.removed, added: event.added }].slice(-LOG_LIMIT) }));
+      break;
+    case "output":
+      patchSession(sessionId, (s) => ({ ...s, log: [...s.log, { kind: "output" as const, text: event.command, lines: event.lines, failed: event.failed }].slice(-LOG_LIMIT) }));
+      break;
     case "status": {
       const ended = ["completed", "failed", "cancelled"].includes(event.status);
       patchSession(sessionId, (s) => ({
@@ -676,14 +721,16 @@ const setActivity = (patch: Partial<ActivityState>) => set({ activity: { ...stat
 
 export async function refreshActivity(category: Category = state.activity.category) {
   try {
-    const [events, accounts, log, meetings] = await Promise.all([
+    const [events, accounts, log, meetings, all] = await Promise.all([
       bridge.activityList(category),
       bridge.accountsList(),
       bridge.reminderLog(),
       bridge.activityList("meetings"),
+      bridge.activityList(null),
     ]);
     const next = meetings.find((m) => m.status !== "cancelled" && m.status !== "completed") ?? null;
-    setActivity({ category, events, accounts, log, next });
+    setActivity({ category, events, accounts, log, next, all });
+    refreshLive();
   } catch (err) {
     pushError({ title: "Could not read your activity", body: describe(err) });
   }
@@ -755,13 +802,42 @@ export function describeTime(time: EventTime) {
     : stated.toLocaleString(undefined, { weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
 }
 
+// ── Live activities ─────────────────────────────────────────────────────────
+
+const LIVE_EVERY_MS = 30_000;
+const FOCUS_MINUTES = 25;
+
+function refreshLive() {
+  if (state.preview) return;
+  const now = Date.now();
+  const { focus } = state;
+  if (focus && now >= focus.endsAt) {
+    set({ focus: null });
+    pushNotice({ tone: "success", title: "Focus time is over", body: `${focus.minutes} minutes done` });
+    if (state.settings.sounds) chime("done");
+  }
+  const found = pickLive(state.activity.all, now);
+  set({ live: state.focus ? [...found, focusActivity(state.focus.endsAt, state.focus.minutes, now)] : found });
+}
+
+export function startFocus(minutes = FOCUS_MINUTES) {
+  set({ focus: { endsAt: Date.now() + minutes * 60_000, minutes } });
+  refreshLive();
+  closePanel();
+}
+
+export function endFocus() {
+  set({ focus: null });
+  refreshLive();
+}
+
 // ── Providers ───────────────────────────────────────────────────────────────
 
 /** Gmail, Calendar and Outlook use the direct connectors, which also feed My day. */
 const DIRECT: Integration[] = [
-  { id: "gmail", name: "Gmail", group: "Mail and calendar", blurb: "Bookings, orders and deliveries found in your mail.", access: "account", connected: false, account: null },
-  { id: "calendar", name: "Google Calendar", group: "Mail and calendar", blurb: "Your upcoming events.", access: "account", connected: false, account: null },
-  { id: "outlook", name: "Outlook", group: "Mail and calendar", blurb: "Mail and calendar from a Microsoft account.", access: "account", connected: false, account: null },
+  { id: "gmail", name: "Gmail", group: "Mail and calendar", blurb: "Finds flights, deliveries and bookings in your mail.", access: "account", connected: false, account: null, ready: false },
+  { id: "calendar", name: "Google Calendar", group: "Mail and calendar", blurb: "Shows meetings as they come up.", access: "account", connected: false, account: null, ready: false },
+  { id: "outlook", name: "Outlook", group: "Mail and calendar", blurb: "Mail and calendar from a Microsoft account.", access: "account", connected: false, account: null, ready: false },
 ];
 
 const directAccount = (id: string, accounts: ConnectedAccount[]) =>
@@ -769,9 +845,11 @@ const directAccount = (id: string, accounts: ConnectedAccount[]) =>
 
 export async function refreshIntegrations() {
   const accounts = await bridge.accountsList().catch(() => []);
+  const [google, microsoft] = await bridge.builtInClients();
   const direct = DIRECT.map((d) => {
     const account = directAccount(d.id, accounts);
-    return { ...d, connected: account !== null, account: account?.email ?? null };
+    const own = d.id === "outlook" ? state.settings.microsoftClientId : state.settings.googleClientId;
+    return { ...d, connected: account !== null, account: account?.email ?? null, ready: (d.id === "outlook" ? microsoft : google) || own !== "" };
   });
   const servers = await bridge.integrationsList().catch(() => []);
   set({ integrations: [...direct, ...servers] });
@@ -811,14 +889,12 @@ export async function fetchIntegration(integration: Integration, tool: string | 
   }
 }
 
-export async function connectIntegration(
-  integration: Integration,
-  { clientId, secret, token }: { clientId: string | null; secret: string | null; token: string | null },
-) {
+/** One click: the service's own page opens in the browser, and this returns once signed in. */
+export async function connectIntegration(integration: Integration) {
   if (integration.access === "account") {
-    await connectAccount(integration.id === "outlook" ? "microsoft" : "google", secret);
+    await connectAccount(integration.id === "outlook" ? "microsoft" : "google", null);
   } else {
-    await bridge.integrationConnect(integration.id, clientId, secret, token);
+    await bridge.integrationConnect(integration.id);
   }
   await refreshIntegrations();
 }
@@ -850,6 +926,21 @@ export function describeWhen(value: string) {
 
 // ── Claude Code sessions in other terminals ─────────────────────────────────
 
+/** A CLI signs in through its own window, so this waits to see it succeed. */
+export async function signInAgent(agent: AgentId) {
+  await bridge.agentLogin(agent);
+  for (let i = 0; i < SIGN_IN_POLLS; i++) {
+    await new Promise((r) => setTimeout(r, SIGN_IN_POLL_MS));
+    if ((await refreshAuth(agent))?.signedIn) return true;
+  }
+  return false;
+}
+
+export async function signInProvider(id: string) {
+  await bridge.aiSignIn(id);
+  await refreshProviders();
+}
+
 export async function setWatching(on: boolean) {
   await bridge.watchSet(on);
   set({ watching: on });
@@ -859,8 +950,30 @@ export async function setWatching(on: boolean) {
 
 const RECENT_TRACKS = 8;
 
+/** The album's average colour, taken from a tiny copy of its art. */
+function tintOf(src: string, done: (tint: string) => void) {
+  const image = new Image();
+  image.onload = () => {
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = 8;
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) return;
+    context.drawImage(image, 0, 0, 8, 8);
+    const pixels = context.getImageData(0, 0, 8, 8).data;
+    const sum = [0, 0, 0];
+    for (let i = 0; i < pixels.length; i += 4) for (let c = 0; c < 3; c++) sum[c] += pixels[i + c];
+    done(`rgb(${sum.map((v) => Math.round(v / 64)).join(", ")})`);
+  };
+  image.src = src;
+}
+
 function onMedia(snapshot: MediaSnapshot) {
   const before = state.media;
+  const art = snapshot.current?.artwork ?? null;
+  if (art !== before.current?.artwork) {
+    if (art) tintOf(art, (artTint) => set({ artTint }));
+    else set({ artTint: null });
+  }
   const changed = before.current && before.current.title !== snapshot.current?.title;
   const recent = changed
     ? [before.current!, ...before.recent.filter((t) => t.title !== before.current!.title)].slice(0, RECENT_TRACKS)
@@ -981,7 +1094,24 @@ const previewSession = (id: string, agent: string, project: string, activity: st
 
 type Preview = { name: string; apply: () => Partial<AppState> };
 
+/** A sample event seen a set number of minutes after it starts. */
+function previewLive(kind: string, minutes: number, over: Partial<ContextEvent> = {}): LiveActivity[] {
+  const now = Date.now();
+  const starts = now - minutes * 60_000;
+  const event: ContextEvent = {
+    id: `preview-${kind}`, kind, source: "email", occurredAt: new Date(now).toISOString(),
+    startsAt: { kind: "zoned", value: new Date(starts).toISOString() },
+    endsAt: { kind: "zoned", value: new Date(starts + 135 * 60_000).toISOString() },
+    title: "Design review", body: null, metadata: { flightNumber: "6E2341", departureAirport: "DEL", arrivalAirport: "BOM" },
+    confidence: 1, priority: "important", status: "active", suggestedActions: [], expiresAt: null, dedupeKey: kind,
+    sourceRef: null, userEdited: false, revision: 1, changedFields: [], snoozedUntil: null, ...over,
+  };
+  const activity = liveFrom(event, now);
+  return activity ? [activity] : [];
+}
+
 const clear: Partial<AppState> = {
+  live: [],
   panelOpen: false,
   listening: false,
   chatPending: false,
@@ -1034,6 +1164,11 @@ export const PREVIEWS: Preview[] = [
     }),
   },
   { name: "error", apply: () => ({ ...clear, errors: [{ id: "pe", title: "Anthropic unreachable", body: "Network connection lost." }] }) },
+  { name: "flight, boarding", apply: () => ({ ...clear, live: previewLive("flight", -30) }) },
+  { name: "flight, in the air", apply: () => ({ ...clear, live: previewLive("flight", 57) }) },
+  { name: "flight, landed", apply: () => ({ ...clear, live: previewLive("flight", 140) }) },
+  { name: "parcel", apply: () => ({ ...clear, live: previewLive("delivery", 0, { endsAt: null, metadata: { deliveryStatus: "Out for delivery", carrier: "Delhivery" } }) }) },
+  { name: "meeting", apply: () => ({ ...clear, live: previewLive("meeting", -4, { suggestedActions: [{ label: "Join", actionId: "join", url: "https://meet.google.com/abc" }] }) }) },
   { name: "expanded", apply: () => ({ ...clear, panelOpen: true, tab: "home" as Tab }) },
 ];
 
@@ -1052,6 +1187,7 @@ export function showPreview(name: string | null) {
       suggestions: state.suggestions,
       errors: state.errors,
       media: state.media,
+      live: state.live,
     };
     set({ ...preview.apply(), preview: preview.name });
   } else {
@@ -1071,6 +1207,11 @@ export async function boot() {
   void refreshActivity();
   void bridge.monitors().then((monitors) => set({ monitors }));
   if (!settings.onboarded) set({ notices: [{ id: "welcome", tone: "info", title: "Welcome to Meridian", body: "Click here to set up", sticky: true }] });
+  else if (native) {
+    set({ greeting: true });
+    setTimeout(() => set({ greeting: false }), GREETING_MS);
+  }
+  setInterval(refreshLive, LIVE_EVERY_MS);
   void refreshIntegrations();
   void bridge.builtInClients().then((builtInClients) => set({ builtInClients }));
   void bridge.watchStatus().then((watching) => set({ watching }));
@@ -1086,6 +1227,11 @@ export async function boot() {
   await Promise.all([
     bridge.onAgentEvent(applyAgentEvent),
     bridge.onHover(setHovered),
+    bridge.onGaze((x, y) => {
+      const island = document.querySelector<HTMLElement>(".island");
+      island?.style.setProperty("--gx", `${(x * 4).toFixed(1)}px`);
+      island?.style.setProperty("--gy", `${(y * 3).toFixed(1)}px`);
+    }),
     bridge.onTogglePanel(togglePanel),
     bridge.onBlur(() => {
       if (state.panelOpen && !bridge.dialogOpen()) closePanel();

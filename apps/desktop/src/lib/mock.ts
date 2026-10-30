@@ -40,9 +40,9 @@ let pushReminders: (r: Reminder[]) => void = () => {};
 let accounts: ConnectedAccount[] = [];
 let watching = false;
 let integrations: Integration[] = [
-  { id: "linear", name: "Linear", group: "Work", blurb: "Issues assigned to you.", access: "open", connected: false, account: null },
-  { id: "slack", name: "Slack", group: "Work", blurb: "Channels you belong to.", access: "registeredApp", connected: false, account: null },
-  { id: "github", name: "GitHub", group: "Development", blurb: "Your notifications and issues.", access: "tokenOrApp", connected: false, account: null },
+  { id: "linear", name: "Linear", group: "Work", blurb: "Issues assigned to you.", access: "open", connected: false, account: null, ready: true },
+  { id: "slack", name: "Slack", group: "Work", blurb: "Channels you belong to.", access: "registeredApp", connected: false, account: null, ready: false },
+  { id: "github", name: "GitHub", group: "Development", blurb: "Your notifications and issues.", access: "tokenOrApp", connected: false, account: null, ready: false },
 ];
 const sampleEvent = (id: string, title: string, kind: string, over: Partial<ContextEvent> = {}): ContextEvent => ({
   id,
@@ -124,6 +124,16 @@ export const mock = {
     { id: "claude-code", name: "Claude Code", installed: true, path: "claude", version: "stand-in", capabilities: { approvals: true, resume: true, usage: true, progress: false } },
     { id: "codex", name: "Codex CLI", installed: false, path: null, version: null, capabilities: { approvals: true, resume: true, usage: true, progress: false } },
   ],
+
+  /** A flight departing soon, for the live activity tests. */
+  addFlight: (minutesAway: number) => {
+    const at = Date.now() + minutesAway * 60_000;
+    events = [...events, sampleEvent("flight-live", "Flight 6E 2341 DEL → BOM", "flight", {
+      startsAt: { kind: "zoned", value: new Date(at).toISOString() },
+      endsAt: { kind: "zoned", value: new Date(at + 120 * 60_000).toISOString() },
+      metadata: { flightNumber: "6E2341", departureAirport: "DEL", arrivalAirport: "BOM" },
+    })];
+  },
 
   async mediaAction(action: MediaAction) {
     if (action.action === "toggle") track = { ...track, playing: !track.playing };

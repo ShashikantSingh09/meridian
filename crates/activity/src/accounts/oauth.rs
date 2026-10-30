@@ -263,6 +263,27 @@ fn token_client() -> Result<Client, Error> {
         .map_err(Error::from_reqwest)
 }
 
+/// For a service that gives back a key instead of tokens, as OpenRouter does: the code
+/// and its proof go to `endpoint`, and the key is what returns.
+pub async fn exchange_for_key(endpoint: &str, code: &AuthorizationCode) -> Result<String, Error> {
+    let body = serde_json::json!({ "code": code.code, "code_verifier": code.verifier, "code_challenge_method": "S256" });
+    let response = token_client()?.post(endpoint).json(&body).send().await.map_err(Error::from_reqwest)?;
+    let status = response.status().as_u16();
+    let body = read_capped(response).await?;
+    if !(200..300).contains(&status) {
+        return Err(classify(status, None, &body));
+    }
+    parse_key(&body)
+}
+
+fn parse_key(body: &str) -> Result<String, Error> {
+    #[derive(Deserialize)]
+    struct Reply {
+        key: String,
+    }
+    serde_json::from_str::<Reply>(body).map(|reply| reply.key).map_err(|_| Error::Malformed("key response"))
+}
+
 pub async fn exchange_code(config: &OAuthConfig, code: &AuthorizationCode) -> Result<Tokens, Error> {
     let http = token_client()?;
     let mut form = vec![
@@ -464,6 +485,13 @@ mod tests {
         assert_eq!(google.expires_at, Some(now + TimeDelta::hours(1)));
         let rotated = parse_tokens(r#"{"access_token":"new","refresh_token":"next"}"#, Some("old"), now).unwrap();
         assert_eq!(rotated.refresh_token.as_deref(), Some("next"));
+    }
+
+    #[test]
+    fn a_key_reply_gives_the_key_and_a_bad_one_never_echoes() {
+        assert_eq!(parse_key(r#"{"key":"sk-or-1","user_id":"u"}"#).unwrap(), "sk-or-1");
+        let error = parse_key(r#"{"key":12345,"note":"sekrit"}"#).unwrap_err();
+        assert!(!error.to_string().contains("sekrit"));
     }
 
     #[test]

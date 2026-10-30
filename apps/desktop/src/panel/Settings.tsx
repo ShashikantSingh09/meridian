@@ -1,6 +1,7 @@
 import { spring } from "@meridian/design-system/motion";
 import { motion } from "motion/react";
 import { useState } from "react";
+import { Face, FACES } from "../island/faces";
 import { bridge } from "../lib/bridge";
 import { clearHistory, PREVIEWS, refreshAuth, setSettingsSection, setWatching, showPreview, updateSettings, useApp, type SettingsSection } from "../lib/store";
 import type { AgentInfo, Settings } from "../lib/types";
@@ -65,6 +66,23 @@ function General() {
   );
 }
 
+function FacePicker() {
+  const chosen = useApp((s) => s.settings.face);
+  return (
+    <div className="stack">
+      <h2>Face</h2>
+      <div className="pick-grid">
+        {FACES.map((f) => (
+          <button key={f.id} className="pick" aria-pressed={f.id === chosen} title={f.note} onClick={() => void updateSettings({ face: f.id })}>
+            <span className="pick-stage"><Face id={f.id} mood="rest" scale={0.8} /></span>
+            <span className="pick-name">{f.name}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function IslandSection() {
   const monitor = useApp((s) => s.settings.islandMonitor);
   const monitors = useApp((s) => s.monitors);
@@ -72,6 +90,7 @@ function IslandSection() {
   return (
     <section className="stack-lg">
       <h1>Island</h1>
+      <FacePicker />
       <div className="stack">
         <Choice name="islandAlign" label="Position" options={[
           { value: "left", label: "Left" },

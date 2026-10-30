@@ -266,3 +266,45 @@ and nothing needs that yet. History is plain text on disk, like Claude Code's ow
 `tauri-plugin-updater` verifies an Ed25519 signature. The public key and address come from `MERIDIAN_UPDATE_PUBKEY` and
 `MERIDIAN_UPDATE_URL` at build time. A build without them says it does not update itself, rather than pretending to check.
 Nothing installs on idle, because a restart ends running agents. See `docs/development/RELEASING.md`.
+
+## D34. A face on the island, chosen by the user
+
+The line of light is replaced as the lead by a face, after the owner reviewed six designs and picked Soft eyes. It blinks at
+random, looks at the pointer, falls asleep after ten minutes, and takes a shape and colour for each mood. Faces live in one
+registry, `island/faces.tsx`. Adding one in an update means drawing it there, and it appears in Settings, Island. A face id
+this version does not know falls back to the default, so a downgrade cannot leave the island blank.
+
+Rest stays cheap: blinks and looks are short, event-driven repaints, not a loop. The line remains only for the listening view,
+where it draws the real microphone level.
+
+The mark shown while Claude Code works is our own spark, drawn in `island/marks.tsx`, not Anthropic's logo. D26 still stands:
+a public release showing the real logo would need Anthropic's permission. The owner asked for an animated Claude icon, and a
+spinning spark in the same colour gives that without using a mark that is not ours.
+
+## D35. Live activities come from what the source stated
+
+Flights, parcels, meetings and tickets are followed on the island, using Apple's Live Activity pattern: a small view with one
+fact on each side, and an expanded view on hover. `island/live.ts` is pure, so each stage is tested.
+
+Times come from email and calendars. There is no flight data feed, so a delay after the booking email is not seen, and an
+in-flight countdown is an estimate from the schedule. The interface says so. Live delays and gates would need a paid service.
+Food and cab apps publish no live position to a desktop, so those are not faked: a parcel shows only what its emails say, and
+appears only on the day it arrives, because Apple's limit of about eight hours is a good rule for what deserves the island.
+Bills stay as reminders rather than sitting on the island all day.
+
+## D36. Nobody using the app types a key
+
+Providers connect with one click and a login on the service's own page. Services that accept only registered apps are
+registered once by the publisher, and their IDs go in at build time. Until then their rows say they are not available yet,
+rather than asking a customer for a client ID. API keys remain, folded away, only for model providers with no browser sign-in.
+AI sign-in is a chooser: Claude and ChatGPT through their own CLI's browser login, OpenRouter through its PKCE flow, which
+needs no registration, and local models.
+
+## D37. Music is small until it is clicked
+
+Closed, it is 196 by 36: artwork and bars, as on a Mac. A click opens 372 by 150 with the album and controls, and it closes when
+the pointer leaves. Those sizes sit inside Apple's Live Activity range of 84 to 160 tall and about 371 to 408 wide.
+
+## D38. Every page sets its own size
+
+The panel morphs between pages, so moving around is itself motion, and a small page never fills the screen for no reason.
