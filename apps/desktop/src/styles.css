@@ -28,8 +28,8 @@ p {
 }
 
 h1 {
-  font: 600 var(--text-xl) / 1.2 var(--font-display);
-  letter-spacing: -0.012em;
+  font: 600 var(--text-xl) / 1.2 var(--font-ui);
+  letter-spacing: -0.016em;
 }
 
 h2 {
@@ -56,16 +56,25 @@ textarea {
 
 /* ── Island shape ────────────────────────────────────────────────────── */
 
+@property --ear {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 10px;
+}
+
+/* Flat against the top of the screen, round at the bottom, and flowing out of the
+   edge through two small inward curves: the shape of a hardware notch. */
 .island {
+  --ear: 10px;
   position: absolute;
+  top: 0;
   left: 50%;
   translate: -50% 0;
-  overflow: hidden;
-  background: var(--glass-tint);
-  box-shadow:
-    inset 0 0 0 1px var(--glass-rim),
-    inset 0 1px 0 var(--glass-highlight),
-    var(--glass-shadow);
+  transition: --ear 0.2s ease;
+}
+
+.island[data-small="true"] {
+  --ear: 3px;
 }
 
 .island[data-align="left"] {
@@ -83,30 +92,44 @@ textarea {
   cursor: pointer;
 }
 
-/* Ambient light from the state colour, as a plain gradient. Filters here would
-   be re-rastered on every frame of a morph. */
-.island::after {
-  content: "";
-  position: absolute;
-  inset: auto 12% -46px;
-  height: 64px;
-  border-radius: 50%;
-  background: radial-gradient(closest-side, color-mix(in srgb, var(--glow) 34%, transparent), transparent);
-  opacity: 0.55;
-  pointer-events: none;
-  transition: opacity 0.4s ease;
-}
-
-.island[data-view="idle"]::after,
-.island[data-view="expanded"]::after {
-  opacity: 0.16;
-}
-
-.sheen {
+.island-shape {
   position: absolute;
   inset: 0;
-  background: var(--glass-sheen);
+  overflow: hidden;
+  background: var(--island);
+  border: 1px solid var(--island-edge);
+  border-top: 0;
+  box-shadow: var(--island-shadow);
+  transition: border-color 0.3s ease;
+}
+
+/* The edge carries the state colour, except at rest. */
+.island:not([data-view="idle"], [data-view="expanded"]) .island-shape {
+  border-color: color-mix(in srgb, var(--glow) 42%, transparent);
+}
+
+.ear {
+  position: absolute;
+  top: 0;
+  width: var(--ear);
+  height: var(--ear);
   pointer-events: none;
+  background: radial-gradient(
+    circle at var(--ear-x) 100%,
+    transparent calc(var(--ear) - 1px),
+    var(--island-edge) calc(var(--ear) - 0.5px),
+    var(--island) calc(var(--ear) + 0.5px)
+  );
+}
+
+.ear-left {
+  --ear-x: 0%;
+  right: 100%;
+}
+
+.ear-right {
+  --ear-x: 100%;
+  left: 100%;
 }
 
 .island-content {
@@ -114,7 +137,6 @@ textarea {
   top: 0;
   left: 50%;
   translate: -50% 0;
-  z-index: 1;
 }
 
 .pill-center {
@@ -634,8 +656,10 @@ select {
   cursor: pointer;
 }
 
+/* The popup is drawn by the system in the dark colour scheme. */
 select option {
-  color: #111;
+  background: #1c1c1e;
+  color: var(--ink-1);
 }
 
 input::placeholder,
@@ -648,43 +672,59 @@ textarea::placeholder {
 .panel {
   height: 100%;
   display: flex;
-}
-
-.rail {
-  width: 60px;
-  flex: none;
-  display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: var(--space-1);
-  padding: var(--space-4) 0 var(--space-3);
-  border-right: 1px solid var(--hairline);
 }
 
-.rail-item {
+.topnav {
+  flex: none;
   position: relative;
-  width: 38px;
-  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  height: 52px;
+  padding: 0 var(--space-3);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.topnav-item {
+  position: relative;
+  width: 44px;
+  height: 34px;
   display: grid;
   place-items: center;
-  border-radius: var(--radius-md);
+  border-radius: 11px;
   color: var(--ink-3);
 }
 
-.rail-item:hover {
-  background: var(--well);
+.topnav-item:hover {
   color: var(--ink-1);
 }
 
-.rail-item[aria-current="page"] {
-  background: var(--well-active);
+.topnav-item[aria-current="page"] {
   color: var(--ink-1);
+}
+
+.topnav-item > svg {
+  position: relative;
+}
+
+.topnav-pill {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--well-active);
+}
+
+.topnav-close {
+  position: absolute;
+  right: var(--space-3);
 }
 
 .badge {
   position: absolute;
-  top: 2px;
-  right: 2px;
+  top: 0;
+  right: 3px;
   min-width: 15px;
   height: 15px;
   padding: 0 4px;
@@ -698,7 +738,7 @@ textarea::placeholder {
 
 .page {
   flex: 1;
-  min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
 }
@@ -755,7 +795,7 @@ textarea::placeholder {
 }
 
 .tile-value {
-  font: 600 26px / 1 var(--font-display);
+  font: 600 26px / 1 var(--font-ui);
   letter-spacing: -0.02em;
 }
 
@@ -1025,6 +1065,248 @@ textarea::placeholder {
 
 /* ── Settings ────────────────────────────────────────────────────────── */
 
+.settings {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.settings-nav {
+  width: 148px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-3) var(--space-2);
+  border-right: 1px solid var(--hairline);
+}
+
+.settings-tab {
+  position: relative;
+  height: 30px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  text-align: left;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--ink-2);
+}
+
+.settings-tab:hover,
+.settings-tab[aria-current="page"] {
+  color: var(--ink-1);
+}
+
+.settings-tab-label {
+  position: relative;
+}
+
+.settings-body {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding: var(--space-5);
+}
+
+.settings-body.flush {
+  padding: 0;
+  overflow: hidden;
+  display: flex;
+}
+
+.settings-body > .page-scroll {
+  padding: 0;
+  overflow: visible;
+}
+
+/* ── Providers column ────────────────────────────────────────────────── */
+
+.links {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+}
+
+.links-column {
+  width: 196px;
+  flex: none;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-2);
+  border-right: 1px solid var(--hairline);
+}
+
+.links-group {
+  padding: 0 var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--ink-3);
+}
+
+.link-row {
+  position: relative;
+  width: 100%;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-2) 0 5px;
+  border-radius: var(--radius-sm);
+  text-align: left;
+}
+
+.link-row:hover:not([aria-current]) {
+  background: var(--well);
+}
+
+.link-label {
+  position: relative;
+  flex: 1;
+  font-weight: 500;
+  font-size: var(--text-sm);
+}
+
+.link-dot {
+  position: relative;
+  width: 6px;
+  height: 6px;
+}
+
+.monogram {
+  position: relative;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 28%;
+  font-weight: 600;
+  color: #fff;
+}
+
+.link-pane {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+}
+
+.link-detail {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-4) 0;
+}
+
+.link-name {
+  font-size: var(--text-lg);
+}
+
+.link-feed {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* Runs along the header while a fetch is out. A transform, so it costs no repaint
+   of the text around it. */
+.beam {
+  position: relative;
+  flex: none;
+  height: 1px;
+  overflow: hidden;
+  background: var(--hairline);
+}
+
+.beam::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  background: linear-gradient(90deg, transparent, var(--state-working), transparent);
+  opacity: 0;
+  translate: -100% 0;
+  transition: opacity 0.2s ease;
+}
+
+.beam[data-on="true"]::after {
+  opacity: 1;
+  animation: beam 1s ease-in-out infinite;
+}
+
+@keyframes beam {
+  to { translate: 250% 0; }
+}
+
+.fetched {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  margin-right: calc(var(--space-4) * -1);
+  padding: 0 var(--space-4) var(--space-4) 0;
+}
+
+.fetched-row {
+  width: 100%;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  text-align: left;
+  color: var(--ink-3);
+}
+
+.fetched-row:disabled {
+  opacity: 1;
+}
+
+.fetched-row:hover:not(:disabled) {
+  background: var(--well);
+}
+
+.fetched-row .label {
+  color: var(--ink-1);
+  font-weight: 500;
+}
+
+.fetched-text {
+  max-height: 260px;
+  margin: 0;
+}
+
+.welcome {
+  max-width: 480px;
+  margin: 0 auto;
+}
+
+.welcome-step {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--well);
+}
+
+.chip.tool-chip {
+  height: 22px;
+  padding: 0 var(--space-2);
+  font: 400 var(--text-xs) / 1 var(--font-mono);
+  text-transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .beam[data-on="true"]::after {
+    animation: none;
+    translate: 0 0;
+    width: 100%;
+  }
+}
+
 .setting {
   display: flex;
   align-items: center;
@@ -1049,7 +1331,8 @@ textarea::placeholder {
   background: var(--well);
 }
 
-.page-scroll > .segmented {
+.page-scroll > .segmented,
+.page-scroll > .ghost {
   margin-left: 0;
   align-self: flex-start;
 }

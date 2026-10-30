@@ -1,6 +1,6 @@
 # Security and privacy model
 
-Scope is M2. Anything that reads more of the desktop must extend this before it is built.
+Scope is M3. Anything that reads more of the desktop must extend this before it is built.
 
 ## What the app touches
 
@@ -15,6 +15,11 @@ Scope is M2. Anything that reads more of the desktop must extend this before it 
 | Clipboard, keystrokes | Not read. |
 | Mail and calendars | Read-only OAuth with minimum scopes. Read on this PC. Extracted events stay in a local SQLite file. Nothing here is sent to an AI provider. |
 | OAuth tokens | Windows Credential Manager, never in SQLite. Disconnect removes the tokens and the events owned by that account. A booking seen in two accounts is one row, see `KNOWN_ISSUES.md`. |
+| Providers over MCP | Read-only tools only, chosen by annotation and name, with write verbs refused whatever the server claims. What a service returns stays in memory, is drawn as text, and is never sent to a model. Tokens stay in Credential Manager. |
+| Chat and session history | Plain text in the webview's storage on this PC, like Claude Code's own transcripts. Images are never kept. Privacy can clear it. |
+| Hook events from Claude Code | Followed in memory. Only a short label and the first line of a prompt leave the watcher. Sessions followed this way are never saved to history. |
+| Claude Code settings file | Changed only when the user turns on following. One backup is kept, invalid JSON is refused, and turning it off removes exactly our entries. |
+| Crash log | Local. Credentials and URL queries are removed before writing. |
 | Agent sign-in | Handled entirely by the CLI. The app reads only its status, and drops the account's email and organization. |
 | Telemetry | None. |
 
@@ -41,6 +46,18 @@ hooks load without a trust prompt in print mode, so the new-session form warns a
 **Screen text is untrusted.** Text read from the screen goes to an engine as data, but a model can be influenced by it. A
 malicious web page on screen could carry instructions. Approvals stand between that and any action.
 
+**The watcher** listens on 127.0.0.1 only, and accepts only `POST /meridian-hook` with the right token, compared in constant
+time. A request with an `Origin` header is refused, so a web page cannot reach it. The token sits in the user's Claude Code
+settings file in clear, which any process of the same user can read. Same-user processes are outside this model. A closed app
+never blocks Claude Code, because a failed http hook is not an error to it.
+
+**MCP servers are untrusted.** A server chooses its metadata, tool names, annotations and results. Every URL taken from one
+must be https and must not be a private or loopback address, so a server cannot point the app at a local service.
+Authorization needs PKCE S256, a matching issuer, and a `resource` that describes the same server, or sign-in is refused. The
+last one stops a server borrowing another service's sign-in to receive its token. A hostile name can trick the read-only rule only
+into calling a read-sounding tool, which a server could equally do anything with. A token is only as narrow as the vendor's
+scopes. The DNS-rebinding case is not covered: a public name resolving to a private address passes the check.
+
 **Mail is untrusted.** Senders are not authenticated, so a forged message can create an event and a link. Links open only on
 a click, only for http and https, and each button shows its real host. Extraction uses no model, so mail cannot instruct
 anything.
@@ -53,6 +70,6 @@ agent's own sign-in through its supported CLI.
 ## Before any public release
 
 - Review the `open_project` and session commands against a hostile page.
-- Sign binaries.
+- Sign binaries. Until then SmartScreen warns customers, and the installer cannot be told from a tampered one.
 - Decide on an audit log for approvals.
 - Never ship with `--remote-debugging-port`. It is used only by the live tests, through an environment variable.

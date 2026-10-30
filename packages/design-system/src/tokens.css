@@ -1,17 +1,18 @@
-/* Meridian design tokens. Every colour, surface and radius the app uses lives here. */
+/* Meridian design tokens. Every colour, surface and radius the app uses lives here.
+   The island is opaque black in every state, like the hardware notch it extends, so
+   there is one palette and no light variant. */
 
 :root {
   color-scheme: dark;
 
-  --font-ui: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
-  --font-display: "Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif;
+  --font-ui: "Inter Variable", "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
   --font-mono: "Cascadia Code", "Cascadia Mono", Consolas, monospace;
 
   --text-xs: 11px;
   --text-sm: 12px;
   --text-md: 13px;
   --text-lg: 15px;
-  --text-xl: 22px;
+  --text-xl: 21px;
 
   --space-1: 4px;
   --space-2: 8px;
@@ -23,105 +24,33 @@
   --radius-sm: 8px;
   --radius-md: 12px;
   --radius-lg: 16px;
-  --radius-xl: 26px;
   --radius-full: 999px;
 
   /* Inks */
-  --ink-1: rgba(244, 246, 250, 0.96);
-  --ink-2: rgba(226, 231, 240, 0.68);
-  --ink-3: rgba(214, 221, 232, 0.44);
-  --ink-inverse: #0b0d12;
+  --ink-1: #f5f5f7;
+  --ink-2: rgba(235, 235, 245, 0.62);
+  --ink-3: rgba(235, 235, 245, 0.38);
+  --ink-inverse: #000;
 
-  /* Smoked glass. The tint sits on the native backdrop; see html[data-glass].
-     Dense enough that white apps behind it stay well below the text in
-     luminance: at 0.78 a pure white backdrop lands near #464850. */
-  --glass-tint: rgba(16, 18, 24, 0.78);
-  --glass-rim: rgba(255, 255, 255, 0.09);
-  --glass-highlight: rgba(255, 255, 255, 0.16);
-  --glass-sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0) 42%);
-  --glass-shadow: 0 10px 30px rgba(3, 5, 10, 0.34), 0 2px 8px rgba(3, 5, 10, 0.28);
+  /* The island */
+  --island: #000;
+  --island-edge: rgba(255, 255, 255, 0.11);
+  --island-shadow: 0 6px 22px rgba(0, 0, 0, 0.34);
 
-  --well: rgba(255, 255, 255, 0.055);
-  --well-hover: rgba(255, 255, 255, 0.095);
-  --well-active: rgba(255, 255, 255, 0.13);
-  --hairline: rgba(255, 255, 255, 0.075);
-  --focus-ring: rgba(150, 196, 255, 0.85);
+  --well: rgba(255, 255, 255, 0.07);
+  --well-hover: rgba(255, 255, 255, 0.11);
+  --well-active: rgba(255, 255, 255, 0.16);
+  --hairline: rgba(255, 255, 255, 0.09);
+  --focus-ring: #4aa3ff;
 
   /* State hues: the colour of the line of light. */
-  --state-idle: #c6d4e8;
-  --state-listening: #62e6da;
-  --state-thinking: #9ea9ff;
-  --state-working: #5eaeff;
-  --state-waiting: #ffc56e;
-  --state-success: #63e9ae;
-  --state-notice: #f3ddb0;
-  --state-context: #c7b4ff;
-  --state-error: #ff7470;
-}
-
-html[data-glass="fallback"] {
-  --glass-tint: rgba(15, 17, 23, 0.93);
-}
-
-@media (prefers-color-scheme: light) {
-  html[data-theme="system"] {
-    color-scheme: light;
-    --ink-1: rgba(14, 18, 27, 0.94);
-    --ink-2: rgba(30, 37, 51, 0.68);
-    --ink-3: rgba(44, 53, 70, 0.46);
-    --ink-inverse: #f7f8fb;
-    --glass-tint: rgba(246, 248, 252, 0.76);
-    --glass-rim: rgba(20, 28, 44, 0.09);
-    --glass-highlight: rgba(255, 255, 255, 0.7);
-    --glass-sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.34), rgba(255, 255, 255, 0) 42%);
-    --glass-shadow: 0 10px 30px rgba(20, 28, 44, 0.2), 0 2px 8px rgba(20, 28, 44, 0.12);
-    --well: rgba(20, 28, 44, 0.05);
-    --well-hover: rgba(20, 28, 44, 0.085);
-    --well-active: rgba(20, 28, 44, 0.12);
-    --hairline: rgba(20, 28, 44, 0.09);
-    --focus-ring: rgba(40, 104, 214, 0.8);
-    --state-idle: #55657f;
-    --state-listening: #0d9c91;
-    --state-thinking: #5563e0;
-    --state-working: #1f73d6;
-    --state-waiting: #b87410;
-    --state-success: #11935b;
-    --state-notice: #94702a;
-    --state-context: #7656d6;
-    --state-error: #d43c3a;
-  }
-  html[data-theme="system"][data-glass="fallback"] {
-    --glass-tint: rgba(246, 248, 252, 0.94);
-  }
-}
-
-html[data-theme="light"] {
-  color-scheme: light;
-  --ink-1: rgba(14, 18, 27, 0.94);
-  --ink-2: rgba(30, 37, 51, 0.68);
-  --ink-3: rgba(44, 53, 70, 0.46);
-  --ink-inverse: #f7f8fb;
-  --glass-tint: rgba(246, 248, 252, 0.76);
-  --glass-rim: rgba(20, 28, 44, 0.09);
-  --glass-highlight: rgba(255, 255, 255, 0.7);
-  --glass-sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.34), rgba(255, 255, 255, 0) 42%);
-  --glass-shadow: 0 10px 30px rgba(20, 28, 44, 0.2), 0 2px 8px rgba(20, 28, 44, 0.12);
-  --well: rgba(20, 28, 44, 0.05);
-  --well-hover: rgba(20, 28, 44, 0.085);
-  --well-active: rgba(20, 28, 44, 0.12);
-  --hairline: rgba(20, 28, 44, 0.09);
-  --focus-ring: rgba(40, 104, 214, 0.8);
-  --state-idle: #55657f;
-  --state-listening: #0d9c91;
-  --state-thinking: #5563e0;
-  --state-working: #1f73d6;
-  --state-waiting: #b87410;
-  --state-success: #11935b;
-  --state-notice: #94702a;
-  --state-context: #7656d6;
-  --state-error: #d43c3a;
-}
-
-html[data-theme="light"][data-glass="fallback"] {
-  --glass-tint: rgba(246, 248, 252, 0.94);
+  --state-idle: #d1d5db;
+  --state-listening: #64d2ff;
+  --state-thinking: #b8a6ff;
+  --state-working: #4aa3ff;
+  --state-waiting: #ff9f0a;
+  --state-success: #30d158;
+  --state-notice: #ffd60a;
+  --state-context: #bf9bff;
+  --state-error: #ff453a;
 }

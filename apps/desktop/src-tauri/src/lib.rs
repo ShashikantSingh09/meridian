@@ -11,9 +11,11 @@ use tauri::{App, AppHandle, Emitter, Manager, WindowEvent};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
 mod commands;
-mod glass;
+mod following;
 mod island;
 mod life;
+mod links;
+mod log;
 mod secrets;
 mod settings;
 mod watch;
@@ -122,6 +124,12 @@ fn register_shortcuts(app: &App) {
 
 fn setup(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     let handle = app.handle().clone();
+    log::on_panic(app.path().app_log_dir()?);
+    if let Some(key) = commands::UPDATE_KEY {
+        handle.plugin(tauri_plugin_updater::Builder::new().pubkey(key).build())?;
+    }
+    app.manage(links::state(app)?);
+    app.manage(following::state(app)?);
     let path = settings::path(&handle).ok_or("no config directory")?;
     let settings = settings::load(&path);
     let placement = (settings.island_monitor.clone(), settings.island_align.clone());
@@ -150,13 +158,11 @@ fn setup(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     let win = app.get_webview_window(island::LABEL).ok_or("island window missing")?;
     island::restrict_permissions(&win);
     island::place(&handle, &win, &gate, &placement.0, &placement.1);
-    if let Some(hwnd) = island::hwnd(&win) {
-        glass::attach(hwnd);
-    }
     island::prepare(&win, &gate);
     island::show_quietly(&win);
     island::spawn_poll(handle.clone(), gate);
     watch::spawn(handle.clone());
+    following::resume(&handle);
     life::spawn(handle);
 
     build_tray(app)?;
@@ -179,7 +185,6 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::island_set_rect,
             commands::island_set_interactive,
-            commands::glass_active,
             commands::settings_get,
             commands::settings_save,
             commands::monitors_list,
@@ -214,11 +219,22 @@ pub fn run() {
             life::account_disconnect,
             life::account_sync,
             life::open_url,
+            life::built_in_clients,
             commands::screen_capture,
             commands::screen_crop,
             commands::screen_discard,
             watch::screen_ignore,
             commands::open_project,
+            commands::app_version,
+            commands::update_check,
+            commands::update_install,
+            commands::open_logs,
+            following::watch_status,
+            following::watch_set,
+            links::integrations_list,
+            links::integration_connect,
+            links::integration_disconnect,
+            links::integration_fetch,
         ])
         .setup(setup)
         .run(tauri::generate_context!())

@@ -108,6 +108,7 @@ export interface Approval {
 }
 
 export type AgentEvent =
+  | { type: "watched"; agent: string; cwd: string; title: string | null }
   | { type: "started"; nativeId: string | null; model: string | null }
   | { type: "status"; status: SessionStatus; message?: string | null }
   | { type: "text"; text: string }
@@ -122,7 +123,6 @@ export interface AgentEnvelope {
 }
 
 export interface Settings {
-  theme: "system" | "dark" | "light";
   motion: "system" | "full" | "reduced";
   ambient: boolean;
   autostart: boolean;
@@ -146,6 +146,39 @@ export interface Settings {
   googleClientId: string;
   microsoftClientId: string;
   showNextMeeting: boolean;
+  sounds: boolean;
+  onboarded: boolean;
+}
+
+/** Where a provider's data comes from and how it signs in. "account" is the direct
+ *  Google or Microsoft connector; the rest are MCP servers. */
+export type IntegrationAccess = "open" | "registeredApp" | "tokenOrApp" | "account";
+
+export interface Integration {
+  id: string;
+  name: string;
+  group: string;
+  blurb: string;
+  access: IntegrationAccess;
+  connected: boolean;
+  account: string | null;
+}
+
+export interface FetchedItem {
+  key: string;
+  title: string;
+  detail: string | null;
+  url: string | null;
+  when: string | null;
+}
+
+export interface Digest {
+  server: string | null;
+  tool: string | null;
+  /** Other read-only tools the server offers. */
+  tools: string[];
+  items: FetchedItem[];
+  text: string | null;
 }
 
 export interface Track {
@@ -264,7 +297,6 @@ export interface AuthStatus {
 }
 
 export const defaultSettings: Settings = {
-  theme: "system",
   motion: "system",
   ambient: true,
   autostart: false,
@@ -288,4 +320,6 @@ export const defaultSettings: Settings = {
   googleClientId: "",
   microsoftClientId: "",
   showNextMeeting: true,
+  sounds: true,
+  onboarded: false,
 };

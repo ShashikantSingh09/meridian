@@ -1,8 +1,9 @@
-// The island: one shape that morphs. Width, height and radius are spring-driven
-// motion values, so an interrupted transition keeps its velocity instead of
-// restarting, and nothing inside re-renders per frame.
+// The island: one shape that morphs, hanging from the top edge of the screen like
+// a notch. Width, height and radius are spring-driven motion values, so an
+// interrupted transition keeps its velocity instead of restarting, and nothing
+// inside re-renders per frame.
 
-import { contentEnter, contentEnterReduced, fade, instant, scaled, spring } from "@meridian/design-system/motion";
+import { contentEnter, contentEnterReduced, instant, scaled, spring } from "@meridian/design-system/motion";
 import { AnimatePresence, animate, motion, useMotionValue, useReducedMotion } from "motion/react";
 import { useEffect, useMemo, useRef } from "react";
 import { bridge } from "../lib/bridge";
@@ -22,7 +23,8 @@ import {
   WorkingView,
 } from "./views";
 
-const TOP_GAP = 10;
+/** What the shape grows out of when the app starts: a dot at the screen's edge. */
+const BIRTH = { w: 18, h: 4 };
 
 function useReduced() {
   const system = useReducedMotion() ?? false;
@@ -90,8 +92,8 @@ export function Island() {
     actions: (snapshot.notices[0]?.actions?.length ?? 0) > 0 || snapshot.notices[0]?.eventId !== undefined,
   });
 
-  const width = useMotionValue(target.w);
-  const height = useMotionValue(target.h);
+  const width = useMotionValue(reduced ? target.w : BIRTH.w);
+  const height = useMotionValue(reduced ? target.h : BIRTH.h);
   const radius = useMotionValue(target.r);
   const el = useRef<HTMLDivElement>(null);
 
@@ -100,22 +102,22 @@ export function Island() {
     const push = () => {
       frame = 0;
       const box = el.current?.getBoundingClientRect();
-      if (box) void bridge.setIslandRect({ x: box.x, y: box.y, w: box.width, h: box.height, r: radius.get() });
+      if (box) void bridge.setIslandRect({ x: box.x, y: box.y, w: box.width, h: box.height });
     };
     // One message per frame however many values moved.
     const schedule = () => {
       frame ||= requestAnimationFrame(push);
     };
-    const offs = [width.on("change", schedule), height.on("change", schedule), radius.on("change", schedule)];
+    const offs = [width.on("change", schedule), height.on("change", schedule)];
     schedule();
     return () => {
       offs.forEach((off) => off());
       cancelAnimationFrame(frame);
     };
-  }, [width, height, radius]);
+  }, [width, height]);
 
   useEffect(() => {
-    const grows = target.w >= width.get() && target.h >= height.get();
+    const grows = target.w * target.h > width.get() * height.get();
     const transition = reduced ? instant : scaled(grows ? spring.grow : hovered ? spring.hover : spring.shrink, speed);
     const controls = [
       animate(width, target.w, transition),
@@ -127,7 +129,6 @@ export function Island() {
 
   const enter = reduced ? contentEnterReduced : contentEnter;
   const expanded = view === "expanded";
-  const glow = stateToken(view, snapshot);
 
   return (
     <motion.div
@@ -135,23 +136,26 @@ export function Island() {
       className="island"
       data-view={view}
       data-align={align}
-      style={{ width, height, borderRadius: radius, top: TOP_GAP, "--glow": `var(${glow})` } as never}
+      data-small={target.h < 12}
+      style={{ width, height, "--glow": `var(${stateToken(view, snapshot)})` } as never}
       onClick={view === "idle" ? togglePanel : undefined}
     >
-      <span className="sheen" aria-hidden="true" />
-      <AnimatePresence mode="popLayout" initial={false}>
-        <motion.div
-          key={expanded ? "panel" : view + (hovered && (view === "idle" || view === "working" || view === "media") ? "-hover" : "")}
-          className="island-content"
-          style={{ width: target.w, height: target.h }}
-          initial={enter.initial}
-          animate={enter.animate}
-          exit={enter.exit}
-          transition={fade.in}
-        >
-          {expanded ? <Panel /> : <CompactContent view={view} reduced={reduced} hovered={hovered} sliver={sliver} />}
-        </motion.div>
-      </AnimatePresence>
+      <span className="ear ear-left" aria-hidden="true" />
+      <span className="ear ear-right" aria-hidden="true" />
+      <motion.div className="island-shape" style={{ borderBottomLeftRadius: radius, borderBottomRightRadius: radius }}>
+        <AnimatePresence initial={false}>
+          <motion.div
+            key={expanded ? "panel" : view + (hovered && (view === "idle" || view === "working" || view === "media") ? "-hover" : "")}
+            className="island-content"
+            style={{ width: target.w, height: target.h }}
+            initial={enter.initial}
+            animate={enter.animate}
+            exit={enter.exit}
+          >
+            {expanded ? <Panel /> : <CompactContent view={view} reduced={reduced} hovered={hovered} sliver={sliver} />}
+          </motion.div>
+        </AnimatePresence>
+      </motion.div>
     </motion.div>
   );
 }

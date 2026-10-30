@@ -1,6 +1,6 @@
 # Known issues and limitations
 
-Honest state of M2. "Not verified" means the code exists and has tests where noted, but the behaviour has not been seen
+Honest state of M3. "Not verified" means the code exists and has tests where noted, but the behaviour has not been seen
 working against the real service.
 
 ## Acceptance criteria
@@ -14,7 +14,7 @@ The 20 criteria from the enhancement brief, as they stand.
 | 3 | Fluid expand and collapse | Done | 180 fps, none over 33 ms |
 | 4 | Claude Code selectable in chat | Done | Live |
 | 5 | No separate Anthropic key | Done | Live, on a Max plan. See the licensing note |
-| 6 | Sessions created, continued, managed | Done, within a run | Live. Lost on restart |
+| 6 | Sessions created, continued, managed | Done | Live. Chat and finished sessions now survive a restart, read-only |
 | 7 | Analysis of the current screen | Done | Live: capture, OCR, and an image read by Claude Code |
 | 8 | Identifies visible errors | Done | Live on a real terminal and a test window |
 | 9 | Screen awareness pausable | Done | Settings, tray, tests |
@@ -28,7 +28,23 @@ The 20 criteria from the enhancement brief, as they stand.
 | 17 | Prioritized and deduplicated | Done | Unit tests on the engine and store, live reschedule |
 | 18 | Permissions and disconnect | Done in code, with one edge case | Unit tests. Not with a real account. See below |
 | 19 | No data sent without authorization | Done by design | One share path; no network code in `screen` |
-| 20 | Existing features still work | Done | 296 Rust, 20 unit and 31 UI tests, and every live check pass on the final build |
+| 20 | Existing features still work | Done | 498 Rust, 20 unit and 47 UI tests pass. Live claude, deny, cancel, engine, resume, activity and chat pass on the M3 code. Screen, vision and media were not rerun: this code did not change, and they would capture the desktop in use |
+
+## Milestone 3 brief
+
+| Request | State | Evidence |
+|---|---|---|
+| Reverse engineer TwoCode and compare | Done | `docs/research/TWOCODE_TEARDOWN.md`. Static only, the app was never run |
+| macOS-style notch, not a pill | Done | Real app on this desktop, UI tests for shape and edge |
+| Providers column under Settings, MCP vendors, animated results | Done, against a local server | 144 tests, 56 of them over real sockets, plus UI tests. **No real vendor account was used** |
+| Gmail in that column | Built on the existing connector | Same state as criterion 12 |
+| Rendering problems | Fixed the ones found. See below | Screenshots of every state, no console errors |
+| Shippable to customers | Not yet. See Shipping | Installer built and tested: installs, runs, uninstalls cleanly, keeps settings |
+
+**Rendering problems found and fixed.** Native blur lagged the webview during a morph. Two lines of text overlapped while
+content changed, because exit and enter fades ran together. Text blurred on every change through a filter. The window's
+layered flag was toggled on every pointer crossing. Popup menus had dark text on a dark list. Hover reacted to every passing
+pointer. Tool names were capitalised. A button stretched across My day.
 
 ## Licensing: read before distributing
 
@@ -38,10 +54,32 @@ of their users. Using this yourself on your machine is the case this design serv
 different one, and needs Anthropic's approval or an API-key path first. See `docs/DECISIONS.md`, D19. This is an engineering
 reading, not legal advice.
 
+**Following sessions is a separate case.** It only receives hook events from a CLI the customer runs themselves, and makes
+no model request. That reading is also not legal advice, and it does not cover the Claude Code chat engine, which still
+needs a decision before a public release. Removing that engine from a customer build is one line in `selectEngine`.
+
+## Shipping to customers
+
+What stands between this build and a stranger installing it. Only the owner can do these.
+
+| Blocker | Why it matters |
+|---|---|
+| **Code-signing certificate** | Without one, SmartScreen warns on the installer, and customers cannot tell it from a tampered copy |
+| **Public update host and a signing key** | The GitHub repository is private. Steps are in `docs/development/RELEASING.md`. Until then a build says it does not update itself |
+| **Name and bundle ID** | Meridian is a working title with no clearance, and `dev.meridian.companion` is a placeholder. Changing the ID later orphans settings and stored tokens |
+| **Claude subscription decision** | See above |
+| **Google verification** | `gmail.readonly` is a restricted scope. A published app needs Google's verification and a security assessment, which takes weeks. Until then Gmail needs each user's own registration |
+| **Microsoft publisher verification** | Needed for a smooth consent screen outside your own tenant |
+| **Privacy policy and terms** | Required by Google and by most vendor marketplaces |
+| **Support and crash reports** | Crashes are logged locally. Nothing reaches you |
+
 ## Not verified end to end
 
 | Area | State | To close it |
 |---|---|---|
+| All MCP providers | Discovery was checked anonymously against each vendor on 2026-10-30. No account was connected, so sign-in, tool names and result shapes are unproven. Tool preferences are educated guesses, and the user can pick another tool | Connect one |
+| Terminal dialog while a request waits | Real Claude Code in print mode was followed and answered from the app. In an interactive terminal, the docs do not say if the dialog shows while the hook is held. At worst it is delayed up to 295 s | Run `claude` in a terminal with following on, and trigger a request |
+| Updates | The path is built. No update has been downloaded or installed | Follow `RELEASING.md` |
 | Gmail, Google Calendar, Outlook, Microsoft Calendar | No real account has been connected. OAuth and all four connectors are tested against canned responses, so real-world quirks may remain. | Follow `docs/development/CONNECTING_ACCOUNTS.md` |
 | Codex full turn | Handshake, thread start and failure path ran for real. A successful turn, streaming, approvals and usage did not, because the sign-in here has expired. | Run `codex login`, then `node tests/live/e2e.mjs codex` |
 | Cloud chat APIs | No live call was made to any cloud API. Adapters are tested against a real local socket. An OpenRouter key was added here, but it was not used, to avoid spending it. | Send a message |
@@ -67,13 +105,15 @@ reading, not legal advice.
 
 ## Not tested
 
+- The notch on a maximized app: it sits over the middle of a title bar or a browser's tab strip, and takes those clicks.
+- A taskbar moved to the top of the screen: the island then hangs from the taskbar's lower edge.
 - Multiple monitors. Selection and display-change handling are written, but only one display was available.
 - Display scaling other than 100%. The hit-test maths has unit tests at 150%.
 - Left and right placement on a real desktop.
 - Hide when idle on a real desktop, including how easy the sliver is to reach.
 - Sleep and resume.
-- Windows 10, where only the tinted fallback is expected to work.
-- Transparency effects turned off, and battery saver.
+- Windows 10.
+- Battery saver.
 - A fullscreen app in front. The hide logic is written, but it has not been exercised.
 - Time-to-first-token overhead, and CPU over a full five minutes.
 - Idle cost with contextual mode on, or with music playing. Measured idle only, with the mode off.
@@ -82,11 +122,15 @@ reading, not legal advice.
 
 - **Voice.** The listening state shows the real microphone level. There is no speech to text, text to speech, wake word or
   voice command.
-- **Sessions and chats do not survive a restart.** Activity events do, in SQLite. Quitting ends every running agent.
-- **Sessions started outside the app.** Agents in your own terminal do not appear.
+- **Restored sessions are read-only.** Chat and finished sessions survive a restart, but a session's process does not, so it
+  cannot be continued. Quitting ends every agent the app started. Agents in your own terminal carry on.
+- **Following Codex.** Claude Code only.
+- **A session stopped with Esc looks busy** until its next hook, or 30 minutes of silence, because Claude Code sends no event
+  for a user interrupt.
+- **A company policy of `allowedHttpHookUrls`** can block following.
+- **A renderer crash** has no automatic recovery. Quit from the tray and start again.
 - **Workflows, agent collaboration, output comparison.**
 - **Application profiles, project context, memory.**
-- **Installer, auto-update, code signing.** Only a binary has been built.
 - **LLM extraction.** Email extraction is structured data and rules only. It will miss what they miss, by design.
 - **Calendar writes.** Read-only. Creating or changing events is not implemented.
 - **UI Automation and foreground app profiles.** Awareness is window text by OCR, not app-specific.

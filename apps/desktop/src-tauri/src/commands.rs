@@ -4,6 +4,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use agent_adapters::watch::Watcher;
 use agent_adapters::{AgentInfo, AgentKind, AuthStatus, Sessions, StartRequest};
 use ai_core::{ChatEvent, ChatRequest, Capabilities, Endpoint, Kind, LocalServer, Message, ModelInfo, ProviderDef};
 use serde::Serialize;
@@ -13,9 +14,10 @@ use screen::{Frame, Signal, WindowInfo};
 use tauri::{AppHandle, Manager, State};
 use tokio_util::sync::CancellationToken;
 
+use crate::following::Following;
 use crate::island::{self, Gate, Rect};
 use crate::settings::{self, Settings};
-use crate::{glass, secrets};
+use crate::secrets;
 
 pub struct Core {
     pub settings: Mutex<Settings>,
@@ -31,14 +33,11 @@ fn stringify(err: impl std::fmt::Display) -> String {
     err.to_string()
 }
 
-// ── Island ──────────────────────────────────────────────────────────────────
+// â”€â”€ Island â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-/// Runs on the main thread, which owns the composition objects.
 #[tauri::command]
 pub fn island_set_rect(core: State<'_, Core>, rect: Rect) {
     *core.gate.rect.lock().unwrap() = rect;
-    let d = rect.dpr;
-    glass::place((rect.x * d) as f32, (rect.y * d) as f32, (rect.w * d) as f32, (rect.h * d) as f32, (rect.r * d) as f32);
 }
 
 #[tauri::command]
@@ -48,12 +47,59 @@ pub fn island_set_interactive(app: AppHandle, core: State<'_, Core>, on: bool) {
     }
 }
 
-#[tauri::command]
-pub fn glass_active() -> bool {
-    glass::active()
+// â”€â”€ About â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+/// Set when a release is built. A build without them has no update channel and
+/// says so, rather than pretending to check.
+pub const UPDATE_KEY: Option<&str> = option_env!("MERIDIAN_UPDATE_PUBKEY");
+const UPDATE_URL: Option<&str> = option_env!("MERIDIAN_UPDATE_URL");
+
+#[derive(Serialize)]
+pub struct UpdateStatus {
+    available: bool,
+    message: String,
 }
 
-// ── Settings ────────────────────────────────────────────────────────────────
+fn updater(app: &AppHandle) -> Result<Option<tauri_plugin_updater::Updater>, String> {
+    use tauri_plugin_updater::UpdaterExt;
+    let (Some(_), Some(url)) = (UPDATE_KEY, UPDATE_URL) else { return Ok(None) };
+    let url = url.parse().map_err(|_| "The update address is not valid.")?;
+    app.updater_builder().endpoints(vec![url]).map_err(|e| e.to_string())?.build().map(Some).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn app_version(app: AppHandle) -> String {
+    app.package_info().version.to_string()
+}
+
+#[tauri::command]
+pub async fn update_check(app: AppHandle) -> Result<UpdateStatus, String> {
+    let Some(updater) = updater(&app)? else {
+        return Ok(UpdateStatus { available: false, message: "This build does not update itself.".into() });
+    };
+    Ok(match updater.check().await.map_err(|e| e.to_string())? {
+        Some(update) => UpdateStatus { available: true, message: format!("Version {} is ready to install.", update.version) },
+        None => UpdateStatus { available: false, message: "Up to date.".into() },
+    })
+}
+
+/// Only ever from a click. Installing restarts the app, which would end a running agent.
+#[tauri::command]
+pub async fn update_install(app: AppHandle) -> Result<(), String> {
+    let update = updater(&app)?.ok_or("This build does not update itself.")?;
+    let update = update.check().await.map_err(|e| e.to_string())?.ok_or("Already up to date.")?;
+    update.download_and_install(|_, _| {}, || {}).await.map_err(|e| e.to_string())?;
+    app.restart()
+}
+
+#[tauri::command]
+pub fn open_logs(app: AppHandle) -> Result<(), String> {
+    let dir = app.path().app_log_dir().map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    std::process::Command::new("explorer.exe").arg(dir).spawn().map(|_| ()).map_err(|e| e.to_string())
+}
+
+// â”€â”€ Settings â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 #[tauri::command]
 pub fn settings_get(core: State<'_, Core>) -> Settings {
@@ -79,7 +125,7 @@ pub fn monitors_list(app: AppHandle) -> Vec<String> {
     island::monitor_names(&app)
 }
 
-// ── Providers ───────────────────────────────────────────────────────────────
+// â”€â”€ Providers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -187,7 +233,7 @@ pub fn chat_cancel(core: State<'_, Core>, request_id: String) {
     }
 }
 
-// ── Agents ──────────────────────────────────────────────────────────────────
+// â”€â”€ Agents â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 #[tauri::command]
 pub async fn agents_detect() -> Vec<AgentInfo> {
@@ -231,10 +277,14 @@ pub async fn session_cancel(core: State<'_, Core>, id: String) -> Result<(), Str
 #[tauri::command]
 pub async fn session_answer(
     core: State<'_, Core>,
+    following: State<'_, Following>,
     session_id: String,
     approval_id: String,
     allow: bool,
 ) -> Result<(), String> {
+    if Watcher::owns(&session_id) {
+        return following.answer(&session_id, &approval_id, allow);
+    }
     core.sessions.answer(&session_id, &approval_id, allow).map_err(stringify)
 }
 
@@ -243,7 +293,7 @@ pub fn media_action(core: State<'_, Core>, action: media::Action) {
     core.media.perform(action);
 }
 
-// ── Screen ──────────────────────────────────────────────────────────────────
+// â”€â”€ Screen â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]

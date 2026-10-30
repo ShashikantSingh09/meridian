@@ -1,0 +1,39 @@
+# Releasing Meridian
+
+## One-time setup
+
+1. Generate the update signing key, once, and keep it out of the repository:
+   ```powershell
+   npx tauri signer generate -w $HOME\.meridian\update.key
+   ```
+   Back it up. Losing it means installed copies can never be updated again.
+2. Choose a public address for update metadata. A private GitHub repository will not work, because its release files need a
+   login.
+3. Get a code-signing certificate. Without one, Windows SmartScreen warns every customer.
+
+## Each release
+
+1. Set the version in `apps/desktop/src-tauri/tauri.conf.json` and the workspace `Cargo.toml`.
+2. Build, from `apps/desktop`:
+   ```powershell
+   $env:MERIDIAN_UPDATE_PUBKEY = "<contents of update.key.pub>"
+   $env:MERIDIAN_UPDATE_URL = "https://your-host/meridian/latest.json"
+   $env:TAURI_SIGNING_PRIVATE_KEY = Get-Content $HOME\.meridian\update.key -Raw
+   npx tauri build --config '{"bundle":{"createUpdaterArtifacts":true}}'
+   ```
+3. Publish the installer and a `latest.json` next to it:
+   ```json
+   {
+     "version": "0.2.0",
+     "notes": "What changed.",
+     "platforms": { "windows-x86_64": { "signature": "<contents of the .sig file>", "url": "https://your-host/meridian/Meridian_0.2.0_x64-setup.exe" } }
+   }
+   ```
+
+Installed copies check at start and show the update under Settings, About. It installs only on a click.
+
+## Customer sign-in
+
+To let customers connect Gmail, Calendar or Outlook without their own registration, set `MERIDIAN_GOOGLE_CLIENT_ID`,
+`MERIDIAN_GOOGLE_CLIENT_SECRET` and `MERIDIAN_MICROSOFT_CLIENT_ID` at build time. Google requires verification of a published
+app for `gmail.readonly`, including a security assessment, so plan for weeks.

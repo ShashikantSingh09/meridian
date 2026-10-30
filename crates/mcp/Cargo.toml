@@ -1,0 +1,17 @@
+[package]
+name = "mcp"
+description = "Read-only client for remote Model Context Protocol servers: catalog, sign-in, one tool call turned into rows"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+activity = { path = "../activity" }
+ai-core = { path = "../ai-core" }
+chrono = { version = "0.4", features = ["serde"] }
+futures-util.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true

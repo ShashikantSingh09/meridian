@@ -9,7 +9,9 @@ use std::time::Duration;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use chrono::{DateTime, TimeDelta, Utc};
-use reqwest::{Client, Url};
+use reqwest::header::ACCEPT;
+use reqwest::redirect::Policy;
+use reqwest::{Client, Response, Url};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -17,7 +19,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 
-use super::{classify, http_client, retry_after};
+use super::{classify, retry_after};
 use crate::Error;
 
 pub const GOOGLE_AUTHORIZE_URL: &str = "https://accounts.google.com/o/oauth2/v2/auth";
@@ -29,6 +31,7 @@ pub const GOOGLE_SCOPES: &[&str] =
     &["https://www.googleapis.com/auth/gmail.readonly", "https://www.googleapis.com/auth/calendar.readonly"];
 pub const MICROSOFT_SCOPES: &[&str] = &["Mail.Read", "Calendars.Read", "offline_access", "User.Read"];
 
+const MAX_TOKEN_REPLY_BYTES: usize = 1 << 20;
 /// A redirect line longer than this is not a real redirect.
 const MAX_REDIRECT_BYTES: usize = 8 * 1024;
 /// So a spare socket a browser never writes to does not outlive the sign-in.
@@ -47,6 +50,9 @@ pub struct OAuthConfig {
     pub client_secret: Option<String>,
     pub scopes: Vec<String>,
     pub extra_authorize_params: Vec<(String, String)>,
+    /// Sent on both the code exchange and every refresh. MCP servers need
+    /// `resource` on each, so a token stays bound to one server.
+    pub extra_token_params: Vec<(String, String)>,
     /// How the redirect names this machine. Microsoft ignores the port only for
     /// `localhost`, and Google accepts the address itself.
     pub redirect_host: &'static str,
@@ -65,6 +71,7 @@ impl OAuthConfig {
                 ("access_type".to_string(), "offline".to_string()),
                 ("prompt".to_string(), "consent".to_string()),
             ],
+            extra_token_params: Vec::new(),
             redirect_host: "127.0.0.1",
         }
     }
@@ -77,6 +84,7 @@ impl OAuthConfig {
             client_secret: None,
             scopes: MICROSOFT_SCOPES.iter().map(|s| s.to_string()).collect(),
             extra_authorize_params: Vec::new(),
+            extra_token_params: Vec::new(),
             redirect_host: "localhost",
         }
     }
@@ -127,15 +135,21 @@ fn authorize_url(
     challenge: &str,
 ) -> Result<String, Error> {
     let mut url = Url::parse(&config.authorize_url).map_err(|_| Error::Malformed("authorize URL"))?;
-    url.query_pairs_mut()
-        .append_pair("response_type", "code")
-        .append_pair("client_id", &config.client_id)
-        .append_pair("redirect_uri", redirect_uri)
-        .append_pair("scope", &config.scopes.join(" "))
-        .append_pair("state", state)
-        .append_pair("code_challenge", challenge)
-        .append_pair("code_challenge_method", "S256")
-        .extend_pairs(&config.extra_authorize_params);
+    {
+        let mut query = url.query_pairs_mut();
+        query
+            .append_pair("response_type", "code")
+            .append_pair("client_id", &config.client_id)
+            .append_pair("redirect_uri", redirect_uri)
+            .append_pair("state", state)
+            .append_pair("code_challenge", challenge)
+            .append_pair("code_challenge_method", "S256")
+            .extend_pairs(&config.extra_authorize_params);
+        // An empty `scope` is not the same as none: some servers reject it.
+        if !config.scopes.is_empty() {
+            query.append_pair("scope", &config.scopes.join(" "));
+        }
+    }
     Ok(url.into())
 }
 
@@ -153,6 +167,12 @@ impl LoopbackFlow {
     pub async fn start(config: &OAuthConfig) -> Result<Self, Error> {
         let listener =
             TcpListener::bind("127.0.0.1:0").await.map_err(|_| Error::Network("Could not open a local port."))?;
+        Self::start_on(listener, config)
+    }
+
+    /// For a client registered on the spot, whose redirect URI has to name the
+    /// port before the authorize URL can exist.
+    pub fn start_on(listener: TcpListener, config: &OAuthConfig) -> Result<Self, Error> {
         let port = listener.local_addr().map_err(|_| Error::Network("Could not open a local port."))?.port();
         let redirect_uri = format!("http://{}:{port}", config.redirect_host);
         let state = random_token()?;
@@ -232,8 +252,19 @@ async fn answer_redirect(mut socket: TcpStream, expected_state: String, results:
     let _ = results.send(outcome).await;
 }
 
+/// A token request carries a code or a refresh token, which must not follow a
+/// redirect anywhere the endpoint chooses.
+fn token_client() -> Result<Client, Error> {
+    Client::builder()
+        .connect_timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(60))
+        .redirect(Policy::none())
+        .build()
+        .map_err(Error::from_reqwest)
+}
+
 pub async fn exchange_code(config: &OAuthConfig, code: &AuthorizationCode) -> Result<Tokens, Error> {
-    let http = http_client()?;
+    let http = token_client()?;
     let mut form = vec![
         ("grant_type", "authorization_code"),
         ("code", code.code.as_str()),
@@ -244,6 +275,7 @@ pub async fn exchange_code(config: &OAuthConfig, code: &AuthorizationCode) -> Re
     if let Some(secret) = &config.client_secret {
         form.push(("client_secret", secret.as_str()));
     }
+    form.extend(config.extra_token_params.iter().map(|(name, value)| (name.as_str(), value.as_str())));
     let body = token_request(&http, config, &form).await?;
     parse_tokens(&body, None, Utc::now())
 }
@@ -251,7 +283,7 @@ pub async fn exchange_code(config: &OAuthConfig, code: &AuthorizationCode) -> Re
 /// Microsoft rotates the refresh token and Google usually does not send one
 /// back, so the old one is kept only when the reply omits it.
 pub async fn refresh_tokens(config: &OAuthConfig, tokens: &Tokens) -> Result<Tokens, Error> {
-    let http = http_client()?;
+    let http = token_client()?;
     let refresh_token = tokens.refresh_token.as_deref().ok_or(Error::ReauthRequired)?;
     let mut form = vec![
         ("grant_type", "refresh_token"),
@@ -261,15 +293,29 @@ pub async fn refresh_tokens(config: &OAuthConfig, tokens: &Tokens) -> Result<Tok
     if let Some(secret) = &config.client_secret {
         form.push(("client_secret", secret.as_str()));
     }
+    form.extend(config.extra_token_params.iter().map(|(name, value)| (name.as_str(), value.as_str())));
     let body = token_request(&http, config, &form).await?;
     parse_tokens(&body, Some(refresh_token), Utc::now())
 }
 
+/// The endpoint can come from a server's metadata, and a timeout limits only time.
+async fn read_capped(mut response: Response) -> Result<String, Error> {
+    let mut body = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(Error::from_reqwest)? {
+        body.extend_from_slice(&chunk);
+        if body.len() > MAX_TOKEN_REPLY_BYTES {
+            return Err(Error::Malformed("token response"));
+        }
+    }
+    String::from_utf8(body).map_err(|_| Error::Malformed("token response"))
+}
+
 async fn token_request(http: &Client, config: &OAuthConfig, form: &[(&str, &str)]) -> Result<String, Error> {
-    let response = http.post(&config.token_url).form(form).send().await.map_err(Error::from_reqwest)?;
+    // GitHub answers in form encoding unless asked for JSON.
+    let response = http.post(&config.token_url).header(ACCEPT, "application/json").form(form).send().await.map_err(Error::from_reqwest)?;
     let status = response.status().as_u16();
     let retry = retry_after(response.headers(), Utc::now());
-    let body = response.text().await.map_err(Error::from_reqwest)?;
+    let body = read_capped(response).await?;
     if (200..300).contains(&status) {
         return Ok(body);
     }
@@ -292,7 +338,8 @@ fn parse_tokens(body: &str, previous_refresh: Option<&str>, now: DateTime<Utc>) 
     Ok(Tokens {
         access_token: reply.access_token,
         refresh_token: reply.refresh_token.or_else(|| previous_refresh.map(str::to_string)),
-        expires_at: reply.expires_in.map(|seconds| now + TimeDelta::seconds(seconds)),
+        // A server chooses this number, so an absurd one means no known expiry, not a panic.
+        expires_at: reply.expires_in.and_then(TimeDelta::try_seconds).and_then(|delta| now.checked_add_signed(delta)),
     })
 }
 
@@ -329,6 +376,80 @@ mod tests {
     }
 
     #[test]
+    fn no_scopes_means_no_scope_parameter() {
+        let mut config = OAuthConfig::microsoft("client-1");
+        config.scopes.clear();
+        let url = Url::parse(&authorize_url(&config, "http://127.0.0.1:5000", "st", "ch").unwrap()).unwrap();
+        assert!(url.query_pairs().all(|(name, _)| name != "scope"));
+        assert!(url.query_pairs().any(|(name, _)| name == "client_id"));
+    }
+
+    #[tokio::test]
+    async fn start_on_builds_the_redirect_from_the_listener_it_was_given() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let flow = LoopbackFlow::start_on(listener, &OAuthConfig::google("client-1", None)).unwrap();
+        let url = Url::parse(flow.authorize_url()).unwrap();
+        let params: HashMap<String, String> = url.query_pairs().into_owned().collect();
+        assert_eq!(params["redirect_uri"], format!("http://127.0.0.1:{port}"));
+    }
+
+    /// Answers one token request on a real socket and hands back its body.
+    async fn one_token_request() -> (String, tokio::task::JoinHandle<String>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/token", listener.local_addr().unwrap());
+        let handle = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut raw = Vec::new();
+            let mut buffer = [0u8; 4096];
+            loop {
+                let read = socket.read(&mut buffer).await.unwrap();
+                raw.extend_from_slice(&buffer[..read]);
+                let text = String::from_utf8_lossy(&raw);
+                if let Some((head, body)) = text.split_once("\r\n\r\n") {
+                    let length = head.lines().find_map(|line| line.to_ascii_lowercase().strip_prefix("content-length: ")?.parse().ok());
+                    if read == 0 || body.len() >= length.unwrap_or(0) {
+                        break;
+                    }
+                }
+            }
+            let reply = r#"{"access_token":"a"}"#;
+            let head = format!("HTTP/1.1 200 OK\r\ncontent-length: {}\r\nconnection: close\r\n\r\n", reply.len());
+            socket.write_all(head.as_bytes()).await.unwrap();
+            socket.write_all(reply.as_bytes()).await.unwrap();
+            String::from_utf8_lossy(&raw).into_owned()
+        });
+        (url, handle)
+    }
+
+    fn config_with_resource(token_url: String) -> OAuthConfig {
+        let mut config = OAuthConfig::microsoft("client-1");
+        config.token_url = token_url;
+        config.extra_token_params = vec![("resource".to_string(), "https://mcp.example.test/mcp".to_string())];
+        config
+    }
+
+    #[tokio::test]
+    async fn extra_token_params_go_out_on_the_code_exchange() {
+        let (url, request) = one_token_request().await;
+        let code = AuthorizationCode {
+            code: "c".to_string(),
+            verifier: "v".to_string(),
+            redirect_uri: "http://127.0.0.1:5000".to_string(),
+        };
+        exchange_code(&config_with_resource(url), &code).await.unwrap();
+        assert!(request.await.unwrap().contains("resource=https%3A%2F%2Fmcp.example.test%2Fmcp"));
+    }
+
+    #[tokio::test]
+    async fn extra_token_params_go_out_on_a_refresh() {
+        let (url, request) = one_token_request().await;
+        let tokens = Tokens { access_token: "a".to_string(), refresh_token: Some("r".to_string()), expires_at: None };
+        refresh_tokens(&config_with_resource(url), &tokens).await.unwrap();
+        assert!(request.await.unwrap().contains("resource=https%3A%2F%2Fmcp.example.test%2Fmcp"));
+    }
+
+    #[test]
     fn microsoft_is_a_public_client_with_read_scopes() {
         let config = OAuthConfig::microsoft("client-2");
         assert!(config.client_secret.is_none());
@@ -343,6 +464,12 @@ mod tests {
         assert_eq!(google.expires_at, Some(now + TimeDelta::hours(1)));
         let rotated = parse_tokens(r#"{"access_token":"new","refresh_token":"next"}"#, Some("old"), now).unwrap();
         assert_eq!(rotated.refresh_token.as_deref(), Some("next"));
+    }
+
+    #[test]
+    fn an_absurd_expiry_is_treated_as_unknown_rather_than_panicking() {
+        let body = format!(r#"{{"access_token":"a","expires_in":{}}}"#, i64::MAX);
+        assert_eq!(parse_tokens(&body, None, Utc::now()).unwrap().expires_at, None);
     }
 
     #[test]

@@ -1,3 +1,5 @@
+import { spring } from "@meridian/design-system/motion";
+import { motion } from "motion/react";
 import { useEffect } from "react";
 import { Icon, type IconName } from "../lib/icons";
 import { closePanel, setTab, useApp, type Tab } from "../lib/store";
@@ -8,8 +10,8 @@ import { Home } from "./Home";
 import { Inbox } from "./Inbox";
 import { Media } from "./Media";
 import { MyDay } from "./MyDay";
-import { Providers } from "./Providers";
 import { SettingsPage } from "./Settings";
+import { Welcome } from "./Welcome";
 
 const NAV: { tab: Tab; icon: IconName; label: string }[] = [
   { tab: "home", icon: "home", label: "Command center" },
@@ -19,7 +21,6 @@ const NAV: { tab: Tab; icon: IconName; label: string }[] = [
   { tab: "media", icon: "music", label: "Media" },
   { tab: "day", icon: "calendar", label: "My day" },
   { tab: "inbox", icon: "bell", label: "Notifications" },
-  { tab: "providers", icon: "providers", label: "Providers" },
   { tab: "settings", icon: "settings", label: "Settings" },
 ];
 
@@ -31,14 +32,14 @@ const PAGES: Record<Tab, () => React.JSX.Element> = {
   media: Media,
   day: MyDay,
   inbox: Inbox,
-  providers: Providers,
   settings: SettingsPage,
 };
 
 export function Panel() {
   const tab = useApp((s) => s.tab);
   const running = useApp((s) => s.sessions.filter((x) => x.status === "running" || x.status === "waiting").length);
-  const Page = PAGES[tab];
+  const onboarded = useApp((s) => s.settings.onboarded);
+  const Page = onboarded ? PAGES[tab] : Welcome;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -50,28 +51,28 @@ export function Panel() {
 
   return (
     <div className="panel">
-      <nav className="rail" aria-label="Sections">
-        {NAV.map((n) => (
+      <nav className="topnav" aria-label="Sections">
+        {onboarded && NAV.map((n) => (
           <button
             key={n.tab}
-            className="rail-item"
+            className="topnav-item"
             aria-label={n.label}
             title={n.label}
             aria-current={tab === n.tab ? "page" : undefined}
             onClick={() => setTab(n.tab)}
           >
+            {tab === n.tab && <motion.span layoutId="topnav-pill" className="topnav-pill" transition={spring.hover} />}
             <Icon name={n.icon} size={18} />
             {n.tab === "agents" && running > 0 && <span className="badge tabular">{running}</span>}
           </button>
         ))}
-        <span className="grow" />
-        <button className="rail-item" aria-label="Close" title="Close (Esc)" onClick={closePanel}>
-          <Icon name="close" size={16} />
+        <button className="round topnav-close" aria-label="Close" title="Close (Esc)" onClick={closePanel}>
+          <Icon name="close" size={15} />
         </button>
       </nav>
-      <main className="page">
+      <motion.main key={onboarded ? tab : "welcome"} className="page" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.14 }}>
         <Page />
-      </main>
+      </motion.main>
     </div>
   );
 }

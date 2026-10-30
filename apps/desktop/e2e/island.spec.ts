@@ -4,15 +4,23 @@ const island = (page: Page) => page.locator(".island");
 const preview = (page: Page, name: string | null) =>
   page.evaluate((n) => (window as never as { __meridian: { showPreview(n: string | null): void } }).__meridian.showPreview(n), name);
 
+const openModels = async (page: Page) => {
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await page.getByRole("button", { name: "AI models", exact: true }).click();
+};
+
 const settled = async (page: Page) => {
   let last = "";
   await expect
-    .poll(async () => {
-      const box = JSON.stringify(await island(page).boundingBox());
-      const same = box === last;
-      last = box;
-      return same;
-    })
+    .poll(
+      async () => {
+        const box = JSON.stringify(await island(page).boundingBox());
+        const same = box === last;
+        last = box;
+        return same;
+      },
+      { intervals: [80] },
+    )
     .toBe(true);
 };
 
@@ -41,6 +49,26 @@ test("every compact state renders its own content and stays on screen", async ({
     expect(box!.x).toBeGreaterThanOrEqual(0);
     expect(box!.x + box!.width).toBeLessThanOrEqual(860);
   }
+});
+
+test("hangs from the top edge of the window with a flat top", async ({ page }) => {
+  const box = await island(page).boundingBox();
+  expect(box!.y).toBe(0);
+  const corners = await page.locator(".island-shape").evaluate((el) => {
+    const style = getComputedStyle(el);
+    return [style.borderTopLeftRadius, style.borderBottomLeftRadius, style.borderTopWidth];
+  });
+  expect(corners[0]).toBe("0px");
+  expect(parseFloat(corners[1])).toBeGreaterThan(8);
+  expect(corners[2]).toBe("0px");
+  await expect(page.locator(".ear")).toHaveCount(2);
+});
+
+test("old and new content never show at once for long", async ({ page }) => {
+  await preview(page, "notification");
+  await settled(page);
+  await preview(page, "error");
+  await expect(page.locator(".island-content")).toHaveCount(1, { timeout: 400 });
 });
 
 test("the island is one element that morphs, never a swap", async ({ page }) => {
@@ -78,7 +106,7 @@ test("the clock and hide options change the idle shape", async ({ page }) => {
 
   await setting({ showClock: true });
   await settled(page);
-  expect(await width()).toBeCloseTo(176, 0);
+  expect(await width()).toBeCloseTo(188, 0);
 
   await setting({ showClock: false, islandAutoHide: true });
   await settled(page);
@@ -195,8 +223,23 @@ test.describe("panel", () => {
     await expect(approval).toContainText("cargo test --workspace");
     await approval.getByRole("button", { name: "Allow" }).click();
     await expect(approval).toContainText("cargo clippy");
+    await page.waitForTimeout(450);
     await approval.getByRole("button", { name: "Allow" }).click();
     await expect(page.locator(".log")).toContainText("All tests pass.");
+  });
+
+  test("a double click cannot approve the request that appears under it", async ({ page }) => {
+    await page.getByRole("button", { name: "Agents", exact: true }).click();
+    await page.getByLabel("Project folder").fill("C:\\Projects\\sample");
+    await page.getByLabel("Task").fill("run parallel checks");
+    await page.getByRole("button", { name: "Start" }).click();
+
+    const approval = page.locator(".approval");
+    await expect(approval).toContainText("cargo test --workspace");
+    await approval.getByRole("button", { name: "Allow" }).dblclick();
+    await expect(approval).toContainText("cargo clippy");
+    await page.waitForTimeout(100);
+    await expect(approval).toContainText("cargo clippy");
   });
 
   test("denying a request ends it without running", async ({ page }) => {
@@ -210,14 +253,14 @@ test.describe("panel", () => {
   });
 
   test("shows only the capabilities a provider has", async ({ page }) => {
-    await page.getByRole("button", { name: "Providers", exact: true }).click();
+    await openModels(page);
     const ollama = page.locator(".card", { hasText: "Ollama" });
     await expect(ollama.locator(".cap")).toHaveText(["Streaming", "Tools", "Model list"]);
     await expect(ollama.getByLabel("Ollama API key")).toHaveCount(0);
   });
 
   test("an API key field never echoes a stored key", async ({ page }) => {
-    await page.getByRole("button", { name: "Providers", exact: true }).click();
+    await openModels(page);
     const key = page.getByLabel("Anthropic API key");
     await expect(key).toHaveAttribute("type", "password");
     await expect(key).toHaveValue("");
@@ -225,7 +268,7 @@ test.describe("panel", () => {
   });
 
   test("removing the last key takes that provider out of the engine list", async ({ page }) => {
-    await page.getByRole("button", { name: "Providers", exact: true }).click();
+    await openModels(page);
     await page.locator(".card", { hasText: "Anthropic" }).getByRole("button", { name: "Remove" }).click();
     await page.getByRole("button", { name: "Chat", exact: true }).click();
     await expect(page.getByLabel("AI engine").locator("option", { hasText: "Anthropic" })).toHaveCount(0);
@@ -283,9 +326,11 @@ test.describe("panel", () => {
 
   test("an account can be connected and disconnected", async ({ page }) => {
     await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await page.getByRole("button", { name: "Providers", exact: true }).click();
+    await page.getByRole("button", { name: "Gmail", exact: true }).click();
     await page.getByLabel("Google client ID").fill("test-id.apps.googleusercontent.com");
     await page.getByLabel("Google client ID").blur();
-    await page.getByRole("button", { name: "Connect Google" }).click();
+    await page.getByRole("button", { name: "Connect Gmail" }).click();
     await expect(page.getByRole("button", { name: "Disconnect" })).toBeVisible();
     await page.getByRole("button", { name: "Disconnect" }).click();
     await expect(page.getByRole("button", { name: "Disconnect" })).toHaveCount(0);
@@ -352,9 +397,148 @@ test.describe("panel", () => {
     });
   });
 
+  test.describe("providers column", () => {
+    test.beforeEach(async ({ page }) => {
+      await page.getByRole("button", { name: "Settings", exact: true }).click();
+      await page.getByRole("button", { name: "Providers", exact: true }).click();
+    });
+
+    test("lists mail, calendar and MCP services by group", async ({ page }) => {
+      const column = page.getByRole("navigation", { name: "Providers" });
+      await expect(column.getByRole("heading", { name: "Mail and calendar" })).toBeVisible();
+      for (const name of ["Gmail", "Google Calendar", "Outlook", "Linear", "GitHub"]) {
+        await expect(column.getByRole("button", { name })).toBeVisible();
+      }
+    });
+
+    test("a service with open sign-in connects, then shows what it fetched", async ({ page }) => {
+      await page.getByRole("button", { name: "Linear" }).click();
+      await expect(page.getByText("No setup needed")).toBeVisible();
+      await page.getByRole("button", { name: "Connect Linear" }).click();
+      await expect(page.locator(".fetched-row")).toHaveCount(2);
+      await expect(page.locator(".fetched")).toContainText("Fix the island hit area");
+      await expect(page.locator(".link-feed h2")).toContainText("2 items");
+      await expect(page.getByRole("navigation", { name: "Providers" }).locator(".link-dot")).toHaveCount(1);
+    });
+
+    test("a link says where it goes, and a row without one is not a button that does nothing", async ({ page }) => {
+      await page.getByRole("button", { name: "Linear" }).click();
+      await page.getByRole("button", { name: "Connect Linear" }).click();
+      await expect(page.locator(".fetched-row").first()).toHaveAttribute("title", "Open on linear.example");
+      await expect(page.locator(".fetched-row").nth(1)).toBeDisabled();
+    });
+
+    test("the read-only tools can be switched, and fetching marks the beam", async ({ page }) => {
+      await page.getByRole("button", { name: "Linear" }).click();
+      await page.getByRole("button", { name: "Connect Linear" }).click();
+      await expect(page.locator(".fetched-row")).toHaveCount(2);
+      await page.getByRole("button", { name: "search_issues" }).click();
+      await expect(page.locator(".beam")).toHaveAttribute("data-on", "true");
+      await expect(page.getByRole("button", { name: "search_issues" })).toHaveAttribute("aria-pressed", "true");
+      await expect(page.locator(".beam")).toHaveAttribute("data-on", "false");
+    });
+
+    test("disconnecting drops what was fetched", async ({ page }) => {
+      await page.getByRole("button", { name: "Linear" }).click();
+      await page.getByRole("button", { name: "Connect Linear" }).click();
+      await expect(page.locator(".fetched-row")).toHaveCount(2);
+      await page.getByRole("button", { name: "Disconnect" }).click();
+      await expect(page.getByRole("button", { name: "Connect Linear" })).toBeVisible();
+      await expect(page.locator(".fetched-row")).toHaveCount(0);
+    });
+
+    test("a service that needs a registered app asks for a client ID first", async ({ page }) => {
+      await page.getByRole("button", { name: "Slack" }).click();
+      await expect(page.getByRole("button", { name: "Connect Slack" })).toBeDisabled();
+      await page.getByLabel("Slack client ID").fill("abc");
+      await expect(page.getByRole("button", { name: "Connect Slack" })).toBeEnabled();
+    });
+
+    test("GitHub takes a token, and never shows it", async ({ page }) => {
+      await page.getByRole("button", { name: "GitHub" }).click();
+      await expect(page.getByLabel("GitHub token")).toHaveAttribute("type", "password");
+    });
+  });
+
+  test.describe("Claude Code in another terminal", () => {
+    const publish = (page: Page) =>
+      page.evaluate(() => (window as never as { __mock: { publishWatched(id: string): void } }).__mock.publishWatched("watch:s1"));
+
+    test("a session that started before the app still shows its permission request", async ({ page }) => {
+      await page.keyboard.press("Escape");
+      await page.evaluate(() => (window as never as { __mock: { publishWatchedApproval(id: string): void } }).__mock.publishWatchedApproval("watch:early"));
+      await expect(island(page)).toContainText("npm install stripe");
+      await expect(island(page)).toContainText("Your terminal");
+    });
+
+    test("is off until asked, and the toggle says what it changes", async ({ page }) => {
+      await page.getByRole("button", { name: "Settings", exact: true }).click();
+      await page.getByRole("button", { name: "Coding agents", exact: true }).click();
+      const toggle = page.getByRole("switch", { name: /Follow my Claude Code sessions/ });
+      await expect(toggle).not.toBeChecked();
+      await expect(page.locator(".settings-body")).toContainText("keeps a backup");
+      await toggle.check();
+      await expect(toggle).toBeChecked();
+    });
+
+    test("appears as a session that can be followed but not steered", async ({ page }) => {
+      await publish(page);
+      await page.getByRole("button", { name: "Agents", exact: true }).click();
+      await page.locator(".session-list").getByRole("button", { name: /Claude Code/ }).click();
+      await expect(page.locator(".session header, .session .bar").first()).toContainText("shop");
+      await expect(page.getByText("Terminal", { exact: true })).toBeVisible();
+      await expect(page.getByLabel("Instruction")).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "Stop session" })).toHaveCount(0);
+    });
+
+    test("shows on the island, and asks for permission there", async ({ page }) => {
+      await page.keyboard.press("Escape");
+      await publish(page);
+      await expect(island(page)).toHaveAttribute("data-view", "working");
+      await expect(island(page)).toContainText("Editing cart.ts");
+      await expect(island(page).getByRole("button", { name: "Stop task" })).toHaveCount(0);
+      await page.evaluate(() => (window as never as { __mock: { publishWatchedApproval(id: string): void } }).__mock.publishWatchedApproval("watch:s1"));
+      await expect(island(page)).toContainText("npm install stripe");
+      await expect(island(page).getByRole("button", { name: "Allow" })).toBeVisible();
+    });
+  });
+
+  test("chat survives a restart, without any images, and can be cleared", async ({ page }) => {
+    await page.getByRole("button", { name: "Chat", exact: true }).click();
+    await page.getByLabel("AI engine").selectOption("anthropic");
+    await page.getByLabel("Message").fill("remember this");
+    await page.getByRole("button", { name: "Send" }).click();
+    await expect(page.locator('.message[data-role="assistant"]')).toContainText("browser stand-in");
+    await page.waitForTimeout(1100);
+
+    await page.reload();
+    await island(page).click();
+    await page.getByRole("button", { name: "Chat", exact: true }).click();
+    await page.getByLabel("AI engine").selectOption("anthropic");
+    await expect(page.locator('.message[data-role="user"]')).toContainText("remember this");
+
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await page.getByRole("button", { name: "Privacy", exact: true }).click();
+    await page.getByRole("button", { name: "Clear history" }).click();
+    await page.reload();
+    await island(page).click();
+    await page.getByRole("button", { name: "Chat", exact: true }).click();
+    await page.getByLabel("AI engine").selectOption("anthropic");
+    await expect(page.locator('.message[data-role="user"]')).toHaveCount(0);
+  });
+
+  test("first run shows the welcome steps until they are done", async ({ page }) => {
+    await page.evaluate(() => (window as never as { __meridian: { updateSettings(p: object): Promise<void> } }).__meridian.updateSettings({ onboarded: false }));
+    await expect(page.getByRole("heading", { name: /top of your screen/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Chat", exact: true })).toHaveCount(0);
+    await page.getByRole("button", { name: "Done" }).click();
+    await expect(page.getByRole("button", { name: "Chat", exact: true })).toBeVisible();
+  });
+
   test("settings apply straight away", async ({ page }) => {
     await page.getByRole("button", { name: "Settings", exact: true }).click();
-    await page.getByRole("button", { name: "Light" }).click();
-    await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+    await page.getByRole("button", { name: "Island", exact: true }).click();
+    await page.getByRole("button", { name: "Reduced" }).click();
+    await expect(page.locator("html")).toHaveAttribute("data-motion", "reduced");
   });
 });

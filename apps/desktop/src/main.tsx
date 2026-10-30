@@ -1,3 +1,4 @@
+import "@fontsource-variable/inter/opsz.css";
 import "@meridian/design-system/tokens.css";
 import { createRoot } from "react-dom/client";
 import "./styles.css";

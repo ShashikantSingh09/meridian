@@ -19,34 +19,31 @@ the app is doing from the corner of your eye, without reading a word. Text only 
 
 No state shows invented progress. A travelling pulse means "busy", and only a real number would ever become a bar.
 
-## Material: smoked glass
+## Material: a black notch
 
-The island is built in layers, from the back:
+The island is one opaque black shape hanging from the top edge of the display, like the hardware notch it extends:
 
-1. **Real blur.** A host backdrop visual, native and below the webview.
-2. **Tint.** `--glass-tint` at 0.78. This one number decides legibility: at 0.5 the panel looked lovely over a dark editor
-   and went mid-grey over white apps. Keep it dense.
-3. **Sheen.** A soft top-down gradient, `--glass-sheen`.
-4. **Rim.** A hairline ring and a brighter top edge, as inset shadows.
-5. **Ambient light.** A radial gradient of the state colour, leaking from under the bottom edge.
-6. **Shadow.** Soft and two-layered, `--glass-shadow`.
+1. **Flat top.** It meets the edge of the screen, so it has no top corners.
+2. **Two inward curves.** 10 px each, where the shape flows out of the edge. They are radial gradients beside the shape, so
+   nothing is clipped or re-rastered per frame.
+3. **Round bottom.** 13 px at rest, up to 30 px on the panel.
+4. **Hairline edge.** 11% white, so black stays visible on a dark desktop. While something is happening it takes the state
+   colour at 42%.
+5. **Shadow.** One soft layer, `--island-shadow`, to lift it off a light desktop.
 
-Without native blur, `html[data-glass="fallback"]` raises the tint to 0.93, and the design must still hold.
-
-Filters are avoided on anything that moves. A gradient costs nothing per frame, and a blur filter is re-rastered on every
-frame of a morph.
+There is no glass, no tint and no light theme. See `docs/DECISIONS.md`, D27. Filters are avoided on anything that moves.
 
 ## Typography
 
-Segoe UI Variable, in its Text and Display optical sizes, and Cascadia for code. Both ship with Windows 11, which is what
-makes the app feel native and adds nothing to the download.
+Inter, bundled as a variable font with optical sizes, and Cascadia for code. Inter is the closest open font to San
+Francisco, and it is what makes the island read as native to a notch rather than to Windows.
 
-Scale: 11, 12, 13, 15 and 22 px. Body is 13 px, like Windows itself. Numbers use tabular figures wherever they update.
+Scale: 11, 12, 13, 15 and 21 px. Body is 13 px. Numbers use tabular figures wherever they update.
 
 ## Space and shape
 
-Spacing steps are 4, 8, 12, 16, 24 and 32. Radii are 8, 12, 16 and 26, and a compact island's radius is half its height,
-so the shape stays a true pill as it grows.
+Spacing steps are 4, 8, 12, 16, 24 and 32. Radii are 8, 12 and 16. Heights stay slim: 32 at rest, 44 for a compact state, so
+the island stays close to the notch it imitates.
 
 ## Motion
 
@@ -54,16 +51,19 @@ Tokens live in `packages/design-system/src/motion.ts`.
 
 | Token | Use | Character |
 |---|---|---|
-| `spring.grow` | Expanding | Stiffness 420, damping 33: a touch of overshoot |
-| `spring.shrink` | Collapsing | Stiffness 460, damping 42: no overshoot |
-| `spring.hover` | Hover growth | Stiffness 620, damping 40: immediate |
-| `fade.in` | Content arriving | 200 ms, decelerating |
-| `fade.out` | Content leaving | 90 ms, so nothing lingers |
+| `spring.grow` | Expanding | Response 0.42 s, damping 0.84: a hint of overshoot |
+| `spring.shrink` | Collapsing | Response 0.34 s, damping 1: no overshoot |
+| `spring.hover` | Hover growth, indicators | Response 0.28 s, damping 0.9 |
+| `contentEnter` | Content changing | 70 ms out, then 200 ms in |
+| `rowEnter` | Rows from a fetch | One after another, 35 ms apart |
 
 Rules:
 
 - Growth may overshoot. Shrinking never does: a panel that bounces while closing reads as a mistake.
 - Content fades at its final size, so text never reflows during a morph.
+- Old content leaves before new content arrives, so two lines of text are never readable on top of each other.
+- The island reacts to a resting pointer, not a passing one: 180 ms in, 240 ms out.
+- At launch the shape grows out of a dot at the screen's edge.
 - An interrupted transition keeps its velocity.
 - Reduced motion, from the system or from Settings, lands instantly with no line animation.
 - Nothing animates forever at rest. See `docs/DECISIONS.md`, D12.

@@ -14,6 +14,7 @@ mod claude;
 mod codex;
 mod detect;
 mod process;
+pub mod watch;
 
 pub use detect::{auth_status, detect, open_login, AgentInfo, AuthStatus, Capabilities};
 
@@ -53,6 +54,8 @@ pub enum AgentEvent {
     Approval { approval: Approval },
     ApprovalResolved { id: String },
     Usage { input: u64, output: u64, cost_usd: Option<f64> },
+    /// A session this app did not start, heard from for the first time.
+    Watched { agent: String, cwd: String, title: Option<String> },
 }
 
 impl AgentEvent {

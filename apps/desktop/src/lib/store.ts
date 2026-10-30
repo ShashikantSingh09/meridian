@@ -2,7 +2,8 @@
 
 import { useSyncExternalStore } from "react";
 import type { IslandError, Notice, SessionSummary, Suggestion } from "../island/machine";
-import { bridge, type StartSession } from "./bridge";
+import { bridge, type StartSession, type UpdateStatus } from "./bridge";
+import { chime } from "./sound";
 import type {
   AgentEnvelope,
   AgentId,
@@ -15,7 +16,9 @@ import type {
   Category,
   ConnectedAccount,
   ContextEvent,
+  Digest,
   EventTime,
+  Integration,
   MediaAction,
   MediaSnapshot,
   ProviderInfo,
@@ -27,7 +30,8 @@ import type {
 } from "./types";
 import { defaultSettings } from "./types";
 
-export type Tab = "home" | "chat" | "agents" | "desktop" | "media" | "day" | "inbox" | "providers" | "settings";
+export type Tab = "home" | "chat" | "agents" | "desktop" | "media" | "day" | "inbox" | "settings";
+export type SettingsSection = "general" | "island" | "models" | "providers" | "agents" | "privacy" | "about";
 
 export interface LogEntry {
   kind: "user" | "text" | "activity" | "system";
@@ -48,6 +52,10 @@ export interface SessionDetail extends SessionSummary {
   log: LogEntry[];
   /** Approvals behind the one on screen. */
   queued: Approval[];
+  /** Runs in the user's own terminal: it can be followed and answered, not steered. */
+  watched?: boolean;
+  /** From an earlier run of the app, so there is no process left to talk to. */
+  restored?: boolean;
 }
 
 export interface ChatState {
@@ -101,9 +109,9 @@ export interface AppState {
   screen: ScreenState;
   media: MediaState;
   tab: Tab;
+  settingsSection: SettingsSection;
   listening: boolean;
   hovered: boolean;
-  glass: boolean;
   chatPending: boolean;
   sessions: SessionDetail[];
   notices: Notice[];
@@ -119,10 +127,23 @@ export interface AppState {
   agentChat: AgentChat;
   monitors: string[];
   preview: string | null;
+  integrations: Integration[];
+  /** Google and Microsoft sign-in work with no registration of the user's own. */
+  builtInClients: [boolean, boolean];
+  digests: Record<string, Digest>;
+  fetching: string[];
+  fetchErrors: Record<string, string>;
+  /** Claude Code hooks are installed, so its sessions appear here. */
+  watching: boolean;
+  version: string;
+  update: UpdateStatus;
 }
 
 const LOG_LIMIT = 500;
 const NOTICE_MS = 6000;
+const HOVER_IN_MS = 180;
+const HOVER_OUT_MS = 240;
+const ANSWER_GAP_MS = 400;
 
 let state: AppState = {
   panelOpen: false,
@@ -130,9 +151,9 @@ let state: AppState = {
   media: { current: null, sessions: [], reportedAt: 0, recent: [] },
   screen: { capture: null, capturing: false, question: "", includeImage: true, refused: null },
   tab: "home",
+  settingsSection: "general",
   listening: false,
   hovered: false,
-  glass: false,
   chatPending: false,
   sessions: [],
   notices: [],
@@ -147,6 +168,14 @@ let state: AppState = {
   agentChat: { agent: null, mode: "general", cwd: null, sessionId: null },
   monitors: [],
   preview: null,
+  integrations: [],
+  builtInClients: [false, false],
+  digests: {},
+  fetching: [],
+  fetchErrors: {},
+  watching: false,
+  version: "",
+  update: { available: false, message: "" },
 };
 
 const listeners = new Set<() => void>();
@@ -155,6 +184,52 @@ function set(patch: Partial<AppState>) {
   state = { ...state, ...patch };
   listeners.forEach((l) => l());
   reportContext();
+  if (patch.sessions || patch.chat) saveHistory();
+}
+
+// ── History ─────────────────────────────────────────────────────────────────
+
+const HISTORY_KEY = "meridian.history";
+const HISTORY_SESSIONS = 30;
+const HISTORY_LOG = 120;
+const HISTORY_MESSAGES = 200;
+const ENDED = ["completed", "failed", "cancelled"];
+
+let saveTimer: ReturnType<typeof setTimeout> | undefined;
+
+/** Finished work and the chat survive a restart, on this PC only. Images are left
+ *  out: a screen capture should not outlive the conversation it was shared in. */
+function saveHistory() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    const sessions = state.sessions
+      // A terminal session's labels can quote a command, which stays out of any file.
+      .filter((s) => ENDED.includes(s.status) && !s.watched)
+      .slice(0, HISTORY_SESSIONS)
+      .map((s) => ({ ...s, log: s.log.slice(-HISTORY_LOG), approval: null, queued: [] }));
+    const messages = state.chat.messages.slice(-HISTORY_MESSAGES).map(({ role, content }) => ({ role, content }));
+    try {
+      localStorage.setItem(HISTORY_KEY, JSON.stringify({ sessions, messages }));
+    } catch {
+      // Storage is full or unavailable. History is a convenience, never a reason to fail.
+    }
+  }, 1000);
+}
+
+function restoreHistory() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(HISTORY_KEY) ?? "{}");
+    const sessions: SessionDetail[] = (saved.sessions ?? []).map((s: SessionDetail) => ({ ...s, restored: true }));
+    set({ sessions, chat: { ...state.chat, messages: saved.messages ?? [] } });
+  } catch {
+    localStorage.removeItem(HISTORY_KEY);
+  }
+}
+
+export function clearHistory() {
+  clearTimeout(saveTimer);
+  localStorage.removeItem(HISTORY_KEY);
+  set({ sessions: state.sessions.filter((s) => !s.restored && !ENDED.includes(s.status)), chat: { ...state.chat, messages: [], usage: null } });
 }
 
 /** Tells the core what the user is in the middle of, for interruption decisions. */
@@ -198,7 +273,18 @@ export function closePanel() {
 
 export const togglePanel = () => (state.panelOpen ? closePanel() : openPanel());
 export const setTab = (tab: Tab) => set({ tab });
-export const setHovered = (hovered: boolean) => set({ hovered });
+export const setSettingsSection = (settingsSection: SettingsSection) => set({ settingsSection });
+export const openSettings = (settingsSection: SettingsSection) => set({ tab: "settings", settingsSection });
+
+let hoverTimer: ReturnType<typeof setTimeout> | undefined;
+
+/** A pointer passing on its way to a browser tab should not move the island, and
+ *  one slipping off the edge for a moment should not close it. */
+export function setHovered(hovered: boolean) {
+  clearTimeout(hoverTimer);
+  if (hovered !== state.hovered) hoverTimer = setTimeout(() => set({ hovered }), hovered ? HOVER_IN_MS : HOVER_OUT_MS);
+}
+
 export const setListening = (listening: boolean) => set({ listening, preview: null });
 
 // ── Notices and errors ──────────────────────────────────────────────────────
@@ -229,7 +315,6 @@ const describe = (err: unknown) => (err instanceof Error ? err.message : String(
 // ── Settings ────────────────────────────────────────────────────────────────
 
 function applyAppearance(s: Settings) {
-  document.documentElement.dataset.theme = s.theme;
   document.documentElement.dataset.motion = s.motion;
   document.documentElement.dataset.ambient = String(s.ambient);
   document.documentElement.dataset.align = s.islandAlign;
@@ -296,7 +381,7 @@ function patchLastMessage(fn: (text: string) => string) {
 export async function sendChat(text: string, images: string[] = []) {
   const provider = usableProvider();
   if (!provider) {
-    pushError({ title: "No AI provider ready", body: "Add a key or start a local server in Providers." });
+    pushError({ title: "No AI provider ready", body: "Add a key or start a local server in Settings, AI models." });
     return;
   }
   if (state.chat.providerId !== provider.id || !state.chat.model) await selectProvider(provider.id, state.chat.model);
@@ -421,6 +506,15 @@ const earlyEvents = new Map<string, AgentEnvelope[]>();
 
 export function applyAgentEvent(envelope: AgentEnvelope) {
   const { sessionId, event } = envelope;
+  if (event.type === "watched") {
+    addWatchedSession(sessionId, event.agent, event.cwd, event.title);
+    return;
+  }
+  // Hooks can outrun the page at startup, and the one event naming a session is
+  // then gone. A request for permission must still appear.
+  if (sessionId.startsWith("watch:") && !state.sessions.some((s) => s.id === sessionId)) {
+    addWatchedSession(sessionId, "Claude Code", "", null);
+  }
   const session = state.sessions.find((s) => s.id === sessionId);
   if (!session) {
     earlyEvents.set(sessionId, [...(earlyEvents.get(sessionId) ?? []), envelope]);
@@ -437,6 +531,7 @@ export function applyAgentEvent(envelope: AgentEnvelope) {
       patchSession(sessionId, (s) => ({ ...s, activity: event.label, log: appendLog(s, "activity", event.label) }));
       break;
     case "approval":
+      if (state.settings.sounds) chime("attention");
       // Parallel tool calls can ask at once. Each waits its turn on screen.
       patchSession(sessionId, (s) => ({
         ...s,
@@ -471,8 +566,10 @@ export function applyAgentEvent(envelope: AgentEnvelope) {
         activity: event.message ?? (ended ? "" : s.activity),
         log: event.message ? appendLog(s, "system", event.message) : s.log,
       }));
-      if (event.status === "completed" && !state.panelOpen)
+      if (event.status === "completed" && !state.panelOpen) {
         pushNotice({ tone: "success", title: `${session.agent} finished`, body: session.title, sessionId });
+        if (state.settings.sounds) chime("done");
+      }
       if (event.status === "failed") {
         pushError({ title: `${session.agent} failed`, body: event.message ?? session.project });
         // A lapsed sign-in is the usual cause, and it should show where you can fix it.
@@ -481,6 +578,38 @@ export function applyAgentEvent(envelope: AgentEnvelope) {
       break;
     }
   }
+}
+
+function addWatchedSession(id: string, agent: string, cwd: string, title: string | null) {
+  // A session that went quiet and came back keeps its row.
+  if (state.sessions.some((s) => s.id === id)) {
+    patchSession(id, (s) => ({ ...s, status: "running", endedAt: null, restored: false }));
+    return;
+  }
+  const session: SessionDetail = {
+    id,
+    agentId: "claude-code",
+    agent,
+    surface: "agents",
+    mode: "project",
+    title: title ?? (projectName(cwd) || "Your terminal"),
+    project: projectName(cwd) || "Your terminal",
+    cwd,
+    prompt: title ?? "",
+    model: null,
+    status: "running",
+    activity: "Working",
+    startedAt: Date.now(),
+    endedAt: null,
+    approval: null,
+    usage: null,
+    log: title ? [{ kind: "user", text: title }] : [],
+    queued: [],
+    watched: true,
+  };
+  set({ sessions: [session, ...state.sessions] });
+  earlyEvents.get(id)?.forEach(applyAgentEvent);
+  earlyEvents.delete(id);
 }
 
 export async function startSession(
@@ -522,8 +651,15 @@ export async function startSession(
 }
 
 export const cancelSession = (id: string) => void bridge.cancelSession(id);
-export const answerApproval = (sessionId: string, approvalId: string, allow: boolean) =>
-  void bridge.answerApproval(sessionId, approvalId, allow);
+let lastAnswerAt = 0;
+
+/** The next request can appear under the button that was just pressed, so the second
+ *  half of a double click must not approve something nobody has read. */
+export function answerApproval(sessionId: string, approvalId: string, allow: boolean) {
+  if (Date.now() - lastAnswerAt < ANSWER_GAP_MS) return;
+  lastAnswerAt = Date.now();
+  void bridge.answerApproval(sessionId, approvalId, allow).catch((err) => pushError({ title: "That request has gone", body: describe(err) }));
+}
 
 export async function sendToSession(id: string, text: string, images: string[] = []) {
   patchSession(id, (s) => ({ ...s, log: appendLog(s, "user", text) }));
@@ -617,6 +753,106 @@ export function describeTime(time: EventTime) {
   return time.kind === "date"
     ? stated.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" })
     : stated.toLocaleString(undefined, { weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
+}
+
+// ── Providers ───────────────────────────────────────────────────────────────
+
+/** Gmail, Calendar and Outlook use the direct connectors, which also feed My day. */
+const DIRECT: Integration[] = [
+  { id: "gmail", name: "Gmail", group: "Mail and calendar", blurb: "Bookings, orders and deliveries found in your mail.", access: "account", connected: false, account: null },
+  { id: "calendar", name: "Google Calendar", group: "Mail and calendar", blurb: "Your upcoming events.", access: "account", connected: false, account: null },
+  { id: "outlook", name: "Outlook", group: "Mail and calendar", blurb: "Mail and calendar from a Microsoft account.", access: "account", connected: false, account: null },
+];
+
+const directAccount = (id: string, accounts: ConnectedAccount[]) =>
+  accounts.find((a) => a.provider === (id === "outlook" ? "microsoft" : "google")) ?? null;
+
+export async function refreshIntegrations() {
+  const accounts = await bridge.accountsList().catch(() => []);
+  const direct = DIRECT.map((d) => {
+    const account = directAccount(d.id, accounts);
+    return { ...d, connected: account !== null, account: account?.email ?? null };
+  });
+  const servers = await bridge.integrationsList().catch(() => []);
+  set({ integrations: [...direct, ...servers] });
+}
+
+/** What the mail and calendar connectors have found, in the shape of a fetch. */
+async function directDigest(integration: Integration): Promise<Digest> {
+  const account = directAccount(integration.id, await bridge.accountsList());
+  const events = await bridge.activityList(null);
+  const items = events
+    .filter((e) => integration.id === "outlook" || e.source === (integration.id === "calendar" ? "calendar" : "email"))
+    .filter((e) => (e.sourceRef?.account ?? account?.email) === account?.email)
+    .map((e) => ({
+      key: e.id,
+      title: e.title,
+      detail: e.sourceRef?.subject ?? e.body,
+      url: e.sourceRef?.link ?? null,
+      when: e.startsAt && e.startsAt.kind !== "date" ? e.startsAt.value : null,
+    }));
+  return { server: null, tool: null, tools: [], items, text: null };
+}
+
+export async function fetchIntegration(integration: Integration, tool: string | null = null, background = false) {
+  const { id, name } = integration;
+  if (state.fetching.includes(id)) return;
+  set({ fetching: [...state.fetching, id], fetchErrors: { ...state.fetchErrors, [id]: "" } });
+  try {
+    const digest = integration.access === "account" ? await directDigest(integration) : await bridge.integrationFetch(id, tool);
+    const known = new Set(state.digests[id]?.items.map((i) => i.key));
+    const fresh = digest.items.filter((i) => !known.has(i.key)).length;
+    set({ digests: { ...state.digests, [id]: digest } });
+    if (background && known.size > 0 && fresh > 0) pushNotice({ tone: "info", title: name, body: `${fresh} new` });
+  } catch (err) {
+    set({ fetchErrors: { ...state.fetchErrors, [id]: describe(err) } });
+  } finally {
+    set({ fetching: state.fetching.filter((x) => x !== id) });
+  }
+}
+
+export async function connectIntegration(
+  integration: Integration,
+  { clientId, secret, token }: { clientId: string | null; secret: string | null; token: string | null },
+) {
+  if (integration.access === "account") {
+    await connectAccount(integration.id === "outlook" ? "microsoft" : "google", secret);
+  } else {
+    await bridge.integrationConnect(integration.id, clientId, secret, token);
+  }
+  await refreshIntegrations();
+}
+
+export async function disconnectIntegration(integration: Integration) {
+  if (integration.access === "account") {
+    const account = directAccount(integration.id, await bridge.accountsList());
+    if (account) await disconnectAccount(account.id);
+  } else {
+    await bridge.integrationDisconnect(integration.id);
+  }
+  const { [integration.id]: _gone, ...digests } = state.digests;
+  set({ digests });
+  await refreshIntegrations();
+}
+
+const FETCH_EVERY_MS = 15 * 60_000;
+
+function fetchInBackground() {
+  if (state.settings.monitoringPaused) return;
+  for (const i of state.integrations) if (i.connected) void fetchIntegration(i, null, true);
+}
+
+export function describeWhen(value: string) {
+  const when = new Date(value);
+  if (Number.isNaN(when.getTime())) return value.slice(0, 16);
+  return when.toLocaleString(undefined, { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
+}
+
+// ── Claude Code sessions in other terminals ─────────────────────────────────
+
+export async function setWatching(on: boolean) {
+  await bridge.watchSet(on);
+  set({ watching: on });
 }
 
 // ── Media ───────────────────────────────────────────────────────────────────
@@ -827,18 +1063,25 @@ export function showPreview(name: string | null) {
 // ── Boot ────────────────────────────────────────────────────────────────────
 
 export async function boot() {
-  const [settings, providers, agents, glass] = await Promise.all([
-    bridge.getSettings(),
-    bridge.listProviders(),
-    bridge.detectAgents(),
-    bridge.glassStatus(),
-  ]);
+  const [settings, providers, agents] = await Promise.all([bridge.getSettings(), bridge.listProviders(), bridge.detectAgents()]);
   applyAppearance(settings);
-  document.documentElement.dataset.glass = glass ? "native" : "fallback";
-  set({ settings, providers, agents, glass });
+  set({ settings, providers, agents });
+  restoreHistory();
   void refreshLocal();
   void refreshActivity();
   void bridge.monitors().then((monitors) => set({ monitors }));
+  if (!settings.onboarded) set({ notices: [{ id: "welcome", tone: "info", title: "Welcome to Meridian", body: "Click here to set up", sticky: true }] });
+  void refreshIntegrations();
+  void bridge.builtInClients().then((builtInClients) => set({ builtInClients }));
+  void bridge.watchStatus().then((watching) => set({ watching }));
+  void bridge.appVersion().then((version) => set({ version }));
+  if (settings.localOnly) set({ update: { available: false, message: "Update checks are off in local-only mode." } });
+  else
+    void bridge.checkUpdate().then(
+      (update) => set({ update }),
+      () => set({ update: { available: false, message: "Could not check for updates." } }),
+    );
+  setInterval(fetchInBackground, FETCH_EVERY_MS);
   for (const a of agents) if (a.installed) void refreshAuth(a.id);
   await Promise.all([
     bridge.onAgentEvent(applyAgentEvent),

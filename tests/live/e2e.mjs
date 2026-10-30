@@ -52,7 +52,7 @@ await ev(`(() => { const s = __meridian.getState(); s.errors.forEach((e) => __me
 if (mode === "chat") {
   const server = spawn("node", [`${here}/fake-llm.mjs`], { stdio: "ignore" });
   await sleep(600);
-  await ev("__meridian.openPanel('providers'); 'ok'");
+  await ev("__meridian.openPanel('home'); 'ok'");
   const online = await until("__meridian.getState().localOnline.includes('lmstudio')", 4000, "discovery");
   pass("discovers local server on its default port", !!online);
   await ev("__meridian.closePanel(); 'ok'");

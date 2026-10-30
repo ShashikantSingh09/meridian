@@ -20,11 +20,16 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use crate::commands::Core;
 use crate::island;
 
-const SERVICE: &str = "dev.meridian.companion";
+pub const SERVICE: &str = "dev.meridian.companion";
 const TICK: Duration = Duration::from_secs(60);
 /// In ticks: mail and calendars every 15 minutes.
 const SYNC_EVERY: u32 = 15;
 const SIGN_IN_TIMEOUT: Duration = Duration::from_secs(300);
+/// Set when a release is built, so customers need no registration of their own.
+/// Google's desktop client secret is not confidential in this flow.
+const BUILT_IN_GOOGLE: Option<&str> = option_env!("MERIDIAN_GOOGLE_CLIENT_ID");
+const BUILT_IN_GOOGLE_SECRET: Option<&str> = option_env!("MERIDIAN_GOOGLE_CLIENT_SECRET");
+const BUILT_IN_MICROSOFT: Option<&str> = option_env!("MERIDIAN_MICROSOFT_CLIENT_ID");
 /// Credential Manager caps one secret at 2560 bytes of UTF-16, so 1280
 /// characters, and an access token alone can pass that. Tokens go in pieces.
 const CHUNK: usize = 1200;
@@ -147,14 +152,30 @@ fn remind(app: &AppHandle) -> Result<(), activity::Error> {
     Ok(())
 }
 
+/// The user's own registration wins over the one a release was built with.
+fn client_id(own: &str, built_in: Option<&str>) -> Option<String> {
+    (!own.is_empty()).then(|| own.to_string()).or(built_in.map(str::to_string))
+}
+
 fn oauth_config(core: &Core, provider: Provider, secret: Option<String>) -> Result<OAuthConfig, String> {
     let settings = core.settings.lock().unwrap();
     match provider {
-        Provider::Google if settings.google_client_id.is_empty() => Err("Add a Google client ID first.".into()),
-        Provider::Microsoft if settings.microsoft_client_id.is_empty() => Err("Add a Microsoft application ID first.".into()),
-        Provider::Google => Ok(OAuthConfig::google(settings.google_client_id.clone(), secret.or_else(|| client_secret(Provider::Google)))),
-        Provider::Microsoft => Ok(OAuthConfig::microsoft(settings.microsoft_client_id.clone())),
+        Provider::Google => {
+            let id = client_id(&settings.google_client_id, BUILT_IN_GOOGLE).ok_or("Add a Google client ID first.")?;
+            let secret = secret.or_else(|| client_secret(Provider::Google)).or(BUILT_IN_GOOGLE_SECRET.map(str::to_string));
+            Ok(OAuthConfig::google(id, secret))
+        }
+        Provider::Microsoft => {
+            let id = client_id(&settings.microsoft_client_id, BUILT_IN_MICROSOFT).ok_or("Add a Microsoft application ID first.")?;
+            Ok(OAuthConfig::microsoft(id))
+        }
     }
+}
+
+/// Which sign-ins work with no registration of the user's own.
+#[tauri::command]
+pub fn built_in_clients() -> (bool, bool) {
+    (BUILT_IN_GOOGLE.is_some(), BUILT_IN_MICROSOFT.is_some())
 }
 
 async fn sync_account(core: &Core, life: &Life, account: &ConnectedAccount) -> Result<SyncSummary, String> {
@@ -360,11 +381,14 @@ pub async fn account_sync(core: State<'_, Core>, life: State<'_, Life>, id: Stri
     Ok(format!("Read {} messages. {} new, {} updated.", summary.messages_fetched, summary.inserted, summary.updated))
 }
 
-fn open_in_browser(url: &str) -> Result<(), String> {
-    if !(url.starts_with("https://") || url.starts_with("http://")) {
+/// The parsed form goes on, which is plain ASCII. The handler reads the ANSI code
+/// page, which can turn a lookalike slash into a real one and change the host.
+pub fn open_in_browser(url: &str) -> Result<(), String> {
+    let url = tauri::Url::parse(url).map_err(|_| "That link is not valid.")?;
+    if !matches!(url.scheme(), "http" | "https") {
         return Err("Only web links can be opened.".into());
     }
-    std::process::Command::new("rundll32.exe").args(["url.dll,FileProtocolHandler", url]).spawn().map(|_| ()).map_err(stringify)
+    std::process::Command::new("rundll32.exe").args(["url.dll,FileProtocolHandler", url.as_str()]).spawn().map(|_| ()).map_err(stringify)
 }
 
 #[tauri::command]
@@ -383,6 +407,13 @@ mod tests {
         assert_eq!(parts.len(), 4);
         assert!(parts.iter().all(|p| p.len() <= CHUNK));
         assert_eq!(parts.concat(), token);
+    }
+
+    #[test]
+    fn a_users_own_registration_wins_over_the_built_in_one() {
+        assert_eq!(client_id("mine", Some("built-in")).as_deref(), Some("mine"));
+        assert_eq!(client_id("", Some("built-in")).as_deref(), Some("built-in"));
+        assert_eq!(client_id("", None), None);
     }
 
     #[test]

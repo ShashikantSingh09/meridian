@@ -15,7 +15,7 @@ use tokio::sync::oneshot;
 use crate::{AgentEvent, Approval, Emit};
 
 const MAX_BODY: usize = 1 << 20;
-const READ_TIMEOUT: Duration = Duration::from_secs(5);
+pub const READ_TIMEOUT: Duration = Duration::from_secs(5);
 /// Written into the hook definition; the server gives up a little sooner so
 /// Claude Code always hears from us.
 pub const HOOK_TIMEOUT_SECS: u64 = 1800;
@@ -97,7 +97,7 @@ pub fn summarize(tool: &str, input: &Value) -> String {
     text.chars().take(240).collect()
 }
 
-fn decision_body(allow: bool) -> String {
+pub fn decision_body(allow: bool) -> String {
     let decision = if allow {
         json!({ "behavior": "allow" })
     } else {
@@ -106,7 +106,7 @@ fn decision_body(allow: bool) -> String {
     json!({ "hookSpecificOutput": { "hookEventName": "PermissionRequest", "decision": decision } }).to_string()
 }
 
-async fn read_request(socket: &mut TcpStream) -> Option<(String, Vec<u8>)> {
+pub async fn read_request(socket: &mut TcpStream, max: usize) -> Option<(String, Vec<u8>)> {
     let mut raw = Vec::new();
     let mut buf = [0u8; 8192];
     loop {
@@ -115,7 +115,7 @@ async fn read_request(socket: &mut TcpStream) -> Option<(String, Vec<u8>)> {
             return None;
         }
         raw.extend_from_slice(&buf[..n]);
-        if raw.len() > MAX_BODY {
+        if raw.len() > max {
             return None;
         }
         let Some(end) = raw.windows(4).position(|w| w == b"\r\n\r\n") else { continue };
@@ -124,7 +124,7 @@ async fn read_request(socket: &mut TcpStream) -> Option<(String, Vec<u8>)> {
             .lines()
             .find_map(|l| l.to_ascii_lowercase().strip_prefix("content-length:")?.trim().parse::<usize>().ok())
             .unwrap_or(0);
-        if length > MAX_BODY {
+        if length > max {
             return None;
         }
         if raw.len() >= end + 4 + length {
@@ -133,7 +133,7 @@ async fn read_request(socket: &mut TcpStream) -> Option<(String, Vec<u8>)> {
     }
 }
 
-async fn respond(socket: &mut TcpStream, status: &str, body: &str) {
+pub async fn respond(socket: &mut TcpStream, status: &str, body: &str) {
     let response = format!(
         "HTTP/1.1 {status}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
         body.len()
@@ -143,7 +143,7 @@ async fn respond(socket: &mut TcpStream, status: &str, body: &str) {
 }
 
 async fn handle(mut socket: TcpStream, state: Arc<Mutex<State>>) {
-    let Ok(Some((head, body))) = tokio::time::timeout(READ_TIMEOUT, read_request(&mut socket)).await else {
+    let Ok(Some((head, body))) = tokio::time::timeout(READ_TIMEOUT, read_request(&mut socket, MAX_BODY)).await else {
         return;
     };
     let token = head

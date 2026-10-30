@@ -29,10 +29,11 @@ function Session({ session }: { session: SessionDetail }) {
         <span className="status-dot" data-status={session.status} />
         <span className="label">{session.agent}</span>
         <span className="meta truncate grow">{session.project}{session.model ? ` · ${session.model}` : ""}</span>
+        {session.watched && <span className="cap" title="Started in your own terminal">Terminal</span>}
         <button className="round" aria-label="Open project" title="Open project folder" onClick={() => void bridge.openProject(session.cwd)}>
           <Icon name="folder" size={14} />
         </button>
-        {live && (
+        {live && !session.watched && (
           <button className="round" aria-label="Stop session" title="Stop" onClick={() => cancelSession(session.id)}>
             <Icon name="stop" size={14} />
           </button>
@@ -67,7 +68,7 @@ function Session({ session }: { session: SessionDetail }) {
         )}
       </footer>
 
-      <form className="composer" onSubmit={submit}>
+      {!session.watched && !session.restored && <form className="composer" onSubmit={submit}>
         <input
           aria-label="Instruction"
           placeholder={live ? "Send an instruction" : "Continue this session"}
@@ -77,7 +78,7 @@ function Session({ session }: { session: SessionDetail }) {
         <button className="round solid" aria-label="Send instruction" disabled={!text.trim()}>
           <Icon name="send" size={14} />
         </button>
-      </form>
+      </form>}
     </div>
   );
 }

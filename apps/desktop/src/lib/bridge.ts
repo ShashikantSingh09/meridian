@@ -15,7 +15,9 @@ import type {
   ChatMessage,
   ConnectedAccount,
   ContextEvent,
+  Digest,
   EventTime,
+  Integration,
   LocalServer,
   MediaAction,
   MediaSnapshot,
@@ -36,7 +38,11 @@ export interface IslandRect {
   y: number;
   w: number;
   h: number;
-  r: number;
+}
+
+export interface UpdateStatus {
+  available: boolean;
+  message: string;
 }
 
 export interface StartSession {
@@ -52,7 +58,6 @@ export const bridge = {
   setIslandRect: (rect: IslandRect) =>
     native ? invoke<void>("island_set_rect", { rect: { ...rect, dpr: window.devicePixelRatio || 1 } }) : Promise.resolve(),
   setInteractive: (on: boolean) => (native ? invoke<void>("island_set_interactive", { on }) : Promise.resolve()),
-  glassStatus: () => (native ? invoke<boolean>("glass_active") : Promise.resolve(false)),
 
   getSettings: () => (native ? invoke<Settings>("settings_get") : mock.getSettings()),
   saveSettings: (settings: Settings) =>
@@ -114,6 +119,26 @@ export const bridge = {
     native ? invoke<void>("account_disconnect", { id }) : mock.accountDisconnect(id),
   accountSync: (id: string) => (native ? invoke<string>("account_sync", { id }) : Promise.resolve("Up to date.")),
   openUrl: (url: string) => (native ? invoke<void>("open_url", { url }) : Promise.resolve()),
+  builtInClients: () => (native ? invoke<[boolean, boolean]>("built_in_clients") : Promise.resolve<[boolean, boolean]>([false, false])),
+
+  integrationsList: () => (native ? invoke<Integration[]>("integrations_list") : mock.integrationsList()),
+  integrationConnect: (id: string, clientId: string | null, secret: string | null, token: string | null) =>
+    native ? invoke<void>("integration_connect", { id, clientId, secret, token }) : mock.integrationConnect(id),
+  integrationDisconnect: (id: string) =>
+    native ? invoke<void>("integration_disconnect", { id }) : mock.integrationDisconnect(id),
+  integrationFetch: (id: string, tool: string | null) =>
+    native ? invoke<Digest>("integration_fetch", { id, tool }) : mock.integrationFetch(id, tool),
+
+  watchStatus: () => (native ? invoke<boolean>("watch_status") : Promise.resolve(mock.watching())),
+  watchSet: (on: boolean) => (native ? invoke<void>("watch_set", { on }) : mock.watchSet(on)),
+
+  appVersion: () => (native ? invoke<string>("app_version") : Promise.resolve("0.0.0")),
+  checkUpdate: () =>
+    native
+      ? invoke<UpdateStatus>("update_check")
+      : Promise.resolve<UpdateStatus>({ available: false, message: "Updates are checked in the installed app." }),
+  installUpdate: () => (native ? invoke<void>("update_install") : Promise.resolve()),
+  openLogs: () => (native ? invoke<void>("open_logs") : Promise.resolve()),
 
   screenCapture: (target: "window" | "screen") =>
     native ? invoke<Capture>("screen_capture", { target }) : mock.screenCapture(),

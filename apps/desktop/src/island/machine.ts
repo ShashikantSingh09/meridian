@@ -107,33 +107,34 @@ export interface Geometry {
   r: number;
 }
 
-export const EXPANDED: Geometry = { w: 760, h: 580, r: 26 };
+/** The radius is for the two bottom corners only: the top is the screen's edge. */
+export const EXPANDED: Geometry = { w: 820, h: 600, r: 30 };
 
 const SIZES: Record<IslandView, Geometry> = {
-  idle: { w: 128, h: 30, r: 15 },
-  listening: { w: 300, h: 48, r: 24 },
-  thinking: { w: 212, h: 42, r: 21 },
-  working: { w: 372, h: 50, r: 25 },
-  notification: { w: 392, h: 72, r: 24 },
+  idle: { w: 132, h: 32, r: 13 },
+  listening: { w: 300, h: 44, r: 18 },
+  thinking: { w: 232, h: 44, r: 18 },
+  working: { w: 372, h: 44, r: 18 },
+  notification: { w: 392, h: 66, r: 22 },
   expanded: EXPANDED,
-  contextual: { w: 408, h: 104, r: 24 },
-  multitask: { w: 392, h: 0, r: 24 },
-  screen: { w: 244, h: 42, r: 21 },
-  media: { w: 336, h: 50, r: 25 },
-  error: { w: 392, h: 76, r: 24 },
+  contextual: { w: 420, h: 112, r: 24 },
+  multitask: { w: 392, h: 0, r: 22 },
+  screen: { w: 264, h: 44, r: 18 },
+  media: { w: 340, h: 44, r: 18 },
+  error: { w: 392, h: 66, r: 22 },
 };
 
-const IDLE_HOVER: Geometry = { w: 300, h: 36, r: 18 };
-const APPROVAL: Geometry = { w: 416, h: 118, r: 24 };
+const IDLE_HOVER: Geometry = { w: 300, h: 38, r: 16 };
+const APPROVAL: Geometry = { w: 420, h: 124, r: 24 };
 const MULTITASK_ROW = 34;
 const MULTITASK_PAD = 18;
 export const MULTITASK_MAX_ROWS = 4;
 
-const IDLE_CLOCK: Geometry = { w: 176, h: 30, r: 15 };
-const SLIVER: Geometry = { w: 84, h: 6, r: 3 };
-const WORKING_HOVER: Geometry = { w: 416, h: 128, r: 24 };
-const MEDIA_HOVER: Geometry = { w: 420, h: 124, r: 26 };
-const REMINDER: Geometry = { w: 416, h: 112, r: 24 };
+const IDLE_CLOCK: Geometry = { w: 188, h: 32, r: 13 };
+const SLIVER: Geometry = { w: 96, h: 6, r: 3 };
+const WORKING_HOVER: Geometry = { w: 420, h: 132, r: 24 };
+const MEDIA_HOVER: Geometry = { w: 424, h: 128, r: 26 };
+const REMINDER: Geometry = { w: 420, h: 112, r: 24 };
 
 export interface GeometryContext {
   hovered: boolean;

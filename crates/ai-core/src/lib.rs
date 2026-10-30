@@ -10,7 +10,7 @@ mod anthropic;
 mod catalog;
 mod discovery;
 mod openai;
-mod sse;
+pub mod sse;
 #[cfg(test)]
 mod test_server;
 

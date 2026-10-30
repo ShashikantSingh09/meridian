@@ -121,7 +121,7 @@ export function Providers() {
     <div className="page-scroll stack-lg">
       <header className="row">
         <div className="grow stack-sm">
-          <h1>Providers</h1>
+          <h1>AI models</h1>
           <p className="meta">Keys stay in Windows Credential Manager. The interface can only see whether one exists.</p>
         </div>
         <button className="ghost" onClick={discover}>Find local servers</button>

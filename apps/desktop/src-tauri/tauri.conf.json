@@ -34,9 +34,13 @@
         "maximizable": false,
         "minimizable": false,
         "closable": false,
-        "dragDropEnabled": false
+        "dragDropEnabled": false,
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=no-user-gesture-required"
       }
     ]
+  },
+  "plugins": {
+    "updater": { "pubkey": "" }
   },
   "bundle": {
     "active": true,

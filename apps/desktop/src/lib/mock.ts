@@ -12,7 +12,9 @@ import type {
   ChatEvent,
   ConnectedAccount,
   ContextEvent,
+  Digest,
   EventTime,
+  Integration,
   LocalServer,
   MediaAction,
   MediaSnapshot,
@@ -31,11 +33,17 @@ const providers: ProviderInfo[] = [
   { id: "ollama", name: "Ollama", kind: "local", baseUrl: "http://localhost:11434/v1", needsKey: false, hasKey: false, capabilities: { ...caps, usage: false } },
 ];
 
-let settings: Settings = { ...defaultSettings };
+let settings: Settings = { ...defaultSettings, onboarded: true };
 let emit: (e: AgentEnvelope) => void = () => {};
 let authed = true;
 let pushReminders: (r: Reminder[]) => void = () => {};
 let accounts: ConnectedAccount[] = [];
+let watching = false;
+let integrations: Integration[] = [
+  { id: "linear", name: "Linear", group: "Work", blurb: "Issues assigned to you.", access: "open", connected: false, account: null },
+  { id: "slack", name: "Slack", group: "Work", blurb: "Channels you belong to.", access: "registeredApp", connected: false, account: null },
+  { id: "github", name: "GitHub", group: "Development", blurb: "Your notifications and issues.", access: "tokenOrApp", connected: false, account: null },
+];
 const sampleEvent = (id: string, title: string, kind: string, over: Partial<ContextEvent> = {}): ContextEvent => ({
   id,
   kind,
@@ -149,6 +157,29 @@ export const mock = {
     return account;
   },
   accountDisconnect: async (id: string) => void (accounts = accounts.filter((a) => a.id !== id)),
+
+  integrationsList: async () => integrations.map((i) => ({ ...i })),
+  integrationConnect: async (id: string) => {
+    await sleep(40);
+    integrations = integrations.map((i) => (i.id === id ? { ...i, connected: true, account: "Connected, read-only" } : i));
+  },
+  integrationDisconnect: async (id: string) =>
+    void (integrations = integrations.map((i) => (i.id === id ? { ...i, connected: false, account: null } : i))),
+  integrationFetch: async (_id: string, tool: string | null): Promise<Digest> => {
+    await sleep(120);
+    return {
+      server: "Stand-in",
+      tool: tool ?? "list_my_issues",
+      tools: ["list_my_issues", "search_issues"],
+      items: [
+        { key: "i1", title: "Fix the island hit area", detail: "In progress", url: "https://linear.example/i1", when: "2026-10-30T09:00:00Z" },
+        { key: "i2", title: "Write the release notes", detail: "Todo", url: null, when: null },
+      ],
+      text: null,
+    };
+  },
+  watching: () => watching,
+  watchSet: async (on: boolean) => void (watching = on),
   async onReminders(handler: (r: Reminder[]) => void) {
     pushReminders = handler;
     return () => {};
@@ -169,6 +200,14 @@ export const mock = {
       ? { signedIn: authed, method: "claude.ai", plan: "max" }
       : { signedIn: false, method: null, plan: null },
   setAuthed: (value: boolean) => void (authed = value),
+
+  /** A session started in another terminal, as its hooks would report it. */
+  publishWatched: (sessionId: string) => {
+    emit({ sessionId, event: { type: "watched", agent: "Claude Code", cwd: "C:\\Projects\\shop", title: "Fix the checkout" } });
+    emit({ sessionId, event: { type: "activity", label: "Editing cart.ts" } });
+  },
+  publishWatchedApproval: (sessionId: string) =>
+    emit({ sessionId, event: { type: "approval", approval: { id: "w1", tool: "Bash", summary: "npm install stripe" } } }),
 
   async startSession(request: { agent: string; cwd: string; prompt: string }) {
     const sessionId = crypto.randomUUID();

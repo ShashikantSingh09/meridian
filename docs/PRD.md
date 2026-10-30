@@ -202,3 +202,15 @@ Added by the enhancement brief of 2026-10-30, and implemented in the order it se
 
 The 20 acceptance criteria and their current state are in `docs/KNOWN_ISSUES.md`. Decisions are in `docs/DECISIONS.md`,
 D19 onward.
+
+## 11. Milestone 3 scope
+
+Added by the brief of 2026-10-30, after a teardown of TwoCode (`docs/research/TWOCODE_TEARDOWN.md`):
+
+1. Replace the pill with a macOS-style notch, flush with the top of the screen, opaque black.
+2. Make the product shippable to customers.
+3. A providers column under Settings with MCP integrations, including Gmail and other popular vendors, with animation that
+   shows what was fetched.
+4. Find and fix rendering problems.
+
+Decisions are D27 to D33. This supersedes the glass material and light theme described in sections 1 and 8.

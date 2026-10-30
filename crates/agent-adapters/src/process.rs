@@ -42,6 +42,8 @@ pub fn spawn<S: AsRef<OsStr>>(exe: &Path, args: &[S], cwd: &str) -> std::io::Res
         .current_dir(cwd)
         // Set inside a Claude Code session, and a nested run would refuse to start.
         .env_remove("CLAUDECODE")
+        // Lets the watcher tell this app's own runs from the user's.
+        .env(crate::watch::OWN_RUN_ENV, "1")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

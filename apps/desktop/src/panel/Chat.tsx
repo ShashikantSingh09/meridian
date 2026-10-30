@@ -17,7 +17,7 @@ import {
   setAgentCwd,
   setAgentMode,
   setListening,
-  setTab,
+  openSettings,
   useApp,
 } from "../lib/store";
 import type { AgentId } from "../lib/types";
@@ -260,7 +260,7 @@ function ApiChat() {
             <div className="empty">
               <p className="label">No AI engine is ready yet</p>
               <p className="meta">Add an API key, or start a local server such as Ollama or LM Studio.</p>
-              <button className="solid" onClick={() => setTab("providers")}>Set up a provider</button>
+              <button className="solid" onClick={() => openSettings("models")}>Set up a provider</button>
             </div>
           ) : (
             <p className="meta center">Say something to start.</p>

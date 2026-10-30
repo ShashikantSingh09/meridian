@@ -5,34 +5,30 @@ Status of each phase from the master brief. Every milestone must end in somethin
 | Phase | Scope | Status |
 |---|---|---|
 | 1. Research and definition | References, Windows technology, PRD, architecture | Done |
-| 2. UI and visual prototype | Island, all states, glass, motion, settings | Done |
+| 2. UI and visual prototype | Island, all states, notch shape, motion, settings | Done |
 | 3. Windows foundation | Shell, positioning, tray, shortcut, lifecycle, settings | Done, except multi-monitor and sleep handling |
 | 4. Universal AI | Provider abstraction, Anthropic, OpenAI-compatible, local, streaming | Done; conversation persistence open |
 | 5. Multi-agent command center | Claude Code, Codex, sessions, controls | Core done, and agents work as chat engines; history and comparison open |
 | 6. Desktop context engine | Foreground detection, events, suggestions, modes | Screen awareness and unified events done; app profiles open |
 | 7. Voice and workspace | Speech, profiles, project context | Mic level only |
 | 8. Automation | Workflow engine, agent collaboration | Not started |
-| 9. Release | Optimization, security review, installer, updates | Baseline measured only |
+| 9. Release | Optimization, security review, installer, updates | Installer and update path built. Signing and hosting open |
 
 M2 added the top-center island work, Claude Code as a chat engine, screen awareness, media, personal activity and unified
-notifications. See `docs/DEVELOPMENT_LEDGER.md`.
+notifications. M3 added the notch island, the providers column, following Claude Code from any terminal, history, first run
+and the update path. See `docs/DEVELOPMENT_LEDGER.md`.
 
-## Next milestone: M3, a companion you can trust all day
+## Next milestone: M4, ready for a first customer
 
-**Goal.** Everything works against real accounts, and nothing is lost on restart.
+**Goal.** A stranger can install it, connect something real, and trust it.
 
-1. Verify the open items: real accounts, real Codex turn, real cloud chat, real local server, real media players.
-2. Persist chats and agent sessions in SQLite, with retention controls.
-3. Verify multiple monitors, and 125%, 150% and 200% scaling.
-4. Handle sleep and resume, and a WebView2 process crash.
-5. Add a panel pin, Markdown rendering and file attachments.
-6. Shrink the window while compact, and measure the memory recovered.
-7. Build an NSIS installer.
-
-## M4: observe everything
-
-Opt-in, previewed, backed-up global hooks for sessions started outside the app, then adapters for Gemini CLI and Aider.
-Foreground application context through `SetWinEventHook` and application profiles.
+1. Verify the open items: real accounts, real MCP services, real Codex turn, real cloud chat, real media players.
+2. Decide the name and bundle ID, then sign the installer and host updates. See `docs/development/RELEASING.md`.
+3. Resolve the Claude subscription question for chat, see D19. Following sessions does not depend on it.
+4. Verify multiple monitors, and 125%, 150% and 200% scaling.
+5. Handle sleep and resume, and a WebView2 process crash.
+6. Add a panel pin, Markdown rendering and file attachments.
+7. Follow Codex the same way as Claude Code, then Gemini CLI and Aider.
 
 ## M5: voice
 

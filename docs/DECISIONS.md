@@ -194,3 +194,75 @@ position runs on locally only while the hover card is open, so a compact track c
 
 The island shows Claude Code and Codex by name, with original iconography. Product logos are their owners' marks, and
 Meridian is not affiliated with them.
+
+## D27. The island is a black notch, and the glass is gone
+
+The island hangs flush from the top edge of the display, with a flat top, round bottom corners and two small inward curves
+where it meets the edge. It is opaque black in every state. This follows what TwoCode does, and macOS notch apps before it.
+See `docs/research/TWOCODE_TEARDOWN.md`.
+
+This replaces D-series glass work. The composition backdrop in `glass.rs` was removed, along with the light theme, which only
+existed to tint that glass. Reasons: a backdrop drawn by a separate visual fell behind the webview during a morph and showed
+as a halo at the edges; a rounded-rectangle clip cannot follow a notch; and black needs no per-frame geometry pushed to native
+code. This is a deliberate removal of working functionality, at the user's request for a macOS-like island. The theme setting
+is gone from Settings and from the settings file, which ignores the old key on load.
+
+The curves are two small radial gradients beside the shape, not a `clip-path`, so nothing is re-rastered per frame.
+
+## D28. The click-through flag is the only style that changes
+
+`WS_EX_LAYERED` now stays set, and only `WS_EX_TRANSPARENT` toggles. Taking layering off and on resets the window's surface,
+which is a flicker risk each time the pointer crosses the island, and Electron's own implementation also keeps it for
+transparent windows.
+
+## D29. Follow the sessions people already run
+
+Customers already run Claude Code in their terminals. With one opt-in toggle, Meridian adds hooks to their Claude Code
+settings file, and follows every session from a loopback server. Permission requests can be answered on the island, and the
+terminal's own dialog stays live, so whichever answers first wins.
+
+This is now the main route for customers. It makes no model request and touches no Claude credential, so it does not depend
+on the D19 question. Chat through Claude Code remains, for the person's own use, under D19's limits.
+
+The toggle changes a file the user owns, so it is explained where it is offered, keeps one backup, and turning it off removes
+exactly our entries. Sessions from the watcher can be followed and answered, not steered, because the app holds no process
+for them.
+
+## D30. Providers are read through MCP, with read-only tools only
+
+Vendors now publish remote MCP servers, and most accept dynamic client registration, so a customer can connect them with no
+setup and no client ID from us. Anonymous discovery on 2026-10-30 confirmed 16 such services. Discovery needs no account, and
+results are recorded in the catalog.
+
+`crates/mcp` is a small client: Streamable HTTP, the full authorization discovery chain, PKCE S256 required, RFC 8707 resource
+indicators, and registration. stdio and arbitrary server URLs were left out: nothing here needs them yet.
+
+- Only tools that are read-only by annotation or by a catalogued name are ever called, and a name containing a write verb is
+  refused whatever its annotation says. Annotations are hints from an untrusted server.
+- Catalog scopes ask for read access where a vendor offers it. Without such a list, scopes that sound like writing or
+  administration are dropped. Where a vendor has one catch-all scope, the token can do more than this app will ever ask of it.
+  The tool rule is what holds in that case, so the interface says the app calls read-only tools, not that the sign-in is
+  read-only.
+- Results are untrusted. They are rendered as text, stay in memory, and are never sent to a model.
+- Gmail, Calendar and Outlook stay on the direct connectors, which feed My day. Google's MCP servers are in developer preview
+  and need the same registered client.
+
+Vendor logos are not used, per D26. Rows carry a letter on a tile.
+
+## D31. Hover has intent, and old content leaves first
+
+A pointer must rest on the island for 180 ms to open it, and be away for 240 ms to close it. Without this the island reacted
+to every pass towards a browser tab. Content fades out in 70 ms before new content fades in, so two lines of text are never
+readable on top of each other. Filters are gone from these transitions, because a blur re-rasters text on every frame.
+
+## D32. History lives in the webview's storage
+
+Finished sessions and the chat survive a restart through `localStorage`, capped at 30 sessions and 200 messages. A restored
+session is read-only because its process is gone. Images are never kept. SQLite would be the choice for search across history,
+and nothing needs that yet. History is plain text on disk, like Claude Code's own transcripts, and Privacy can clear it.
+
+## D33. Updates install on a click, from a channel set at build time
+
+`tauri-plugin-updater` verifies an Ed25519 signature. The public key and address come from `MERIDIAN_UPDATE_PUBKEY` and
+`MERIDIAN_UPDATE_URL` at build time. A build without them says it does not update itself, rather than pretending to check.
+Nothing installs on idle, because a restart ends running agents. See `docs/development/RELEASING.md`.

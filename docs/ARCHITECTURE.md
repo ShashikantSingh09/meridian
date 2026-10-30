@@ -18,7 +18,7 @@ flowchart TB
   subgraph Shell["Desktop shell: apps/desktop/src-tauri"]
     Commands["commands.rs"]
     Win["island.rs\nwindow, focus, click-through"]
-    Glass["glass.rs\ncomposition backdrop"]
+    Links["links.rs\nproviders over MCP"]
     Settings["settings.rs"]
     Secrets["secrets.rs"]
   end
@@ -29,10 +29,13 @@ flowchart TB
     Screen["screen\ncapture, OCR, signals, no network"]
     MediaC["media\nsystem media controls"]
     Activity["activity\nevents, extraction, store, notify, OAuth"]
+    McpC["mcp\nread-only MCP client, OAuth discovery"]
   end
 
   Bridge -- "invoke, channels, events" --> Commands
-  Commands --> Win & Glass & Settings & Secrets & AI & Agents & Screen & MediaC & Activity
+  Commands --> Win & Links & Settings & Secrets & AI & Agents & Screen & MediaC & Activity
+  Links --> McpC
+  McpC -- "read-only tools" --> Vendors[("Linear, Notion, GitHub and others")]
   Activity -- "read-only OAuth" --> Mail[("Gmail, Calendar, Graph")]
   AI -- HTTPS or loopback --> LLM[("Cloud and local models")]
   Agents -- "stdio JSON" --> CLI[("claude, codex")]
@@ -52,14 +55,16 @@ flowchart TB
 | `lib/mock.ts` | A browser stand-in for the core, used by UI tests | Nothing |
 | `packages/design-system` | Colour, surface and motion tokens | Nothing |
 | `src-tauri/island.rs` | Placement, style bits, click-through poll | Win32 |
-| `src-tauri/glass.rs` | The blurred backdrop, entirely optional | WinRT Composition |
 | `crates/ai-core` | Providers | reqwest |
 | `crates/agent-adapters` | Agent sessions | tokio |
 | `crates/screen` | Capture, OCR, signals, exclusions. No network code | Win32, WinRT |
 | `crates/media` | Media sessions and controls | WinRT |
 | `crates/activity` | Event model, extraction, store, notifications, connectors | SQLite, reqwest |
+| `crates/mcp` | MCP client, sign-in discovery, service catalog, tool choice, turning results into rows | reqwest, `activity` for OAuth |
 | `src-tauri/watch.rs` | The contextual screen loop | `screen` |
 | `src-tauri/life.rs` | Activity timers, keychain, sign-in, commands | `activity` |
+| `src-tauri/links.rs` | Providers over MCP: saved links and commands | `mcp` |
+| `src-tauri/log.rs` | A redacted log of crashes | Nothing |
 
 The frontend never sees a provider or agent wire format. A provider failure comes back as a typed error, and every chat
 ends in exactly one terminal event, so the UI can never be left waiting.
@@ -68,11 +73,14 @@ ends in exactly one terminal event, so the UI can never be left waiting.
 
 The window is fixed and transparent, so a morph is only a change inside the page.
 
-1. Motion springs animate one element's width, height and radius.
+1. Motion springs animate one element's width, height and radius. It hangs from the top of the window, which sits at the
+   top of the display's work area.
 2. At most once per frame, the page sends the shape to Rust through `island_set_rect`.
-3. Rust moves the backdrop visual to match, on the main thread that owns it.
-4. A poll thread compares the cursor with the shape. Over the shape the window takes the mouse. Anywhere else it is
+3. A poll thread compares the cursor with the shape. Over the shape the window takes the mouse. Anywhere else it is
    click-through, and hover changes reach the page as events.
+4. The page waits 180 ms before reacting to hover and 240 ms before reacting to its end, so a passing pointer moves nothing.
+
+Only `WS_EX_TRANSPARENT` changes at runtime. See `docs/DECISIONS.md`, D28.
 
 The page reports its own device pixel ratio, so hit testing stays correct even when WebView2's scale differs from the
 window's.

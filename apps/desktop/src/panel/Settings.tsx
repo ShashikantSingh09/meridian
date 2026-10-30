@@ -1,7 +1,11 @@
+import { spring } from "@meridian/design-system/motion";
+import { motion } from "motion/react";
 import { useState } from "react";
 import { bridge } from "../lib/bridge";
-import { connectAccount, disconnectAccount, PREVIEWS, refreshAuth, showPreview, updateSettings, useApp } from "../lib/store";
+import { clearHistory, PREVIEWS, refreshAuth, setSettingsSection, setWatching, showPreview, updateSettings, useApp, type SettingsSection } from "../lib/store";
 import type { AgentInfo, Settings } from "../lib/types";
+import { Integrations } from "./Integrations";
+import { Providers } from "./Providers";
 
 function Choice<K extends keyof Settings>({ name, label, options }: {
   name: K;
@@ -23,7 +27,7 @@ function Choice<K extends keyof Settings>({ name, label, options }: {
   );
 }
 
-type Flag = "ambient" | "autostart" | "localOnly" | "showClock" | "islandAutoHide" | "mediaEnabled" | "monitoringPaused" | "showNextMeeting";
+type Flag = "ambient" | "autostart" | "localOnly" | "showClock" | "islandAutoHide" | "mediaEnabled" | "monitoringPaused" | "showNextMeeting" | "sounds";
 
 function Toggle({ name, label, hint }: { name: Flag; label: string; hint: string }) {
   const value = useApp((s) => s.settings[name]);
@@ -38,105 +42,37 @@ function Toggle({ name, label, hint }: { name: Flag; label: string; hint: string
   );
 }
 
-function Accounts() {
-  const accounts = useApp((s) => s.activity.accounts);
-  const googleId = useApp((s) => s.settings.googleClientId);
-  const microsoftId = useApp((s) => s.settings.microsoftClientId);
-  const [secret, setSecret] = useState("");
-  const [status, setStatus] = useState<string | null>(null);
-
-  const connect = async (provider: "google" | "microsoft") => {
-    setStatus("Finish signing in in your browser.");
-    try {
-      const account = await connectAccount(provider, provider === "google" && secret ? secret : null);
-      setStatus(`Connected ${account.email ?? provider}. Read-only access.`);
-      setSecret("");
-    } catch (err) {
-      setStatus(String(err));
-    }
-  };
-
+function General() {
+  const systemPrompt = useApp((s) => s.settings.systemPrompt);
   return (
-    <section className="stack">
-      <h2>Connected accounts</h2>
-      <p className="meta">
-        Read-only access through Google and Microsoft sign-in. Your password is never seen here, tokens stay in Windows
-        Credential Manager, and mail is read on this PC. Each provider needs a free app registration of your own, which
-        gives the client ID below.
-      </p>
-      {accounts.map((a) => (
-        <div key={a.id} className="setting">
-          <span className="stacked grow">
-            <span className="label truncate">{a.email ?? a.id}</span>
-            <span className="meta">{a.provider === "google" ? "Gmail and Google Calendar" : "Outlook and Microsoft Calendar"}</span>
-          </span>
-          <button className="ghost" onClick={() => void bridge.accountSync(a.id).then(setStatus, (e) => setStatus(String(e)))}>Sync now</button>
-          <button className="ghost" onClick={() => void disconnectAccount(a.id)}>Disconnect</button>
-        </div>
-      ))}
-      <label className="field">
-        <span className="meta">Google client ID</span>
-        <input aria-label="Google client ID" defaultValue={googleId} onBlur={(e) => void updateSettings({ googleClientId: e.target.value.trim() })} />
-      </label>
-      <label className="field">
-        <span className="meta">Google client secret, from the same registration</span>
-        <input aria-label="Google client secret" type="password" value={secret} onChange={(e) => setSecret(e.target.value)} />
-      </label>
-      <div className="row">
-        <button className="solid" disabled={!googleId} onClick={() => void connect("google")}>Connect Google</button>
+    <section className="stack-lg">
+      <h1>General</h1>
+      <div className="stack">
+        <Toggle name="autostart" label="Start with Windows" hint="Off by default." />
+        <Toggle name="sounds" label="Sounds" hint="A soft chime when an agent finishes or needs you." />
+        <Toggle name="localOnly" label="Local-only mode" hint="Requests to cloud providers are refused. Only servers on this machine are used." />
       </div>
       <label className="field">
-        <span className="meta">Microsoft application ID</span>
-        <input aria-label="Microsoft client ID" defaultValue={microsoftId} onBlur={(e) => void updateSettings({ microsoftClientId: e.target.value.trim() })} />
+        <span className="label">Custom instructions</span>
+        <textarea
+          rows={3}
+          defaultValue={systemPrompt}
+          placeholder="Sent as the system prompt with every API chat"
+          onBlur={(e) => void updateSettings({ systemPrompt: e.target.value })}
+        />
       </label>
-      <div className="row">
-        <button className="solid" disabled={!microsoftId} onClick={() => void connect("microsoft")}>Connect Microsoft</button>
-      </div>
-      {status && <p className="meta" role="status">{status}</p>}
     </section>
   );
 }
 
-function AgentRow({ agent }: { agent: AgentInfo }) {
-  const auth = useApp((s) => s.auth[agent.id]);
-  const signedIn = auth?.signedIn;
-  const state = !agent.installed ? "Not installed" : signedIn === true ? `Signed in${auth?.plan ? `, ${auth.plan}` : ""}` : signedIn === false ? "Not signed in" : "Sign-in unknown";
-  return (
-    <div className="setting">
-      <span className="stacked grow">
-        <span className="label">{agent.name}</span>
-        <span className="meta truncate" title={agent.path ?? undefined}>{agent.version ?? "Not found on PATH"}</span>
-      </span>
-      <span className="meta">{state}</span>
-      {agent.installed && <button className="ghost" onClick={() => void refreshAuth(agent.id)}>Check</button>}
-      {agent.installed && signedIn !== true && <button className="solid" onClick={() => void bridge.agentLogin(agent.id)}>Sign in</button>}
-    </div>
-  );
-}
-
-export function SettingsPage() {
-  const glass = useApp((s) => s.glass);
-  const systemPrompt = useApp((s) => s.settings.systemPrompt);
+function IslandSection() {
   const monitor = useApp((s) => s.settings.islandMonitor);
-  const defaultDir = useApp((s) => s.settings.agentDefaultDir);
   const monitors = useApp((s) => s.monitors);
-  const agents = useApp((s) => s.agents);
   const preview = useApp((s) => s.preview);
-  const [picking, setPicking] = useState(false);
-
-  const pickDir = async () => {
-    setPicking(true);
-    const dir = await bridge.pickFolder();
-    setPicking(false);
-    if (dir) void updateSettings({ agentDefaultDir: dir });
-  };
-
   return (
-    <div className="page-scroll stack-lg">
-      <h1>Settings</h1>
-
-      <section className="stack">
-        <h2>Dynamic Island</h2>
+    <section className="stack-lg">
+      <h1>Island</h1>
+      <div className="stack">
         <Choice name="islandAlign" label="Position" options={[
           { value: "left", label: "Left" },
           { value: "center", label: "Center" },
@@ -158,31 +94,90 @@ export function SettingsPage() {
           { value: 1, label: "Normal" },
           { value: 1.35, label: "Quick" },
         ]} />
-        <Toggle name="showClock" label="Show the time" hint="Beside the line while idle." />
-        <Toggle name="showNextMeeting" label="Show the next meeting" hint="On the island when you point at it." />
-        <Toggle name="mediaEnabled" label="Show what is playing" hint="Any player that publishes to Windows media controls." />
-        <Toggle name="islandAutoHide" label="Hide when idle" hint="Shrinks to a sliver. Move the pointer to it, or wait for activity, and it returns." />
-        <p className="meta">Hide it completely from the tray icon. The shortcut brings it back.</p>
-      </section>
-
-      <section className="stack">
-        <h2>Appearance</h2>
-        <Choice name="theme" label="Theme" options={[
-          { value: "system", label: "System" },
-          { value: "dark", label: "Dark" },
-          { value: "light", label: "Light" },
-        ]} />
         <Choice name="motion" label="Motion" options={[
           { value: "system", label: "System" },
           { value: "full", label: "Full" },
           { value: "reduced", label: "Reduced" },
         ]} />
+      </div>
+      <div className="stack">
+        <Toggle name="showClock" label="Show the time" hint="Beside the line while idle." />
+        <Toggle name="showNextMeeting" label="Show the next meeting" hint="On the island when you point at it." />
+        <Toggle name="mediaEnabled" label="Show what is playing" hint="Any player that publishes to Windows media controls." />
+        <Toggle name="islandAutoHide" label="Hide when idle" hint="Shrinks to a sliver at the top of the screen, and returns on hover or activity." />
         <Toggle name="ambient" label="Ambient breathing" hint="The line breathes for a few seconds after activity, then rests." />
-        <p className="meta">Glass: {glass ? "native backdrop active" : "tinted fallback"}</p>
-      </section>
+        <p className="meta">Hide it completely from the tray icon. The shortcut brings it back.</p>
+      </div>
+      <div className="stack">
+        <h2>Preview island states</h2>
+        <p className="meta">Shows each state with sample data so you can judge the design.</p>
+        <div className="chips">
+          {PREVIEWS.map((p) => (
+            <button key={p.name} className="chip" aria-pressed={preview === p.name} onClick={() => showPreview(p.name)}>{p.name}</button>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
 
-      <section className="stack">
-        <h2>Coding agents</h2>
+function AgentRow({ agent }: { agent: AgentInfo }) {
+  const auth = useApp((s) => s.auth[agent.id]);
+  const signedIn = auth?.signedIn;
+  const state = !agent.installed ? "Not installed" : signedIn === true ? `Signed in${auth?.plan ? `, ${auth.plan}` : ""}` : signedIn === false ? "Not signed in" : "Sign-in unknown";
+  return (
+    <div className="setting">
+      <span className="stacked grow">
+        <span className="label">{agent.name}</span>
+        <span className="meta truncate" title={agent.path ?? undefined}>{agent.version ?? "Not found on PATH"}</span>
+      </span>
+      <span className="meta">{state}</span>
+      {agent.installed && <button className="ghost" onClick={() => void refreshAuth(agent.id)}>Check</button>}
+      {agent.installed && signedIn !== true && <button className="solid" onClick={() => void bridge.agentLogin(agent.id)}>Sign in</button>}
+    </div>
+  );
+}
+
+function AgentsSection() {
+  const agents = useApp((s) => s.agents);
+  const watching = useApp((s) => s.watching);
+  const defaultDir = useApp((s) => s.settings.agentDefaultDir);
+  const [picking, setPicking] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
+
+  const pickDir = async () => {
+    setPicking(true);
+    const dir = await bridge.pickFolder();
+    setPicking(false);
+    if (dir) void updateSettings({ agentDefaultDir: dir });
+  };
+
+  const toggle = async (on: boolean) => {
+    setStatus(null);
+    try {
+      await setWatching(on);
+    } catch (err) {
+      setStatus(String(err));
+    }
+  };
+
+  return (
+    <section className="stack-lg">
+      <h1>Coding agents</h1>
+      <div className="stack">
+        <label className="setting toggle">
+          <span className="stacked grow">
+            <span className="label">Follow my Claude Code sessions</span>
+            <span className="meta">
+              Shows sessions started in any terminal, and lets you answer permission requests from the island. Adds hooks
+              to your Claude Code settings file and keeps a backup. Turning this off removes them. Nothing leaves this PC.
+            </span>
+          </span>
+          <input type="checkbox" role="switch" checked={watching} onChange={(e) => void toggle(e.target.checked)} />
+        </label>
+        {status && <p className="meta bad" role="status">{status}</p>}
+      </div>
+      <div className="stack">
         {agents.map((a) => (
           <AgentRow key={a.id} agent={a} />
         ))}
@@ -193,45 +188,80 @@ export function SettingsPage() {
           </span>
           <button className="ghost" disabled={picking} onClick={() => void pickDir()}>Choose</button>
         </div>
-      </section>
+      </div>
+    </section>
+  );
+}
 
-      <Accounts />
+function Privacy() {
+  return (
+    <section className="stack-lg">
+      <h1>Privacy</h1>
+      <Toggle name="monitoringPaused" label="Pause all monitoring" hint="Stops contextual awareness and background fetching at once. Also in the tray menu." />
+      <p className="meta">
+        Your screen is read only as set in Desktop awareness, always on this PC, and shared only from a preview you approve.
+        No keystrokes or clipboard are read. The microphone opens only while the listening view is on screen, shows a dot
+        while open, and nothing is recorded. Chat text goes only to the engine you pick. Providers are read with read-only
+        tools, and what they return stays on this PC. No telemetry.
+      </p>
+      <div className="setting">
+        <span className="stacked grow">
+          <span className="label">Chat and session history</span>
+          <span className="meta">Kept on this PC so it survives a restart. Shared images are not kept.</span>
+        </span>
+        <button className="ghost" onClick={clearHistory}>Clear history</button>
+      </div>
+    </section>
+  );
+}
 
-      <section className="stack">
-        <h2>Behaviour</h2>
-        <Toggle name="autostart" label="Start with Windows" hint="Off by default." />
-        <Toggle name="localOnly" label="Local-only mode" hint="Requests to cloud providers are refused. Only servers on this machine are used." />
-        <label className="field">
-          <span className="label">Custom instructions</span>
-          <textarea
-            rows={3}
-            defaultValue={systemPrompt}
-            placeholder="Sent as the system prompt with every API chat"
-            onBlur={(e) => void updateSettings({ systemPrompt: e.target.value })}
-          />
-        </label>
-      </section>
-
-      <section className="stack">
-        <h2>Privacy</h2>
-        <Toggle name="monitoringPaused" label="Pause all monitoring" hint="Stops contextual awareness at once. Also in the tray menu." />
-        <p className="meta">
-          Your screen is read only as set in Desktop awareness, always on this PC, and shared only from a
-          preview you approve. No keystrokes or clipboard are read. The microphone opens only while the
-          listening view is on screen, shows a dot while open, and nothing is recorded. Chat text goes only
-          to the engine you pick. No telemetry.
-        </p>
-      </section>
-
-      <section className="stack">
-        <h2>Preview island states</h2>
-        <p className="meta">Shows each state with sample data so you can judge the design.</p>
-        <div className="chips">
-          {PREVIEWS.map((p) => (
-            <button key={p.name} className="chip" aria-pressed={preview === p.name} onClick={() => showPreview(p.name)}>{p.name}</button>
-          ))}
+function About() {
+  const version = useApp((s) => s.version);
+  const update = useApp((s) => s.update);
+  return (
+    <section className="stack-lg">
+      <h1>About Meridian</h1>
+      <div className="stack">
+        <div className="setting">
+          <span className="stacked grow">
+            <span className="label">Version {version}</span>
+            <span className="meta" role="status">{update.message}</span>
+          </span>
+          {update.available && <button className="solid" onClick={() => void bridge.installUpdate()}>Install and restart</button>}
+          <button className="ghost" onClick={() => void bridge.openLogs()}>Open logs</button>
         </div>
-      </section>
+      </div>
+      <p className="meta">Set in Inter, used under the SIL Open Font License. Keyboard shortcut: Ctrl Alt Space opens the island from anywhere.</p>
+    </section>
+  );
+}
+
+const SECTIONS: { id: SettingsSection; label: string; page: () => React.JSX.Element }[] = [
+  { id: "general", label: "General", page: General },
+  { id: "island", label: "Island", page: IslandSection },
+  { id: "models", label: "AI models", page: Providers },
+  { id: "providers", label: "Providers", page: Integrations },
+  { id: "agents", label: "Coding agents", page: AgentsSection },
+  { id: "privacy", label: "Privacy", page: Privacy },
+  { id: "about", label: "About", page: About },
+];
+
+export function SettingsPage() {
+  const current = useApp((s) => s.settingsSection);
+  const Section = SECTIONS.find((s) => s.id === current)!.page;
+  return (
+    <div className="settings">
+      <nav className="settings-nav" aria-label="Settings sections">
+        {SECTIONS.map((s) => (
+          <button key={s.id} className="settings-tab" aria-current={current === s.id ? "page" : undefined} onClick={() => setSettingsSection(s.id)}>
+            {current === s.id && <motion.span layoutId="settings-pill" className="topnav-pill" transition={spring.hover} />}
+            <span className="settings-tab-label">{s.label}</span>
+          </button>
+        ))}
+      </nav>
+      <motion.div key={current} className={current === "providers" ? "settings-body flush" : "settings-body"} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.14 }}>
+        <Section />
+      </motion.div>
     </div>
   );
 }

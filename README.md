@@ -1,10 +1,10 @@
 # Meridian
 
-A universal AI companion for the Windows desktop. A small island of real glass sits at the top of your screen, and one
-line of light tells you what your AI is doing. Chat with any model or with Claude Code, ask about what is on your screen,
-control your music, and see your day, all from one place.
+A universal AI companion for the Windows desktop. A black notch hangs from the top of your screen, and one line of light
+tells you what your AI is doing. Follow your Claude Code sessions from any terminal and answer them from the island, chat
+with any model, see what your connected services have for you, ask about what is on your screen, and control your music.
 
-Meridian is a working title. This is milestone 2: a real, running app, not the finished product. See
+Meridian is a working title. This is milestone 3: a real, running app, close to a first customer but not there yet. See
 [what works](#status) below.
 
 ## Run it
@@ -27,16 +27,18 @@ The island appears at the top of your screen.
 | Pause all monitoring | Tray icon, or Settings |
 | See every island state | Settings, Preview island states |
 
-To use a model, open Providers and add an API key, or start a local server such as Ollama or LM Studio and choose Find
-local servers. To chat with Claude Code, pick it as the engine in Chat. It uses your own installed CLI and sign-in, so no
-API key is needed. To run a task, open Agents, pick a folder you trust, and describe it. Permission requests appear on the
-island.
+To follow Claude Code, turn on Settings, Coding agents, Follow my Claude Code sessions. Sessions from any terminal then
+appear on the island, and permission requests can be answered there. It makes no model request of its own.
 
-To connect mail and calendars, see [Connecting accounts](docs/development/CONNECTING_ACCOUNTS.md).
+To connect a service, open Settings, Providers, choose one and connect. Most need no setup. To connect mail and calendars,
+see [Connecting accounts](docs/development/CONNECTING_ACCOUNTS.md).
 
-**Personal use only for now.** Anthropic does not permit third-party apps to offer Claude.ai login or to route requests
-through subscription plans on behalf of their users, so read [the licensing note](docs/KNOWN_ISSUES.md#licensing-read-before-distributing)
-before giving this to anyone else.
+To use a model, open Settings, AI models, and add an API key, or start a local server such as Ollama or LM Studio and choose
+Find local servers. To chat with Claude Code, pick it as the engine in Chat. It uses your own installed CLI and sign-in, so
+no API key is needed.
+
+**Before giving this to anyone else,** read [the licensing note](docs/KNOWN_ISSUES.md#licensing-read-before-distributing)
+and [Shipping](docs/KNOWN_ISSUES.md#shipping-to-customers).
 
 ## Test it
 
@@ -50,21 +52,23 @@ npm run test:e2e      # the real interface, on a browser stand-in for the core
 ## Build it
 
 ```powershell
-npm run build -w apps/desktop
-npx --prefix apps/desktop tauri build --no-bundle
+cd apps/desktop
+npx tauri build
 ```
+
+This makes the app and an NSIS installer. Releases are in [Releasing](docs/development/RELEASING.md).
 
 ## Status
 
-**Working, and verified in the real app:** real desktop blur, every island state, click-through, tray, global shortcuts,
-placement, Claude Code as a chat engine and as task sessions with approve, deny, stop and resume, screen capture with local
-OCR and error detection, media detection and controls, reading bookings from a pasted email, reminders, and local server
-streaming.
+**Working, and verified in the real app:** the notch island in every state, click-through, tray, global shortcuts,
+following a real Claude Code run through hooks with an answer from the app, Claude Code as a chat engine and as task
+sessions with approve, deny, stop and resume, screen capture with local OCR and error detection, media detection and
+controls, reading bookings from a pasted email, reminders, and local server streaming.
 
-**Built, but not yet proven against the real thing:** Gmail, Google Calendar, Outlook and Microsoft Calendar (they need your
-own app registration), a full Codex turn, live cloud APIs, real Ollama or LM Studio.
+**Built, but not yet proven against the real thing:** every provider sign-in (no real account was connected), Gmail, Google
+Calendar and Outlook, updates, a full Codex turn, live cloud APIs, real Ollama or LM Studio.
 
-**Not built yet:** speech, saved chat history, workflows, installer.
+**Not built yet:** speech, workflows, following Codex.
 
 The full list is in [docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md).
 
@@ -75,7 +79,7 @@ apps/desktop/          The app
   src/island/          The morphing island and the line of light
   src/panel/           The expanded command center
   src/lib/             Store, and the bridge to Rust
-  src-tauri/           Window, tray, glass, commands
+  src-tauri/           Window, tray, providers, following, commands
 crates/ai-core/        Providers: catalog, streaming, discovery
 crates/agent-adapters/ Claude Code and Codex sessions, approvals
 crates/screen/         Capture, local OCR, error signals

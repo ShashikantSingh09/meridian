@@ -47,7 +47,6 @@ pub struct Rect {
     pub y: f64,
     pub w: f64,
     pub h: f64,
-    pub r: f64,
     pub dpr: f64,
 }
 
@@ -104,10 +103,12 @@ pub fn working_window(gate: &Gate) -> Option<screen::WindowInfo> {
 /// TOOLWINDOW, so click-through is set here rather than through them.
 fn apply_style(win: &WebviewWindow, gate: &Gate) {
     let Some(hwnd) = hwnd(win) else { return };
-    let through = (WS_EX_TRANSPARENT.0 | WS_EX_LAYERED.0) as isize;
+    let through = WS_EX_TRANSPARENT.0 as isize;
     let noactivate = WS_EX_NOACTIVATE.0 as isize;
     unsafe {
-        let mut style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) | WS_EX_TOOLWINDOW.0 as isize;
+        // LAYERED stays on. Taking it off and on again resets the window's surface,
+        // which shows as a flicker each time the pointer crosses the island.
+        let mut style = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) | (WS_EX_TOOLWINDOW.0 | WS_EX_LAYERED.0) as isize;
         // Never takes focus from what the user is doing, unless the panel's
         // text fields need the keyboard.
         style = if gate.interactive.load(Ordering::Relaxed) { style & !noactivate } else { style | noactivate };
@@ -290,7 +291,7 @@ pub fn spawn_poll(app: AppHandle, gate: Arc<Gate>) {
 mod tests {
     use super::*;
 
-    const RECT: Rect = Rect { x: 100.0, y: 10.0, w: 200.0, h: 30.0, r: 15.0, dpr: 1.5 };
+    const RECT: Rect = Rect { x: 100.0, y: 10.0, w: 200.0, h: 30.0, dpr: 1.5 };
 
     #[test]
     fn hit_test_works_in_physical_pixels() {

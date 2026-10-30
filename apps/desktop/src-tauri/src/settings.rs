@@ -10,7 +10,6 @@ use tauri::{AppHandle, Manager};
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
-    pub theme: String,
     pub motion: String,
     pub ambient: bool,
     pub autostart: bool,
@@ -40,12 +39,14 @@ pub struct Settings {
     pub google_client_id: String,
     pub microsoft_client_id: String,
     pub show_next_meeting: bool,
+    pub sounds: bool,
+    /// The welcome steps have been seen.
+    pub onboarded: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            theme: "system".into(),
             motion: "system".into(),
             ambient: true,
             autostart: false,
@@ -69,6 +70,8 @@ impl Default for Settings {
             google_client_id: String::new(),
             microsoft_client_id: String::new(),
             show_next_meeting: true,
+            sounds: true,
+            onboarded: false,
         }
     }
 }
@@ -108,7 +111,7 @@ mod tests {
     #[test]
     fn round_trips() {
         let path = scratch("round");
-        let settings = Settings { theme: "dark".into(), local_only: true, ..Settings::default() };
+        let settings = Settings { motion: "reduced".into(), local_only: true, ..Settings::default() };
         save(&path, &settings).unwrap();
         assert_eq!(load(&path), settings);
     }
@@ -129,9 +132,9 @@ mod tests {
     #[test]
     fn unknown_and_missing_fields_are_tolerated() {
         let path = scratch("partial");
-        std::fs::write(&path, r#"{"theme":"light","fromTheFuture":1}"#).unwrap();
+        std::fs::write(&path, r#"{"motion":"full","fromTheFuture":1}"#).unwrap();
         let settings = load(&path);
-        assert_eq!(settings.theme, "light");
+        assert_eq!(settings.motion, "full");
         assert!(settings.ambient);
     }
 }

@@ -155,7 +155,7 @@ export function WorkingView({ reduced, hovered }: { reduced: boolean; hovered: b
             <span className="meta truncate">{session.title}</span>
           </button>
           <span className="meta"><Elapsed since={session.startedAt} /></span>
-          {iconButton("Stop task", "stop", () => cancelSession(session.id))}
+          {!session.watched && iconButton("Stop task", "stop", () => cancelSession(session.id))}
         </div>
         <div className="peek">
           {recent.length === 0 && <p className="meta">{session.activity || "Starting"}</p>}
@@ -177,7 +177,7 @@ export function WorkingView({ reduced, hovered }: { reduced: boolean; hovered: b
         <span className="meta truncate">{session.activity || session.project}</span>
       </button>
       <span className="meta"><Elapsed since={session.startedAt} /></span>
-      {iconButton("Stop task", "stop", () => cancelSession(session.id))}
+      {!session.watched && iconButton("Stop task", "stop", () => cancelSession(session.id))}
     </div>
   );
 }

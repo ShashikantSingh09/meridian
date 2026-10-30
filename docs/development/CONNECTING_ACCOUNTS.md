@@ -1,3 +1,18 @@
+# Connecting services
+
+Settings, Providers lists every service. Most connect with one click: Linear, Notion, Jira and Confluence, ClickUp, monday.com,
+Todoist, Airtable, Granola, Intercom, Sentry, Vercel, Figma, Canva, Dropbox, Stripe and PayPal all register themselves over
+MCP and ask you to sign in on their own site. Nothing is needed from you, and read-only scopes are requested where the vendor
+offers them.
+
+Some vendors accept only registered apps: Slack, Asana, HubSpot, Box and Google Drive need a client ID from a registration of
+your own, or from a release built with one. GitHub also takes a personal access token: read-only scopes are enough.
+
+What a service returns stays in memory, shows in that row, and is never sent to an AI. Disconnect removes the token. No real
+account has been connected to any of these yet, so treat each first sign-in as the real test.
+
+The rest of this page covers mail and calendars, which use their own connectors because they also feed My day.
+
 # Connecting Gmail, Outlook and calendars
 
 Meridian reads mail and calendars through Google's and Microsoft's official APIs, with read-only permission. Each provider
@@ -13,7 +28,7 @@ without any account.
 3. Configure the OAuth consent screen as External, and add your own address as a test user.
 4. Add the scopes `gmail.readonly` and `calendar.readonly`.
 5. Under Credentials, create an **OAuth client ID** of type **Desktop app**.
-6. In Meridian, open Settings, Connected accounts. Paste the client ID and client secret, then choose Connect Google.
+6. In Meridian, open Settings, Providers, Gmail. Paste the client ID and client secret, then choose Connect Gmail.
 
 Sign-in happens in your browser, on Google's own page.
 
@@ -28,7 +43,7 @@ verification. For one person's use, Testing is the practical choice.
 3. Add a platform: **Mobile and desktop applications**, with the custom redirect URI `http://localhost`. Microsoft ignores the
    port on a `localhost` redirect, which is what lets each sign-in use a random one.
 4. Under API permissions, add delegated permissions: `Mail.Read`, `Calendars.Read`, `offline_access`, `User.Read`.
-5. Copy the **Application (client) ID** into Settings, Connected accounts, then choose Connect Microsoft.
+5. Copy the **Application (client) ID** into Settings, Providers, Outlook, then choose Connect Outlook.
 
 A work or school account may need an administrator's consent, depending on the tenant's policy.
 
