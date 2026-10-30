@@ -89,6 +89,8 @@ export const bridge = {
     native ? invoke<string>("session_start", { request }) : mock.startSession(request),
   sendToSession: (id: string, text: string, images: string[] = []) =>
     native ? invoke<void>("session_send", { id, text, images }) : mock.sendToSession(id, text),
+  adoptSession: (earlier: { id: string; agent: AgentId; cwd: string; model: string | null; restricted: boolean; nativeId: string }) =>
+    native ? invoke<void>("session_adopt", { earlier }) : mock.adoptSession(earlier.id),
   cancelSession: (id: string) => (native ? invoke<void>("session_cancel", { id }) : mock.cancelSession(id)),
   answerApproval: (sessionId: string, approvalId: string, allow: boolean, answers?: Record<string, string | string[]>) =>
     native

@@ -7,7 +7,6 @@ import { Icon, type IconName } from "../lib/icons";
 import { closePanel, setTab, useApp, type Tab } from "../lib/store";
 import { Agents } from "./Agents";
 import { Chat } from "./Chat";
-import { Desktop } from "./Desktop";
 import { Home } from "./Home";
 import { Inbox } from "./Inbox";
 import { Media } from "./Media";
@@ -19,7 +18,6 @@ const NAV: { tab: Tab; icon: IconName; label: string }[] = [
   { tab: "home", icon: "home", label: "Home" },
   { tab: "chat", icon: "chat", label: "Chat" },
   { tab: "agents", icon: "agents", label: "Agents" },
-  { tab: "desktop", icon: "eye", label: "Desktop awareness" },
   { tab: "media", icon: "music", label: "Media" },
   { tab: "day", icon: "calendar", label: "My day" },
   { tab: "inbox", icon: "bell", label: "Notifications" },
@@ -30,7 +28,6 @@ const PAGES: Record<Tab, () => React.JSX.Element> = {
   home: Home,
   chat: Chat,
   agents: Agents,
-  desktop: Desktop,
   media: Media,
   day: MyDay,
   inbox: Inbox,
@@ -40,6 +37,7 @@ const PAGES: Record<Tab, () => React.JSX.Element> = {
 export function Panel() {
   const tab = useApp((s) => s.tab);
   const face = useApp((s) => s.settings.face);
+  const feeling = useApp((s) => s.feeling);
   const running = useApp((s) => s.sessions.filter((x) => x.status === "running" || x.status === "waiting").length);
   const onboarded = useApp((s) => s.settings.onboarded);
   const Page = onboarded ? PAGES[tab] : Welcome;
@@ -57,7 +55,7 @@ export function Panel() {
   return (
     <div className="panel">
       <header className="panel-head">
-        <Face id={face} mood="rest" scale={0.62} />
+        <Face id={face} mood={feeling ?? "rest"} scale={0.62} />
         <h1 className="grow truncate">{title}</h1>
         <span className="meta">{date}</span>
         <Clock className="panel-time tabular" />

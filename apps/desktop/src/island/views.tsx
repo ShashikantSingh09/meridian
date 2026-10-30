@@ -2,11 +2,12 @@
 // them; text only says what the face cannot.
 
 import type { Approval } from "../lib/types";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useLayoutEffect, useRef } from "react";
 import { Markdown } from "../panel/Markdown";
 import { Icon } from "../lib/icons";
 import {
   answerApproval,
+  feel,
   assist,
   cancelSession,
   describeTime,
@@ -30,17 +31,20 @@ import { MeridianLine } from "./MeridianLine";
 import { Progress } from "./Progress";
 import { useMicLevel } from "./useMicLevel";
 
-/** After this long with nothing to do and no pointer, the face falls asleep. */
-const SLEEP_AFTER_MS = 10 * 60_000;
+/** With nothing to do and no pointer, the face gets drowsy, then falls asleep. */
+const SLEEPY_AFTER_MS = 45_000;
+const ASLEEP_AFTER_MS = 2 * 60_000;
 
 export const greetingWord = () => {
   const hour = new Date().getHours();
   return hour < 5 ? "Hello" : hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
 };
 
+/** The face, showing how it feels about something that just happened, or else its mood here. */
 function Mine({ mood, scale = 0.62, reduced }: { mood: Mood; scale?: number; reduced: boolean }) {
   const id = useApp((s) => s.settings.face);
-  return <Face id={id} mood={mood} scale={scale} reduced={reduced} />;
+  const feeling = useApp((s) => s.feeling);
+  return <Face id={id} mood={feeling ?? mood} scale={scale} reduced={reduced} />;
 }
 
 function Elapsed({ since }: { since: number }) {
@@ -101,18 +105,26 @@ function Peek() {
 export function IdleView({ reduced, hovered, sliver }: { reduced: boolean; hovered: boolean; sliver: boolean }) {
   const clock = useApp((s) => s.settings.showClock);
   const greeting = useApp((s) => s.greeting);
-  const [asleep, setAsleep] = useState(false);
+  const [tired, setTired] = useState<Mood>("rest");
 
   useEffect(() => {
-    setAsleep(false);
-    const timer = setTimeout(() => setAsleep(true), SLEEP_AFTER_MS);
-    return () => clearTimeout(timer);
+    if (hovered) return setTired((was) => {
+      // Woken up: a moment of surprise.
+      if (was !== "rest") feel("needs", 800);
+      return "rest";
+    });
+    const drowsy = setTimeout(() => setTired("sleepy"), SLEEPY_AFTER_MS);
+    const asleep = setTimeout(() => setTired("asleep"), ASLEEP_AFTER_MS);
+    return () => {
+      clearTimeout(drowsy);
+      clearTimeout(asleep);
+    };
   }, [hovered]);
 
   if (greeting) {
     return (
       <div className="rest">
-        <Mine mood="done" reduced={reduced} />
+        <Mine mood="wink" reduced={reduced} />
         <span className="greeting">{greetingWord()}</span>
       </div>
     );
@@ -121,7 +133,7 @@ export function IdleView({ reduced, hovered, sliver }: { reduced: boolean; hover
   if (hovered) return <Peek />;
   return (
     <div className="rest">
-      <Mine mood={asleep ? "asleep" : "rest"} reduced={reduced} />
+      <Mine mood={tired} reduced={reduced} />
       {clock && <Clock />}
     </div>
   );
@@ -386,16 +398,36 @@ export function Artwork({ src, size }: { src: string | null; size: number }) {
 }
 
 /** Small by default, like a Mac: artwork and bars. A click opens the album and its controls. */
+/**
+ * One line that, when it does not fit, slides to show the rest while the pointer is on it. This
+ * replaces the browser's tooltip, which draws badly over a transparent always-on-top window.
+ */
+function Slide({ text, moving, className }: { text: string; moving: boolean; className: string }) {
+  const line = useRef<HTMLSpanElement>(null);
+  const [hidden, setHidden] = useState(0);
+  useLayoutEffect(() => {
+    const el = line.current;
+    if (el) setHidden(Math.max(0, el.scrollWidth - el.clientWidth));
+  }, [text]);
+  const style = { "--slide": `-${hidden}px`, "--slide-time": `${Math.max(3, hidden / 30)}s` } as React.CSSProperties;
+  return (
+    <span ref={line} className={`slide ${className}`} data-moving={moving && hidden > 0} style={style}>
+      <span>{text}</span>
+    </span>
+  );
+}
+
 export function MediaView({ open }: { open: boolean }) {
   const track = useApp((s) => s.media.current);
+  const hovered = useApp((s) => s.hovered);
   if (!track) return null;
   if (!open) {
     return (
-      <button className="media-closed" aria-label={`Now playing: ${track.title || track.app}. Open the player`} title={track.title} onClick={() => setMediaOpen(true)}>
+      <button className="media-closed" aria-label={`Now playing: ${track.title || track.app}. Open the player`} onClick={() => setMediaOpen(true)}>
         <Artwork src={track.artwork} size={32} />
         <span className="stacked grow">
-          <span className="label truncate">{track.title || track.app}</span>
-          <span className="meta truncate">{track.artist || track.app}</span>
+          <Slide className="label" text={track.title || track.app} moving={hovered} />
+          <Slide className="meta" text={track.artist || track.app} moving={hovered} />
         </span>
         <Bars playing={track.playing} height={18} />
       </button>
@@ -406,8 +438,8 @@ export function MediaView({ open }: { open: boolean }) {
       <div className="row">
         <Artwork src={track.artwork} size={64} />
         <button className="grow text-button stacked" onClick={() => openPanel("media")}>
-          <span className="media-title truncate">{track.title || track.app}</span>
-          <span className="meta truncate">{track.artist || track.app}</span>
+          <Slide className="media-title" text={track.title || track.app} moving={hovered} />
+          <Slide className="meta" text={track.artist || track.app} moving={hovered} />
         </button>
         <Bars playing={track.playing} height={22} />
       </div>

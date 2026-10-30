@@ -28,7 +28,7 @@ The 20 criteria from the enhancement brief, as they stand.
 | 17 | Prioritized and deduplicated | Done | Unit tests on the engine and store, live reschedule |
 | 18 | Permissions and disconnect | Done in code, with one edge case | Unit tests. Not with a real account. See below |
 | 19 | No data sent without authorization | Done by design | One share path; no network code in `screen` |
-| 20 | Existing features still work | Done | 513 Rust, 46 unit and 52 UI tests pass. Live claude, deny, cancel, engine, resume, activity and chat pass on the M3 code. Screen, vision and media were not rerun: this code did not change, and they would capture the desktop in use |
+| 20 | Existing features still work | Done | 513 Rust, 46 unit and 55 UI tests pass. Live claude, deny, cancel, engine, resume, activity and chat pass on the M3 code. Screen, vision and media were not rerun: this code did not change, and they would capture the desktop in use |
 
 ## Milestone 3 brief
 
@@ -157,6 +157,9 @@ What stands between this build and a stranger installing it. Only the owner can 
 - **Gemini CLI, Aider and Continue adapters.**
 
 ## Behaviour to be aware of
+
+- Windows reports screen brightness only for screens it controls, which means a laptop's own. A desktop monitor has no brightness to
+  show, unless it is read over its cable, which is slow and not supported by every monitor.
 
 - Questions and plans answered on the island follow Anthropic's documented format and have unit tests, but have not been tried
   against a live Claude Code session. Claude Code offers neither tool without a terminal, so it needs one real try by hand.

@@ -1,5 +1,16 @@
 # Development ledger
 
+## 2026-10-31: Chat that really continues, and eyes with feelings
+
+### Completed
+
+- **Chat follow-ups.** A chat from before a restart failed with "No session with that id", because history came back but the engine had
+  forgotten it. The agent's own id is now saved, and the app resumes the real conversation. The stand-in engine used by tests accepted
+  anything, so no test could have caught it. It now refuses as the real one does.
+- **Chat and screen are one surface** (D46).
+- **Expressions** (D47).
+- **Long song names** slide while the pointer is on them. The browser's own tooltip is gone from the bar.
+
 ## 2026-10-31: Real music end to end, a calmer island, and ideas from Coucou
 
 ### Completed

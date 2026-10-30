@@ -70,7 +70,7 @@ function Session({ session }: { session: SessionDetail }) {
         )}
       </footer>
 
-      {!session.watched && !session.restored && <form className="composer" onSubmit={submit}>
+      {!session.watched && (!session.restored || session.nativeId) && <form className="composer" onSubmit={submit}>
         <input
           aria-label="Instruction"
           placeholder={live ? "Send an instruction" : "Continue this session"}

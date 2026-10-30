@@ -29,10 +29,11 @@ import type {
   Settings,
   Track,
 } from "./types";
+import type { Mood } from "../island/faces";
 import { defaultSettings } from "./types";
 
-export type Tab = "home" | "chat" | "agents" | "desktop" | "media" | "day" | "inbox" | "settings";
-export type SettingsSection = "general" | "island" | "models" | "providers" | "agents" | "privacy" | "about";
+export type Tab = "home" | "chat" | "agents" | "media" | "day" | "inbox" | "settings";
+export type SettingsSection = "general" | "island" | "screen" | "models" | "providers" | "agents" | "privacy" | "about";
 
 export interface LogEntry {
   kind: "user" | "text" | "activity" | "system" | "diff" | "output";
@@ -63,6 +64,8 @@ export interface SessionDetail extends SessionSummary {
   watched?: boolean;
   /** From an earlier run of the app, so there is no process left to talk to. */
   restored?: boolean;
+  /** The agent's own id for this conversation, which is what lets it carry on after a restart. */
+  nativeId?: string | null;
 }
 
 export interface ChatState {
@@ -149,6 +152,8 @@ export interface AppState {
   mediaOpen: boolean;
   /** Says hello for a moment after the app starts. */
   greeting: boolean;
+  /** How the face feels about something that just happened. It passes. */
+  feeling: Mood | null;
   /** The colour of the album, to light the island with. */
   artTint: string | null;
   islandView: IslandView;
@@ -199,6 +204,7 @@ let state: AppState = {
   focus: null,
   mediaOpen: false,
   greeting: false,
+  feeling: null,
   artTint: null,
   islandView: "idle",
   watching: false,
@@ -512,7 +518,9 @@ export const selectAgentConversation = (sessionId: string) =>
 export async function sendAgentChat(text: string, images: string[] = []) {
   const { agent, mode, cwd, sessionId } = state.agentChat;
   if (!agent) return;
-  if (sessionId) return sendToSession(sessionId, text, images);
+  const earlier = state.sessions.find((s) => s.id === sessionId);
+  // History saved before ids were kept cannot be resumed, so that chat starts afresh.
+  if (sessionId && !(earlier?.restored && !earlier.nativeId)) return sendToSession(sessionId, text, images);
   const dir = mode === "project" ? (cwd ?? state.settings.agentDefaultDir) : await bridge.assistantDir();
   if (!dir) {
     pushError({ title: "Choose a project folder", body: "Project mode needs a folder to work in." });
@@ -561,7 +569,7 @@ export function applyAgentEvent(envelope: AgentEnvelope) {
   }
   switch (event.type) {
     case "started":
-      patchSession(sessionId, (s) => ({ ...s, model: event.model }));
+      patchSession(sessionId, (s) => ({ ...s, model: event.model, nativeId: event.nativeId ?? s.nativeId }));
       break;
     case "text":
       patchSession(sessionId, (s) => ({ ...s, log: appendLog(s, "text", event.text) }));
@@ -611,6 +619,8 @@ export function applyAgentEvent(envelope: AgentEnvelope) {
         activity: event.message ?? (ended ? "" : s.activity),
         log: event.message ? appendLog(s, "system", event.message) : s.log,
       }));
+      if (event.status === "completed") feel("done", 2400);
+      if (event.status === "failed") feel("error", 3000);
       if (event.status === "completed" && !state.panelOpen) {
         pushNotice({ tone: "success", title: `${session.agent} finished`, body: session.title, sessionId });
         if (state.settings.sounds) chime("done");
@@ -703,12 +713,20 @@ let lastAnswerAt = 0;
 export function answerApproval(sessionId: string, approvalId: string, allow: boolean, answers?: Record<string, string | string[]>) {
   if (Date.now() - lastAnswerAt < ANSWER_GAP_MS) return;
   lastAnswerAt = Date.now();
+  feel(allow ? "love" : "error", 1300);
   void bridge.answerApproval(sessionId, approvalId, allow, answers).catch((err) => pushError({ title: "That request has gone", body: describe(err) }));
 }
 
 export async function sendToSession(id: string, text: string, images: string[] = []) {
+  const session = state.sessions.find((s) => s.id === id);
   patchSession(id, (s) => ({ ...s, log: appendLog(s, "user", text) }));
   try {
+    // A conversation from before a restart exists only here until the app is told about it.
+    if (session?.restored && session.nativeId) {
+      const { agentId: agent, cwd, model, mode, nativeId } = session;
+      await bridge.adoptSession({ id, agent, cwd, model, restricted: mode === "general", nativeId });
+      patchSession(id, (s) => ({ ...s, restored: false }));
+    }
     await bridge.sendToSession(id, text, images);
   } catch (err) {
     pushError({ title: "Message not delivered", body: describe(err) });
@@ -976,6 +994,15 @@ function tintOf(src: string, done: (tint: string) => void) {
   image.src = src;
 }
 
+let feelingTimer: ReturnType<typeof setTimeout> | undefined;
+
+/** Shows a feeling on the face for a moment. */
+export function feel(feeling: Mood, ms = 1800) {
+  clearTimeout(feelingTimer);
+  set({ feeling });
+  feelingTimer = setTimeout(() => set({ feeling: null }), ms);
+}
+
 function onMedia(snapshot: MediaSnapshot) {
   const before = state.media;
   const art = snapshot.current?.artwork ?? null;
@@ -1073,7 +1100,7 @@ export function ignoreSuggestion(suggestion: Suggestion) {
 export function assist(suggestion: Suggestion, question: string) {
   dismissSuggestion(suggestion.id);
   setScreen({ question });
-  openPanel("desktop");
+  openPanel("chat");
   void captureScreen("window");
 }
 
@@ -1257,7 +1284,7 @@ export async function boot() {
     }),
     bridge.onScreenSuggestion(onScreenSuggestion),
     bridge.onCaptureRequest(() => {
-      openPanel("desktop");
+      openPanel("chat");
       void captureScreen("window");
     }),
   ]);

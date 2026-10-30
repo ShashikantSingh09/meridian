@@ -270,6 +270,11 @@ pub async fn session_send(core: State<'_, Core>, id: String, text: String, image
 }
 
 #[tauri::command]
+pub fn session_adopt(core: State<'_, Core>, earlier: agent_adapters::Earlier) -> Result<(), String> {
+    core.sessions.adopt(earlier).map_err(stringify)
+}
+
+#[tauri::command]
 pub async fn session_cancel(core: State<'_, Core>, id: String) -> Result<(), String> {
     core.sessions.cancel(&id).map_err(stringify)
 }

@@ -167,6 +167,14 @@ test("playing media takes over an idle island and answers its controls", async (
   await expect(island(page)).toHaveAttribute("data-view", "idle");
 });
 
+test("the face shows how it feels by its shape, and it passes", async ({ page }) => {
+  const face = page.locator(".island .face");
+  await expect(face).toHaveAttribute("data-mood", "rest");
+  await page.evaluate(() => (window as never as { __meridian: { feel(m: string, ms: number): void } }).__meridian.feel("love", 400));
+  await expect(face).toHaveAttribute("data-mood", "love");
+  await expect(face).toHaveAttribute("data-mood", "rest");
+});
+
 test("media steps aside for a notification, then returns", async ({ page }) => {
   await page.evaluate(() => (window as never as { __mock: { publishMedia(p: boolean): void } }).__mock.publishMedia(true));
   await expect(island(page)).toHaveAttribute("data-view", "media");
@@ -312,17 +320,60 @@ test.describe("panel", () => {
     await expect(model).toBeFocused();
   });
 
-  test("desktop awareness sets its mode and what is never captured", async ({ page }) => {
-    await page.locator(".dock").getByRole("button", { name: "Desktop" }).click();
+  test("looking at the screen happens in chat, and nothing goes until a message is sent", async ({ page }) => {
+    await page.getByRole("button", { name: "Chat", exact: true }).click();
+    await page.getByRole("radio", { name: "Anthropic" }).click();
+    await page.getByRole("button", { name: "This window" }).click();
+    await expect(page.getByText("I see Code. What do you want to know?")).toBeVisible();
+    await expect(page.locator(".look-pill")).toContainText("Code");
+
+    await page.getByRole("button", { name: "See what would be shared" }).click();
+    await expect(page.getByRole("status").filter({ hasText: "Nothing has left this PC" })).toBeVisible();
+    await page.getByRole("button", { name: "Forget this" }).click();
+    await expect(page.locator(".look-pill")).toHaveCount(0);
+
+    await page.getByRole("button", { name: "Look", exact: true }).click();
+    await expect(page.locator(".look-pill")).toBeVisible();
+    await page.getByRole("button", { name: "Summarize" }).click();
+    await expect(page.locator(".look-pill")).toHaveCount(0);
+    await expect(page.locator('.message[data-role="user"]')).toContainText("Summarize this.");
+    await expect(page.locator('.message[data-role="user"]')).toContainText("Error: Invalid reference");
+  });
+
+  test("a conversation carries on after a restart", async ({ page }) => {
+    await page.getByRole("button", { name: "Chat", exact: true }).click();
+    await page.getByRole("radio", { name: "Claude Code" }).click();
+    await page.getByLabel("Message").fill("chat: hello");
+    await page.getByRole("button", { name: "Send" }).click();
+    await expect(page.locator(".log")).toContainText("Hello from the stand-in agent.");
+    await page.waitForTimeout(1100);
+
+    await page.reload();
+    await island(page).click();
+    await page.getByRole("button", { name: "Chat", exact: true }).click();
+    await page.getByRole("radio", { name: "Claude Code" }).click();
+    await page.getByRole("button", { name: "Conversation" }).click();
+    await page.getByRole("menuitemradio").nth(1).click();
+    await expect(page.locator(".log")).toContainText("Hello from the stand-in agent.");
+
+    await page.getByLabel("Message").fill("and one more thing");
+    await page.getByRole("button", { name: "Send" }).click();
+    await expect(page.locator(".log")).toContainText("Follow-up received: and one more thing");
+  });
+
+  test("how much the app may see is set in Settings", async ({ page }) => {
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await page.getByRole("button", { name: "Screen", exact: true }).click();
     await page.getByRole("button", { name: "Watch for errors" }).click();
     await expect(page.getByRole("heading", { name: "Watching for errors" })).toBeVisible();
     await page.getByRole("switch", { name: "Pause monitoring" }).click();
     await expect(page.getByRole("heading", { name: "Paused" })).toBeVisible();
 
     await page.getByRole("button", { name: "Off" }).click();
-    await expect(page.getByRole("button", { name: "Look at this window" })).toHaveCount(0);
+    await page.getByRole("button", { name: "Chat", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Look", exact: true })).toHaveCount(0);
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page.getByRole("button", { name: "When I ask" }).click();
-    await expect(page.getByRole("button", { name: "Look at this window" })).toBeVisible();
 
     const add = page.getByLabel("Add an app or window to skip");
     await add.fill("salary.xlsx");

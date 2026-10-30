@@ -140,6 +140,23 @@ pub(crate) struct Launch {
     pub images: Vec<String>,
 }
 
+/// A conversation from an earlier run of the app, which is enough to pick it up again.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Earlier {
+    pub id: String,
+    pub agent: AgentKind,
+    pub cwd: String,
+    pub model: Option<String>,
+    pub restricted: bool,
+    pub native_id: String,
+}
+
+/// The id goes to the agent as a command-line value, so it must not be able to read as a flag.
+fn plain_id(id: &str) -> bool {
+    !id.is_empty() && !id.starts_with('-') && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
 struct Record {
     agent: AgentKind,
     cwd: String,
@@ -245,6 +262,24 @@ impl Sessions {
                 }
             }
         });
+    }
+
+    /// Takes back a conversation from before a restart, so that `send` can resume it.
+    /// A session this run already knows is left as it is.
+    pub fn adopt(&self, earlier: Earlier) -> Result<(), AgentError> {
+        if !plain_id(&earlier.native_id) {
+            return Err(AgentError::UnknownSession);
+        }
+        let record = Record {
+            agent: earlier.agent,
+            cwd: earlier.cwd,
+            model: earlier.model,
+            restricted: earlier.restricted,
+            native_id: Some(earlier.native_id),
+            live: None,
+        };
+        self.inner.lock().unwrap().records.entry(earlier.id).or_insert(record);
+        Ok(())
     }
 
     /// Delivers an instruction: straight to a running process, or by resuming

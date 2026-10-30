@@ -121,7 +121,6 @@ const PANELS: Record<string, Geometry> = {
   home: { w: 780, h: 560, r: 32 },
   chat: { w: 680, h: 560, r: 32 },
   agents: { w: 820, h: 600, r: 32 },
-  desktop: { w: 720, h: 540, r: 32 },
   media: { w: 640, h: 310, r: 32 },
   day: { w: 720, h: 580, r: 32 },
   inbox: { w: 640, h: 500, r: 32 },

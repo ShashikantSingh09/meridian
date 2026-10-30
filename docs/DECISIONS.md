@@ -383,3 +383,30 @@ neither tool without a terminal, so no scripted run can reach them.
 PRD rule 9 asks for a backup, a shown diff and explicit confirmation before changing agent configuration, and following Claude Code
 had only the backup. The switch now shows the exact lines, the file and the backup's path, and writes nothing until confirmed, in
 both directions and during onboarding. The access token is replaced with a label in what is shown.
+
+## D46. Chat is where you look at the screen
+
+Screen awareness had its own page, with a review step that sent you to Chat afterwards. TwoCode has one surface, and that is why it
+feels natural: you point at something, a small pill shows what was seen, and you ask. So Look now lives in Chat. The eye in the message
+box, the hotkey and the two buttons on an empty chat all put a pill with a thumbnail above the conversation, and Explain, Summarize,
+Translate and Check spelling appear as one-click questions. Answers are plain text, with no bubbles.
+
+Nothing about consent changed. Nothing leaves the PC until a message is sent, that message says what goes with it, and the pill opens to
+show the exact text and picture, to narrow them, or to leave the picture out. The modes and the never-capture list moved to Settings,
+Screen. Nothing was removed.
+
+## D47. The face shows how it feels by its shape
+
+Soft eyes stay white. Colour alone says nothing to someone glancing up, while shape reads at once: arcs when pleased, slanted lids when
+sad, wide when it needs you, narrowed and reading from side to side when concentrating, one eye larger when thinking, a wink, hearts,
+dizzy rings. `feel()` shows one for a moment when something happens, so a finished task is a smile and an approved request is hearts.
+Faces other than Soft eyes use the nearest mood they have.
+
+It gets drowsy after 45 seconds and sleeps after two minutes, and is startled awake by the pointer. Asleep, it snores a z now and then.
+Glances, double blinks and snores run on the same random timer as blinks, so being alive still costs a short repaint every few seconds
+and not one every frame.
+
+## D48. Designs held for review
+
+Voice, charging, volume and brightness, and the next features from Coucou are on the design canvas, and none of them are built. A first
+volume display was started and taken out again when the owner asked to review it first.

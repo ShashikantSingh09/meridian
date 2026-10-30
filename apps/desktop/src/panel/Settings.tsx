@@ -1,10 +1,11 @@
 import { FollowSwitch } from "./Follow";
+import { ScreenSection } from "./Screen";
 import { spring } from "@meridian/design-system/motion";
 import { motion } from "motion/react";
 import { useState } from "react";
-import { Face, FACES } from "../island/faces";
+import { Face, FACES, type Mood } from "../island/faces";
 import { bridge } from "../lib/bridge";
-import { clearHistory, PREVIEWS, refreshAuth, setSettingsSection, showPreview, updateSettings, useApp, type SettingsSection } from "../lib/store";
+import { clearHistory, feel, PREVIEWS, refreshAuth, setSettingsSection, showPreview, updateSettings, useApp, type SettingsSection } from "../lib/store";
 import type { AgentInfo, Settings } from "../lib/types";
 import { Integrations } from "./Integrations";
 import { Providers } from "./Providers";
@@ -67,17 +68,36 @@ function General() {
   );
 }
 
+const MOODS: [Mood, string][] = [
+  ["done", "Happy"],
+  ["error", "Sad"],
+  ["needs", "Surprised"],
+  ["curious", "Curious"],
+  ["working", "Focused"],
+  ["wink", "Wink"],
+  ["love", "Love"],
+  ["dizzy", "Dizzy"],
+  ["sleepy", "Sleepy"],
+  ["asleep", "Asleep"],
+];
+
 function FacePicker() {
   const chosen = useApp((s) => s.settings.face);
+  const feeling = useApp((s) => s.feeling);
   return (
     <div className="stack">
       <h2>Face</h2>
       <div className="pick-grid">
         {FACES.map((f) => (
           <button key={f.id} className="pick" aria-pressed={f.id === chosen} title={f.note} onClick={() => void updateSettings({ face: f.id })}>
-            <span className="pick-stage"><Face id={f.id} mood="rest" scale={0.8} /></span>
+            <span className="pick-stage"><Face id={f.id} mood={feeling ?? "rest"} scale={0.8} /></span>
             <span className="pick-name">{f.name}</span>
           </button>
+        ))}
+      </div>
+      <div className="chips" role="group" aria-label="Try a mood">
+        {MOODS.map(([mood, label]) => (
+          <button key={mood} className="chip" aria-pressed={feeling === mood} onClick={() => feel(mood, 2600)}>{label}</button>
         ))}
       </div>
     </div>
@@ -198,7 +218,7 @@ function Privacy() {
       <h1>Privacy</h1>
       <Toggle name="monitoringPaused" label="Pause all monitoring" hint="Stops contextual awareness and background fetching at once. Also in the tray menu." />
       <p className="meta">
-        Your screen is read only as set in Desktop awareness, always on this PC, and shared only from a preview you approve.
+        Your screen is read only as set under Screen, always on this PC, and shared only from a preview you approve.
         No keystrokes or clipboard are read. The microphone opens only while the listening view is on screen, shows a dot
         while open, and nothing is recorded. Chat text goes only to the engine you pick. Providers are read with read-only
         tools, and what they return stays on this PC. No telemetry.
@@ -238,6 +258,7 @@ function About() {
 const SECTIONS: { id: SettingsSection; label: string; page: () => React.JSX.Element }[] = [
   { id: "general", label: "General", page: General },
   { id: "island", label: "Island", page: IslandSection },
+  { id: "screen", label: "Screen", page: ScreenSection },
   { id: "models", label: "AI models", page: Providers },
   { id: "providers", label: "Providers", page: Integrations },
   { id: "agents", label: "Coding agents", page: AgentsSection },

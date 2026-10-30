@@ -2773,3 +2773,146 @@ kbd {
 .code-line[data-change="gap"] {
   color: var(--ink-3);
 }
+
+/* A long name slides instead of cutting off */
+.slide {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.slide[data-moving="true"] {
+  text-overflow: clip;
+}
+
+.slide[data-moving="true"] > span {
+  display: inline-block;
+  animation: slide-along var(--slide-time) ease-in-out 0.5s infinite alternate;
+}
+
+@keyframes slide-along {
+  to { translate: var(--slide) 0; }
+}
+
+/* Chat: plain text, as in a conversation, with what was looked at above it */
+.message[data-role="user"],
+.log-user {
+  align-self: flex-end;
+  max-width: 72%;
+  padding: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--ink-2);
+  font-weight: 500;
+  text-align: right;
+}
+
+.message[data-role="assistant"] {
+  padding: 0;
+  background: none;
+}
+
+.look {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 var(--space-4) 8px;
+}
+
+.look-pill {
+  flex: none;
+  max-width: 220px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 8px 0 11px;
+  border-radius: 999px;
+  background: #1c1c1e;
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.look-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #30d158;
+}
+
+.look-thumb {
+  flex: none;
+  width: 32px;
+  height: 20px;
+  padding: 0;
+  border-radius: 5px;
+  overflow: hidden;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.22);
+  cursor: zoom-in;
+}
+
+.look-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.look-forget {
+  flex: none;
+  display: grid;
+  color: var(--ink-2);
+}
+
+.look-forget:hover {
+  color: var(--ink-1);
+}
+
+.look-sheet {
+  max-height: 290px;
+  overflow-y: auto;
+  padding: 10px;
+  border-radius: 15px;
+  background: #121316;
+}
+
+.look-refused {
+  padding: 0 var(--space-4) 8px;
+}
+
+.chat-chips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.chat-chip {
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 13px 0 10px;
+  border-radius: 10px;
+  background: #1c1c1e;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: #fff;
+  transition: background 0.14s ease;
+}
+
+.chat-chip svg {
+  color: var(--tone);
+}
+
+.chat-chip:hover:not(:disabled) {
+  background: #2c2c2e;
+}
+
+.chat-chip:disabled {
+  color: var(--ink-3);
+}

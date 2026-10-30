@@ -202,6 +202,7 @@ pub fn run() {
             commands::agents_detect,
             commands::session_start,
             commands::session_send,
+            commands::session_adopt,
             commands::session_cancel,
             commands::session_answer,
             commands::media_action,

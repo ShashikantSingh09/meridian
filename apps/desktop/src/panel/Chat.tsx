@@ -20,12 +20,14 @@ import {
   setAgentCwd,
   setAgentMode,
   setListening,
+  shareCapture,
   openSettings,
   useApp,
 } from "../lib/store";
 import type { AgentId } from "../lib/types";
 import { Face } from "../island/faces";
 import { LogLine } from "./LogLine";
+import { LookButton, LookChips, lookGreeting, LookPill, seenName } from "./Look";
 import { Markdown } from "./Markdown";
 import { Menu } from "./Menu";
 
@@ -62,6 +64,22 @@ function EnginePicker() {
   );
 }
 
+/** The empty chat: the face, what it can do, and what it has just looked at. */
+function ChatStart({ hello, note }: { hello: string; note: string }) {
+  const face = useApp((s) => s.settings.face);
+  const off = useApp((s) => s.settings.screenMode === "off");
+  const capture = useApp((s) => s.screen.capture);
+  const words = lookGreeting(hello, note, capture ? (seenName(capture.window?.process) ?? "that") : null, off);
+  return (
+    <div className="chat-start">
+      <Face id={face} mood="rest" scale={1.4} />
+      <p className="chat-hello">{words.hello}</p>
+      <p className="meta">{words.note}</p>
+      <LookChips />
+    </div>
+  );
+}
+
 function SignInBanner({ agent }: { agent: AgentId }) {
   const status = useApp((s) => s.auth[agent]);
   const name = useApp((s) => s.agents.find((a) => a.id === agent)?.name ?? agent);
@@ -76,8 +94,8 @@ function SignInBanner({ agent }: { agent: AgentId }) {
 }
 
 function AgentChat({ agent }: { agent: AgentId }) {
-  const face = useApp((s) => s.settings.face);
   const { mode, cwd, sessionId } = useApp((s) => s.agentChat);
+  const capture = useApp((s) => s.screen.capture);
   const defaultDir = useApp((s) => s.settings.agentDefaultDir);
   const sessions = useApp((s) => s.sessions);
   const auth = useApp((s) => s.auth[agent]);
@@ -100,6 +118,7 @@ function AgentChat({ agent }: { agent: AgentId }) {
     const references = files.map((f) => `- ${f}`).join("\n");
     setText("");
     setFiles([]);
+    if (capture) return shareCapture(prompt);
     void sendAgentChat(files.length > 0 ? `${prompt}\n\nReferenced files:\n${references}` : prompt);
   };
 
@@ -132,6 +151,7 @@ function AgentChat({ agent }: { agent: AgentId }) {
       </header>
 
       <SignInBanner agent={agent} />
+      <LookPill />
 
       {mode === "project" && (
         <div className="row bar">
@@ -155,15 +175,10 @@ function AgentChat({ agent }: { agent: AgentId }) {
 
       <div className="log" ref={log} aria-live="polite">
         {session === null ? (
-          <div className="chat-start">
-            <Face id={face} mood="rest" scale={1.4} />
-            <p className="chat-hello">{mode === "general" ? "What can I help with?" : "What should we work on?"}</p>
-            <p className="meta">
-              {mode === "general"
-                ? "Questions, research and explanations. No shell, no file edits, no project access."
-                : "Works in your folder, and asks before it changes anything."}
-            </p>
-          </div>
+          <ChatStart
+            hello={mode === "general" ? "What can I do for you?" : "What should we work on?"}
+            note={mode === "general" ? "Ask anything." : "I work in your folder, and ask before changing anything."}
+          />
         ) : (
           session.log.map((entry, i) => <LogLine key={i} entry={entry} />)
         )}
@@ -185,12 +200,13 @@ function AgentChat({ agent }: { agent: AgentId }) {
       )}
 
       <form className="composer" onSubmit={submit}>
+        <LookButton />
         <button type="button" className="round" aria-label="Reference a file" title="Reference a file" onClick={() => void attach()}>
           <Icon name="plus" size={14} />
         </button>
         <input
           aria-label="Message"
-          placeholder={session ? "Send a follow-up" : "Message"}
+          placeholder={capture ? "Ask about what is here" : session ? "Ask on" : "Ask anything"}
           value={text}
           onChange={(e) => setText(e.target.value)}
         />
@@ -210,6 +226,7 @@ function AgentChat({ agent }: { agent: AgentId }) {
 
 function ApiChat() {
   const face = useApp((s) => s.settings.face);
+  const capture = useApp((s) => s.screen.capture);
   const chat = useApp((s) => s.chat);
   const providers = useApp((s) => s.providers);
   const localOnline = useApp((s) => s.localOnline);
@@ -238,6 +255,7 @@ function ApiChat() {
     const prompt = text.trim();
     if (!prompt || pending) return;
     setText("");
+    if (capture) return shareCapture(prompt);
     void sendChat(prompt);
   };
 
@@ -262,6 +280,7 @@ function ApiChat() {
         <button className="pill-button" onClick={clearChat} disabled={chat.messages.length === 0}>New chat</button>
       </header>
 
+      <LookPill />
       <div className="messages" ref={log} aria-live="polite">
         {chat.messages.length === 0 &&
           (noEngine ? (
@@ -272,10 +291,7 @@ function ApiChat() {
               <button className="solid" onClick={() => openSettings("models")}>Choose your AI</button>
             </div>
           ) : (
-            <div className="chat-start">
-              <Face id={face} mood="rest" scale={1.4} />
-              <p className="chat-hello">What can I help with?</p>
-            </div>
+            <ChatStart hello="What can I do for you?" note="Ask anything." />
           ))}
         {chat.messages.map((m, i) => (
           <div key={i} className="message" data-role={m.role}>
@@ -289,7 +305,8 @@ function ApiChat() {
         <button type="button" className="round" aria-label="Show microphone level" title="Microphone level preview. Speech to text arrives with voice." onClick={() => setListening(true)}>
           <Icon name="mic" size={14} />
         </button>
-        <input aria-label="Message" placeholder="Message" value={text} onChange={(e) => setText(e.target.value)} />
+        <LookButton />
+        <input aria-label="Message" placeholder={capture ? "Ask about what is here" : chat.messages.length ? "Ask on" : "Ask anything"} value={text} onChange={(e) => setText(e.target.value)} />
         {pending ? (
           <button type="button" className="round" aria-label="Stop" onClick={cancelChat}>
             <Icon name="stop" size={14} />

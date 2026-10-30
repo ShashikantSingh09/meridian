@@ -39,6 +39,7 @@ let emit: (e: AgentEnvelope) => void = () => {};
 let authed = true;
 let pushReminders: (r: Reminder[]) => void = () => {};
 let accounts: ConnectedAccount[] = [];
+const known = new Set<string>();
 let watching = false;
 let lastAnswers: Record<string, string | string[]> | null = null;
 let integrations: Integration[] = [
@@ -241,6 +242,7 @@ export const mock = {
 
   async startSession(request: { agent: string; cwd: string; prompt: string }) {
     const sessionId = crypto.randomUUID();
+    known.add(sessionId);
     const send = (event: AgentEvent) => emit({ sessionId, event });
     void (async () => {
       await sleep(20);
@@ -274,7 +276,10 @@ export const mock = {
     emit({ sessionId, event: { type: "status", status: "completed" } });
   },
 
+  adoptSession: async (id: string) => void known.add(id),
   async sendToSession(sessionId: string, text: string) {
+    // As in the app: a session from before a restart has to be taken back first.
+    if (!known.has(sessionId)) throw new Error("No session with that id.");
     emit({ sessionId, event: { type: "status", status: "running" } });
     await sleep(30);
     emit({ sessionId, event: { type: "text", text: `Follow-up received: ${text}` } });
