@@ -15,7 +15,7 @@ mod codex;
 mod detect;
 mod process;
 
-pub use detect::{detect, Capabilities, AgentInfo};
+pub use detect::{auth_status, detect, open_login, AgentInfo, AuthStatus, Capabilities};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AgentKind {
@@ -78,6 +78,9 @@ pub struct StartRequest {
     pub cwd: String,
     pub prompt: String,
     pub model: Option<String>,
+    /// General assistant: no shell, no file edits, no connectors.
+    #[serde(default)]
+    pub restricted: bool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -95,7 +98,10 @@ pub enum AgentError {
 pub(crate) enum Command {
     Send(String),
     Answer { id: String, allow: bool },
+    /// Stop the current turn, keeping the session where the agent allows it.
     Cancel,
+    /// End everything now: the app is quitting.
+    Kill,
 }
 
 pub(crate) type Emit = Arc<dyn Fn(AgentEvent) + Send + Sync>;
@@ -107,21 +113,24 @@ pub(crate) struct Launch {
     pub prompt: String,
     pub model: Option<String>,
     pub resume: Option<String>,
+    pub restricted: bool,
 }
 
-/// How to pick a finished session up again.
-#[derive(Clone)]
-struct Finished {
+struct Record {
     agent: AgentKind,
     cwd: String,
     model: Option<String>,
-    native_id: String,
+    restricted: bool,
+    /// The agent's own id, needed to resume after the process has gone.
+    native_id: Option<String>,
+    /// The running process, tagged so a finishing run cannot retire its successor.
+    live: Option<(u64, mpsc::UnboundedSender<Command>)>,
 }
 
+#[derive(Default)]
 struct Inner {
-    live: HashMap<String, mpsc::UnboundedSender<Command>>,
-    native: HashMap<String, String>,
-    finished: HashMap<String, Finished>,
+    records: HashMap<String, Record>,
+    runs: u64,
 }
 
 #[derive(Clone)]
@@ -143,8 +152,7 @@ impl Sessions {
     pub async fn new(emit: impl Fn(Envelope) + Send + Sync + 'static) -> std::io::Result<Self> {
         let emit: Arc<dyn Fn(Envelope) + Send + Sync> = Arc::new(emit);
         let approvals = approvals::ApprovalServer::start().await?;
-        let inner = Inner { live: HashMap::new(), native: HashMap::new(), finished: HashMap::new() };
-        Ok(Self { inner: Arc::new(Mutex::new(inner)), emit, approvals })
+        Ok(Self { inner: Arc::default(), emit, approvals })
     }
 
     pub fn start(&self, request: StartRequest) -> Result<String, AgentError> {
@@ -154,41 +162,45 @@ impl Sessions {
         let id = uuid::Uuid::new_v4().to_string();
         let launch = Launch {
             exe: locate(request.agent)?,
-            cwd: request.cwd,
+            cwd: request.cwd.clone(),
             prompt: request.prompt,
-            model: request.model,
+            model: request.model.clone(),
             resume: None,
+            restricted: request.restricted,
         };
+        let record = Record {
+            agent: request.agent,
+            cwd: request.cwd,
+            model: request.model,
+            restricted: request.restricted,
+            native_id: None,
+            live: None,
+        };
+        self.inner.lock().unwrap().records.insert(id.clone(), record);
         self.launch(id.clone(), request.agent, launch);
         Ok(id)
     }
 
     fn launch(&self, id: String, agent: AgentKind, launch: Launch) {
         let (tx, rx) = mpsc::unbounded_channel();
-        self.inner.lock().unwrap().live.insert(id.clone(), tx);
+        let run = {
+            let mut inner = self.inner.lock().unwrap();
+            inner.runs += 1;
+            let run = inner.runs;
+            if let Some(record) = inner.records.get_mut(&id) {
+                record.live = Some((run, tx));
+            }
+            run
+        };
 
         let this = self.clone();
-        let cwd = launch.cwd.clone();
-        let model = launch.model.clone();
-        let session = id;
+        let session = id.clone();
         let emit: Emit = Arc::new(move |event| {
-            let mut inner = this.inner.lock().unwrap();
-            match &event {
-                AgentEvent::Started { native_id: Some(native), .. } => {
-                    inner.native.insert(session.clone(), native.clone());
+            if let AgentEvent::Started { native_id: Some(native), .. } = &event {
+                if let Some(record) = this.inner.lock().unwrap().records.get_mut(&session) {
+                    record.native_id = Some(native.clone());
                 }
-                // Retired here, not when the task ends: the process may take a
-                // moment to go, and by then a follow-up may have resumed this id.
-                AgentEvent::Status { status: SessionStatus::Completed | SessionStatus::Failed | SessionStatus::Cancelled, .. } => {
-                    inner.live.remove(&session);
-                    if let Some(native_id) = inner.native.get(&session).cloned() {
-                        let finished = Finished { agent, cwd: cwd.clone(), model: model.clone(), native_id };
-                        inner.finished.insert(session.clone(), finished);
-                    }
-                }
-                _ => {}
             }
-            drop(inner);
             (this.emit)(Envelope { session_id: session.clone(), event });
         });
 
@@ -202,53 +214,65 @@ impl Sessions {
                 }
                 AgentKind::Codex => codex::run(launch, emit, rx).await,
             }
+            if let Some(record) = this.inner.lock().unwrap().records.get_mut(&id) {
+                if matches!(record.live, Some((current, _)) if current == run) {
+                    record.live = None;
+                }
+            }
         });
     }
 
-    /// Delivers an instruction: straight to a live session, or by resuming a
-    /// finished one under the same id.
+    /// Delivers an instruction: straight to a running process, or by resuming
+    /// the session if its process has gone.
     pub fn send(&self, id: &str, text: String) -> Result<(), AgentError> {
-        let finished = {
+        let launch = {
             let inner = self.inner.lock().unwrap();
-            if let Some(tx) = inner.live.get(id) {
-                let _ = tx.send(Command::Send(text));
-                return Ok(());
+            let record = inner.records.get(id).ok_or(AgentError::UnknownSession)?;
+            if let Some((_, tx)) = &record.live {
+                if tx.send(Command::Send(text.clone())).is_ok() {
+                    return Ok(());
+                }
             }
-            inner.finished.get(id).cloned().ok_or(AgentError::UnknownSession)?
+            Launch {
+                exe: locate(record.agent)?,
+                cwd: record.cwd.clone(),
+                prompt: text,
+                model: record.model.clone(),
+                resume: Some(record.native_id.clone().ok_or(AgentError::UnknownSession)?),
+                restricted: record.restricted,
+            }
         };
-        let launch = Launch {
-            exe: locate(finished.agent)?,
-            cwd: finished.cwd,
-            prompt: text,
-            model: finished.model,
-            resume: Some(finished.native_id),
-        };
+        let agent = self.inner.lock().unwrap().records[id].agent;
         (self.emit)(Envelope { session_id: id.to_string(), event: AgentEvent::status(SessionStatus::Starting) });
-        self.launch(id.to_string(), finished.agent, launch);
+        self.launch(id.to_string(), agent, launch);
+        Ok(())
+    }
+
+    fn command(&self, id: &str, command: Command) -> Result<(), AgentError> {
+        let inner = self.inner.lock().unwrap();
+        let live = inner.records.get(id).and_then(|r| r.live.as_ref());
+        let (_, tx) = live.ok_or(AgentError::UnknownSession)?;
+        let _ = tx.send(command);
         Ok(())
     }
 
     pub fn cancel(&self, id: &str) -> Result<(), AgentError> {
-        let inner = self.inner.lock().unwrap();
-        let tx = inner.live.get(id).ok_or(AgentError::UnknownSession)?;
-        let _ = tx.send(Command::Cancel);
-        Ok(())
+        self.command(id, Command::Cancel)
     }
 
     pub fn answer(&self, id: &str, approval: &str, allow: bool) -> Result<(), AgentError> {
         if self.approvals.answer(approval, allow) {
             return Ok(());
         }
-        let inner = self.inner.lock().unwrap();
-        let tx = inner.live.get(id).ok_or(AgentError::UnknownSession)?;
-        let _ = tx.send(Command::Answer { id: approval.to_string(), allow });
-        Ok(())
+        self.command(id, Command::Answer { id: approval.to_string(), allow })
     }
 
     /// Ends every live session. Called on quit, so no agent outlives the app.
     pub fn shutdown(&self) {
-        for tx in self.inner.lock().unwrap().live.values() {
-            let _ = tx.send(Command::Cancel);
+        for record in self.inner.lock().unwrap().records.values() {
+            if let Some((_, tx)) = &record.live {
+                let _ = tx.send(Command::Kill);
+            }
         }
     }
 }

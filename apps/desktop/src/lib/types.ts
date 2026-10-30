@@ -106,6 +106,19 @@ export interface Settings {
   providerBaseUrls: Record<string, string>;
   systemPrompt: string;
   localOnly: boolean;
+  islandMonitor: string;
+  islandAlign: "left" | "center" | "right";
+  islandAutoHide: boolean;
+  showClock: boolean;
+  animationSpeed: number;
+  agentDefaultDir: string | null;
+}
+
+/** What a CLI reports about its own sign-in. */
+export interface AuthStatus {
+  signedIn: boolean | null;
+  method: string | null;
+  plan: string | null;
 }
 
 export const defaultSettings: Settings = {
@@ -118,4 +131,10 @@ export const defaultSettings: Settings = {
   providerBaseUrls: {},
   systemPrompt: "",
   localOnly: false,
+  islandMonitor: "primary",
+  islandAlign: "center",
+  islandAutoHide: false,
+  showClock: false,
+  animationSpeed: 1,
+  agentDefaultDir: null,
 };

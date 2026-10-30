@@ -1,4 +1,4 @@
-﻿// End-to-end through the real app: real store, real Rust core, real CLIs.
+// End-to-end through the real app: real store, real Rust core, real CLIs.
 //
 // Start the app with a debug port, then pick a mode:
 //   $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=9222"
@@ -133,6 +133,50 @@ if (mode === "resume") {
   await until(`__meridian.getState().sessions[0]?.status === 'completed'`, 60000, "second turn");
   const text = await ev(`__meridian.getState().sessions[0].log.map(l => l.text).join(' ')`);
   pass("resumed session kept its context", /heron/i.test(text.split("ok").pop()), text.slice(-60));
+}
+
+if (mode === "engine") {
+  const auth = JSON.parse(await ev(`JSON.stringify(__meridian.getState().auth['claude-code'] ?? null)`));
+  pass("sign-in comes from the CLI, with no API key", auth?.signedIn === true, JSON.stringify(auth));
+  pass("no account details reach the interface", !/@/.test(JSON.stringify(auth)));
+  const keys = await ev(`__meridian.getState().providers.find(p => p.id === 'anthropic').hasKey`);
+  console.log("anthropic api key present:", keys);
+
+  await ev(`__meridian.selectEngine('claude-code'); __meridian.setAgentMode('general'); 'ok'`);
+  const state = (expr) => ev(`(() => { const a = __meridian.getState().agentChat; const s = __meridian.getState().sessions.find(x => x.id === a.sessionId); return ${expr}; })()`);
+  const turn = async (text, label) => {
+    const t0 = Date.now();
+    await ev(`__meridian.sendAgentChat(${JSON.stringify(text)}); 'ok'`);
+    await until(`(() => { const a = __meridian.getState().agentChat; const s = __meridian.getState().sessions.find(x => x.id === a.sessionId); return s && s.status === 'running' })()`, 20000, label + " start");
+    const done = await until(`(() => { const a = __meridian.getState().agentChat; const s = __meridian.getState().sessions.find(x => x.id === a.sessionId); return s && ['completed','failed','cancelled'].includes(s.status) && s.status })()`, 60000, label);
+    return { ms: Date.now() - t0, status: done };
+  };
+
+  const first = await turn("Remember the word heron. Reply with just: ok", "first");
+  pass("first turn answered", first.status === "completed", `${first.ms} ms`);
+  const sid = await state("a.sessionId");
+  const second = await turn("What word did I ask you to remember? Reply with just that word.", "second");
+  pass("follow-up kept the context", /heron/i.test(await state("s.log.map(l => l.text).join(' ')")), `${second.ms} ms`);
+  pass("same conversation", (await state("a.sessionId")) === sid);
+  pass("follow-up on the live process is faster", second.ms < first.ms, `${first.ms} -> ${second.ms} ms`);
+
+  await ev(`__meridian.sendAgentChat('Use a shell command to create a file named shell-test.txt here. If you cannot, say: no shell'); 'ok'`);
+  await sleep(600);
+  await until(`(() => { const a = __meridian.getState().agentChat; const s = __meridian.getState().sessions.find(x => x.id === a.sessionId); return s && s.status === 'completed' })()`, 60000, "no shell");
+  const cwd = await state("s.cwd");
+  pass("general mode has no shell", !fs.existsSync(path.join(cwd, "shell-test.txt")), cwd.split(/[\\/]/).slice(-2).join("/"));
+
+  await ev(`__meridian.sendAgentChat('Count from 1 to 400, one number per line, nothing else.'); 'ok'`);
+  await until(`(() => { const a = __meridian.getState().agentChat; const s = __meridian.getState().sessions.find(x => x.id === a.sessionId); return s && s.status === 'running' && s.log.at(-1).kind === 'text' && s.log.at(-1).text.length > 40 })()`, 30000, "counting");
+  const before = (await state("s.log.at(-1).text.length"));
+  await ev(`__meridian.cancelSession(${JSON.stringify(sid)}); 'ok'`);
+  await until(`(() => { const a = __meridian.getState().agentChat; const s = __meridian.getState().sessions.find(x => x.id === a.sessionId); return s && s.status === 'cancelled' })()`, 8000, "interrupt");
+  pass("stop interrupts the turn", (await state("s.status")) === "cancelled", `stopped after ${before} chars`);
+  const after = await turn("Reply with just the word still-here.", "after interrupt");
+  const lastText = await state("s.log.at(-1).text");
+  pass("the conversation survives an interrupt", after.status === "completed" && /still-here/i.test(lastText), `${after.status} ${after.ms} ms: ${lastText.slice(0, 60)}`);
+  console.log(await state("JSON.stringify(s.log.slice(-5).map(l => [l.kind, l.text.slice(0, 70)]))"));
+  await ev(`__meridian.selectEngine('anthropic'); 'ok'`);
 }
 
 if (mode === "codex") {

@@ -252,6 +252,10 @@ pub async fn run(launch: Launch, emit: Emit, mut commands: mpsc::UnboundedReceiv
                         emit(AgentEvent::ApprovalResolved { id });
                     }
                 }
+                Some(Command::Kill) => {
+                    rpc.agent.kill_tree().await;
+                    return emit(AgentEvent::status(SessionStatus::Cancelled));
+                }
                 Some(Command::Cancel) | None => {
                     match (&thread_id, &turn_id) {
                         (Some(thread), Some(turn)) if interrupted_at.is_none() => {

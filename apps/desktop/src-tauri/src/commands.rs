@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use agent_adapters::{AgentInfo, Sessions, StartRequest};
+use agent_adapters::{AgentInfo, AgentKind, AuthStatus, Sessions, StartRequest};
 use ai_core::{ChatEvent, ChatRequest, Capabilities, Endpoint, Kind, LocalServer, Message, ModelInfo, ProviderDef};
 use serde::Serialize;
 use tauri::ipc::Channel;
@@ -59,8 +59,19 @@ pub fn settings_get(core: State<'_, Core>) -> Settings {
 pub fn settings_save(app: AppHandle, core: State<'_, Core>, settings: Settings) -> Result<(), String> {
     let path = settings::path(&app).ok_or("No settings folder")?;
     settings::save(&path, &settings).map_err(stringify)?;
-    *core.settings.lock().unwrap() = settings;
+    let (monitor, align) = (settings.island_monitor.clone(), settings.island_align.clone());
+    let previous = std::mem::replace(&mut *core.settings.lock().unwrap(), settings);
+    if previous.island_monitor != monitor || previous.island_align != align {
+        if let Some(win) = app.get_webview_window(island::LABEL) {
+            island::place(&app, &win, &core.gate, &monitor, &align);
+        }
+    }
     Ok(())
+}
+
+#[tauri::command]
+pub fn monitors_list(app: AppHandle) -> Vec<String> {
+    island::monitor_names(&app)
 }
 
 // ── Providers ───────────────────────────────────────────────────────────────
@@ -176,6 +187,25 @@ pub fn chat_cancel(core: State<'_, Core>, request_id: String) {
 #[tauri::command]
 pub async fn agents_detect() -> Vec<AgentInfo> {
     agent_adapters::detect().await
+}
+
+#[tauri::command]
+pub async fn agent_auth(agent: AgentKind) -> Option<AuthStatus> {
+    agent_adapters::auth_status(agent).await
+}
+
+#[tauri::command]
+pub fn agent_login(agent: AgentKind) -> Result<(), String> {
+    agent_adapters::open_login(agent).map_err(stringify)
+}
+
+/// An empty folder of our own for general chat, so no project files or project
+/// instructions are in reach.
+#[tauri::command]
+pub fn assistant_dir(app: AppHandle) -> Result<String, String> {
+    let dir = app.path().app_local_data_dir().map_err(stringify)?.join("assistant");
+    std::fs::create_dir_all(&dir).map_err(stringify)?;
+    Ok(dir.to_string_lossy().into_owned())
 }
 
 #[tauri::command]

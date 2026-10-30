@@ -2,7 +2,7 @@
 // motion values, so an interrupted transition keeps its velocity instead of
 // restarting, and nothing inside re-renders per frame.
 
-import { contentEnter, contentEnterReduced, fade, instant, spring } from "@meridian/design-system/motion";
+import { contentEnter, contentEnterReduced, fade, instant, scaled, spring } from "@meridian/design-system/motion";
 import { AnimatePresence, animate, motion, useMotionValue, useReducedMotion } from "motion/react";
 import { useEffect, useMemo, useRef } from "react";
 import { bridge } from "../lib/bridge";
@@ -42,14 +42,14 @@ function useSnapshot(): Snapshot {
   );
 }
 
-function CompactContent({ view, reduced, hovered }: { view: IslandView; reduced: boolean; hovered: boolean }) {
+function CompactContent({ view, reduced, hovered, sliver }: { view: IslandView; reduced: boolean; hovered: boolean; sliver: boolean }) {
   switch (view) {
     case "listening":
       return <ListeningView reduced={reduced} />;
     case "thinking":
       return <ThinkingView reduced={reduced} />;
     case "working":
-      return <WorkingView reduced={reduced} />;
+      return <WorkingView reduced={reduced} hovered={hovered} />;
     case "multitask":
       return <MultitaskView reduced={reduced} />;
     case "notification":
@@ -59,7 +59,7 @@ function CompactContent({ view, reduced, hovered }: { view: IslandView; reduced:
     case "error":
       return <ErrorView reduced={reduced} />;
     default:
-      return <IdleView reduced={reduced} hovered={hovered} />;
+      return <IdleView reduced={reduced} hovered={hovered} sliver={sliver} />;
   }
 }
 
@@ -67,12 +67,18 @@ export function Island() {
   const snapshot = useSnapshot();
   const hovered = useApp((s) => s.hovered);
   const reduced = useReduced();
+  const speed = useApp((s) => s.settings.animationSpeed);
+  const clock = useApp((s) => s.settings.showClock);
+  const sliver = useApp((s) => s.settings.islandAutoHide);
+  const align = useApp((s) => s.settings.islandAlign);
   const view = deriveView(snapshot);
 
   const target = geometryFor(view, {
     hovered,
     rows: activeSessions(snapshot.sessions).length,
     approval: waitingApproval(snapshot.sessions) !== null,
+    clock,
+    sliver,
   });
 
   const width = useMotionValue(target.w);
@@ -101,14 +107,14 @@ export function Island() {
 
   useEffect(() => {
     const grows = target.w >= width.get() && target.h >= height.get();
-    const transition = reduced ? instant : grows ? spring.grow : hovered ? spring.hover : spring.shrink;
+    const transition = reduced ? instant : scaled(grows ? spring.grow : hovered ? spring.hover : spring.shrink, speed);
     const controls = [
       animate(width, target.w, transition),
       animate(height, target.h, transition),
       animate(radius, target.r, transition),
     ];
     return () => controls.forEach((c) => c.stop());
-  }, [target.w, target.h, target.r, reduced, hovered, width, height, radius]);
+  }, [target.w, target.h, target.r, reduced, hovered, speed, width, height, radius]);
 
   const enter = reduced ? contentEnterReduced : contentEnter;
   const expanded = view === "expanded";
@@ -119,13 +125,14 @@ export function Island() {
       ref={el}
       className="island"
       data-view={view}
+      data-align={align}
       style={{ width, height, borderRadius: radius, top: TOP_GAP, "--glow": `var(${glow})` } as never}
       onClick={view === "idle" ? togglePanel : undefined}
     >
       <span className="sheen" aria-hidden="true" />
       <AnimatePresence mode="popLayout" initial={false}>
         <motion.div
-          key={expanded ? "panel" : view + (hovered && view === "idle" ? "-hover" : "")}
+          key={expanded ? "panel" : view + (hovered && (view === "idle" || view === "working") ? "-hover" : "")}
           className="island-content"
           style={{ width: target.w, height: target.h }}
           initial={enter.initial}
@@ -133,7 +140,7 @@ export function Island() {
           exit={enter.exit}
           transition={fade.in}
         >
-          {expanded ? <Panel /> : <CompactContent view={view} reduced={reduced} hovered={hovered} />}
+          {expanded ? <Panel /> : <CompactContent view={view} reduced={reduced} hovered={hovered} sliver={sliver} />}
         </motion.div>
       </AnimatePresence>
     </motion.div>

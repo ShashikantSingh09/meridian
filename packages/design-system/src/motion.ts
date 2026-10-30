@@ -8,6 +8,13 @@ export const spring = {
   hover: { type: "spring", stiffness: 620, damping: 40, mass: 1 },
 } as const;
 
+/** The same spring, faster or slower. Keeps the damping ratio, so the character holds. */
+export const scaled = (s: (typeof spring)[keyof typeof spring], speed: number) => ({
+  ...s,
+  stiffness: s.stiffness * speed * speed,
+  damping: s.damping * speed,
+});
+
 export const fade = {
   out: { duration: 0.09, ease: [0.4, 0, 1, 1] },
   in: { duration: 0.2, ease: [0.16, 1, 0.3, 1] },

@@ -1,5 +1,7 @@
-import { PREVIEWS, showPreview, updateSettings, useApp } from "../lib/store";
-import type { Settings } from "../lib/types";
+import { useState } from "react";
+import { bridge } from "../lib/bridge";
+import { PREVIEWS, refreshAuth, showPreview, updateSettings, useApp } from "../lib/store";
+import type { AgentInfo, Settings } from "../lib/types";
 
 function Choice<K extends keyof Settings>({ name, label, options }: {
   name: K;
@@ -21,7 +23,9 @@ function Choice<K extends keyof Settings>({ name, label, options }: {
   );
 }
 
-function Toggle({ name, label, hint }: { name: "ambient" | "autostart" | "localOnly"; label: string; hint: string }) {
+type Flag = "ambient" | "autostart" | "localOnly" | "showClock" | "islandAutoHide";
+
+function Toggle({ name, label, hint }: { name: Flag; label: string; hint: string }) {
   const value = useApp((s) => s.settings[name]);
   return (
     <label className="setting toggle">
@@ -34,14 +38,71 @@ function Toggle({ name, label, hint }: { name: "ambient" | "autostart" | "localO
   );
 }
 
+function AgentRow({ agent }: { agent: AgentInfo }) {
+  const auth = useApp((s) => s.auth[agent.id]);
+  const signedIn = auth?.signedIn;
+  const state = !agent.installed ? "Not installed" : signedIn === true ? `Signed in${auth?.plan ? `, ${auth.plan}` : ""}` : signedIn === false ? "Not signed in" : "Sign-in unknown";
+  return (
+    <div className="setting">
+      <span className="stacked grow">
+        <span className="label">{agent.name}</span>
+        <span className="meta truncate" title={agent.path ?? undefined}>{agent.version ?? "Not found on PATH"}</span>
+      </span>
+      <span className="meta">{state}</span>
+      {agent.installed && <button className="ghost" onClick={() => void refreshAuth(agent.id)}>Check</button>}
+      {agent.installed && signedIn !== true && <button className="solid" onClick={() => void bridge.agentLogin(agent.id)}>Sign in</button>}
+    </div>
+  );
+}
+
 export function SettingsPage() {
   const glass = useApp((s) => s.glass);
   const systemPrompt = useApp((s) => s.settings.systemPrompt);
+  const monitor = useApp((s) => s.settings.islandMonitor);
+  const defaultDir = useApp((s) => s.settings.agentDefaultDir);
+  const monitors = useApp((s) => s.monitors);
+  const agents = useApp((s) => s.agents);
   const preview = useApp((s) => s.preview);
+  const [picking, setPicking] = useState(false);
+
+  const pickDir = async () => {
+    setPicking(true);
+    const dir = await bridge.pickFolder();
+    setPicking(false);
+    if (dir) void updateSettings({ agentDefaultDir: dir });
+  };
 
   return (
     <div className="page-scroll stack-lg">
       <h1>Settings</h1>
+
+      <section className="stack">
+        <h2>Dynamic Island</h2>
+        <Choice name="islandAlign" label="Position" options={[
+          { value: "left", label: "Left" },
+          { value: "center", label: "Center" },
+          { value: "right", label: "Right" },
+        ]} />
+        {monitors.length > 1 && (
+          <label className="setting">
+            <span className="label">Display</span>
+            <select value={monitor} onChange={(e) => void updateSettings({ islandMonitor: e.target.value })}>
+              <option value="primary">Primary</option>
+              {monitors.map((m) => (
+                <option key={m} value={m}>{m}</option>
+              ))}
+            </select>
+          </label>
+        )}
+        <Choice name="animationSpeed" label="Animation speed" options={[
+          { value: 0.75, label: "Relaxed" },
+          { value: 1, label: "Normal" },
+          { value: 1.35, label: "Quick" },
+        ]} />
+        <Toggle name="showClock" label="Show the time" hint="Beside the line while idle." />
+        <Toggle name="islandAutoHide" label="Hide when idle" hint="Shrinks to a sliver. Move the pointer to it, or wait for activity, and it returns." />
+        <p className="meta">Hide it completely from the tray icon. The shortcut brings it back.</p>
+      </section>
 
       <section className="stack">
         <h2>Appearance</h2>
@@ -55,8 +116,22 @@ export function SettingsPage() {
           { value: "full", label: "Full" },
           { value: "reduced", label: "Reduced" },
         ]} />
-        <Toggle name="ambient" label="Ambient breathing" hint="The resting line fades slowly. Off means no idle animation at all." />
+        <Toggle name="ambient" label="Ambient breathing" hint="The line breathes for a few seconds after activity, then rests." />
         <p className="meta">Glass: {glass ? "native backdrop active" : "tinted fallback"}</p>
+      </section>
+
+      <section className="stack">
+        <h2>Coding agents</h2>
+        {agents.map((a) => (
+          <AgentRow key={a.id} agent={a} />
+        ))}
+        <div className="setting">
+          <span className="stacked grow">
+            <span className="label">Default project folder</span>
+            <span className="meta truncate" title={defaultDir ?? undefined}>{defaultDir ?? "None"}</span>
+          </span>
+          <button className="ghost" disabled={picking} onClick={() => void pickDir()}>Choose</button>
+        </div>
       </section>
 
       <section className="stack">
@@ -68,7 +143,7 @@ export function SettingsPage() {
           <textarea
             rows={3}
             defaultValue={systemPrompt}
-            placeholder="Sent as the system prompt with every chat"
+            placeholder="Sent as the system prompt with every API chat"
             onBlur={(e) => void updateSettings({ systemPrompt: e.target.value })}
           />
         </label>
@@ -79,7 +154,7 @@ export function SettingsPage() {
         <p className="meta">
           This build reads no screen, clipboard, keyboard or window content. The microphone opens only while
           the listening view is on screen, shows a dot while open, and nothing is recorded. Chat text goes
-          only to the provider you pick. No telemetry.
+          only to the engine you pick. No telemetry.
         </p>
       </section>
 

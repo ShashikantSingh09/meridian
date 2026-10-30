@@ -57,10 +57,10 @@ export interface Snapshot {
 
 const ACTIVE: ReadonlySet<SessionStatus> = new Set(["starting", "running", "waiting"]);
 
-export const activeSessions = (sessions: SessionSummary[]) =>
+export const activeSessions = <T extends SessionSummary>(sessions: T[]) =>
   sessions.filter((s) => ACTIVE.has(s.status));
 
-export const waitingApproval = (sessions: SessionSummary[]) =>
+export const waitingApproval = <T extends SessionSummary>(sessions: T[]) =>
   sessions.find((s) => s.approval !== null) ?? null;
 
 /**
@@ -108,9 +108,25 @@ const MULTITASK_ROW = 34;
 const MULTITASK_PAD = 18;
 export const MULTITASK_MAX_ROWS = 4;
 
-export function geometryFor(view: IslandView, ctx: { hovered: boolean; rows: number; approval: boolean }): Geometry {
+const IDLE_CLOCK: Geometry = { w: 176, h: 30, r: 15 };
+const SLIVER: Geometry = { w: 84, h: 6, r: 3 };
+const WORKING_HOVER: Geometry = { w: 416, h: 128, r: 24 };
+
+export interface GeometryContext {
+  hovered: boolean;
+  rows: number;
+  approval: boolean;
+  clock?: boolean;
+  /** Idle with auto-hide on: only a sliver remains until the pointer arrives. */
+  sliver?: boolean;
+}
+
+export function geometryFor(view: IslandView, ctx: GeometryContext): Geometry {
   if (view === "idle" && ctx.hovered) return IDLE_HOVER;
+  if (view === "idle" && ctx.sliver) return SLIVER;
+  if (view === "idle" && ctx.clock) return IDLE_CLOCK;
   if (view === "working" && ctx.approval) return APPROVAL;
+  if (view === "working" && ctx.hovered) return WORKING_HOVER;
   if (view === "multitask") {
     const rows = Math.min(ctx.rows, MULTITASK_MAX_ROWS);
     return { ...SIZES.multitask, h: rows * MULTITASK_ROW + MULTITASK_PAD };

@@ -4,7 +4,9 @@
 import type {
   AgentEnvelope,
   AgentEvent,
+  AgentId,
   AgentInfo,
+  AuthStatus,
   ChatEvent,
   LocalServer,
   ModelInfo,
@@ -23,6 +25,7 @@ const providers: ProviderInfo[] = [
 
 let settings: Settings = { ...defaultSettings };
 let emit: (e: AgentEnvelope) => void = () => {};
+let authed = true;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const pendingSecond = (sessionId: string) =>
   (window as never as { __meridian: { getState(): { sessions: { id: string; approval: { id: string } | null }[] } } })
@@ -56,6 +59,12 @@ export const mock = {
     { id: "codex", name: "Codex CLI", installed: false, path: null, version: null, capabilities: { approvals: true, resume: true, usage: true, progress: false } },
   ],
 
+  agentAuth: async (agent: AgentId): Promise<AuthStatus> =>
+    agent === "claude-code"
+      ? { signedIn: authed, method: "claude.ai", plan: "max" }
+      : { signedIn: false, method: null, plan: null },
+  setAuthed: (value: boolean) => void (authed = value),
+
   async startSession(request: { agent: string; cwd: string; prompt: string }) {
     const sessionId = crypto.randomUUID();
     const send = (event: AgentEvent) => emit({ sessionId, event });
@@ -63,6 +72,13 @@ export const mock = {
       await sleep(20);
       send({ type: "started", nativeId: "stand-in", model: "stand-in-model" });
       send({ type: "status", status: "running" });
+      if (request.prompt.startsWith("chat:")) {
+        await sleep(30);
+        send({ type: "text", text: "Hello from the stand-in agent." });
+        send({ type: "usage", input: 10, output: 5, costUsd: 0.001 });
+        send({ type: "status", status: "completed" });
+        return;
+      }
       send({ type: "activity", label: "Reading src/main.rs" });
       await sleep(60);
       send({ type: "approval", approval: { id: "a1", tool: "Bash", summary: "cargo test --workspace" } });
@@ -80,6 +96,13 @@ export const mock = {
     await sleep(40);
     emit({ sessionId, event: { type: "text", text: "All tests pass." } });
     emit({ sessionId, event: { type: "usage", input: 1200, output: 340, costUsd: 0.012 } });
+    emit({ sessionId, event: { type: "status", status: "completed" } });
+  },
+
+  async sendToSession(sessionId: string, text: string) {
+    emit({ sessionId, event: { type: "status", status: "running" } });
+    await sleep(30);
+    emit({ sessionId, event: { type: "text", text: `Follow-up received: ${text}` } });
     emit({ sessionId, event: { type: "status", status: "completed" } });
   },
 

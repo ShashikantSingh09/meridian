@@ -19,14 +19,30 @@ mod settings;
 use commands::Core;
 
 fn toggle(app: &AppHandle) {
+    reveal(app);
     let _ = app.emit_to(island::LABEL, "island-toggle", ());
+}
+
+/// Anything that asks for the island brings a hidden one back.
+fn reveal(app: &AppHandle) {
+    if let Some(win) = app.get_webview_window(island::LABEL) {
+        island::set_user_hidden(&win, &app.state::<Core>().gate, false);
+    }
+}
+
+fn toggle_visibility(app: &AppHandle) {
+    if let Some(win) = app.get_webview_window(island::LABEL) {
+        let gate = &app.state::<Core>().gate;
+        island::set_user_hidden(&win, gate, !island::user_hidden(gate));
+    }
 }
 
 fn build_tray(app: &App) -> tauri::Result<()> {
     let open = MenuItem::with_id(app, "open", "Open Meridian", true, None::<&str>)?;
     let settings = MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)?;
+    let hide = MenuItem::with_id(app, "visibility", "Show or hide island", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&open, &settings, &quit])?;
+    let menu = Menu::with_items(app, &[&open, &settings, &hide, &quit])?;
 
     let mut tray = TrayIconBuilder::new()
         .tooltip("Meridian")
@@ -35,8 +51,10 @@ fn build_tray(app: &App) -> tauri::Result<()> {
         .on_menu_event(|app, event| match event.id.as_ref() {
             "open" => toggle(app),
             "settings" => {
+                reveal(app);
                 let _ = app.emit_to(island::LABEL, "island-open-tab", "settings");
             }
+            "visibility" => toggle_visibility(app),
             "quit" => {
                 app.state::<Core>().sessions.shutdown();
                 // Give adapters a moment to end their process trees.
@@ -77,7 +95,9 @@ fn register_shortcut(app: &App) {
 fn setup(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     let handle = app.handle().clone();
     let path = settings::path(&handle).ok_or("no config directory")?;
-    let settings = Mutex::new(settings::load(&path));
+    let settings = settings::load(&path);
+    let placement = (settings.island_monitor.clone(), settings.island_align.clone());
+    let settings = Mutex::new(settings);
 
     let emitter = handle.clone();
     let sessions = tauri::async_runtime::block_on(Sessions::new(move |envelope| {
@@ -89,7 +109,7 @@ fn setup(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
 
     let win = app.get_webview_window(island::LABEL).ok_or("island window missing")?;
     island::restrict_permissions(&win);
-    island::place(&handle, &win);
+    island::place(&handle, &win, &gate, &placement.0, &placement.1);
     if let Some(hwnd) = island::hwnd(&win) {
         glass::attach(hwnd);
     }
@@ -120,6 +140,10 @@ pub fn run() {
             commands::glass_active,
             commands::settings_get,
             commands::settings_save,
+            commands::monitors_list,
+            commands::agent_auth,
+            commands::agent_login,
+            commands::assistant_dir,
             commands::providers_list,
             commands::provider_set_key,
             commands::provider_clear_key,

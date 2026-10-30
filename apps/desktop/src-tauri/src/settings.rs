@@ -19,6 +19,16 @@ pub struct Settings {
     pub provider_base_urls: HashMap<String, String>,
     pub system_prompt: String,
     pub local_only: bool,
+    /// "primary", or the name of a display.
+    pub island_monitor: String,
+    /// "left", "center" or "right" along the top of the display.
+    pub island_align: String,
+    /// Shrink to a sliver when idle, and come back on hover or activity.
+    pub island_auto_hide: bool,
+    pub show_clock: bool,
+    /// Multiplies every spring. 1 is the designed speed.
+    pub animation_speed: f64,
+    pub agent_default_dir: Option<String>,
 }
 
 impl Default for Settings {
@@ -33,6 +43,12 @@ impl Default for Settings {
             provider_base_urls: HashMap::new(),
             system_prompt: String::new(),
             local_only: false,
+            island_monitor: "primary".into(),
+            island_align: "center".into(),
+            island_auto_hide: false,
+            show_clock: false,
+            animation_speed: 1.0,
+            agent_default_dir: None,
         }
     }
 }

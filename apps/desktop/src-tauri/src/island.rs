@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde::Deserialize;
-use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, WebviewWindow};
+use tauri::{AppHandle, Emitter, Manager, Monitor, PhysicalPosition, PhysicalSize, WebviewWindow};
 use webview2_com::Microsoft::Web::WebView2::Win32::{
     COREWEBVIEW2_PERMISSION_KIND, COREWEBVIEW2_PERMISSION_KIND_MICROPHONE, COREWEBVIEW2_PERMISSION_STATE_ALLOW,
     COREWEBVIEW2_PERMISSION_STATE_DENY,
@@ -23,6 +23,10 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 
 pub const LABEL: &str = "island";
+
+/// Logical size of the fixed window. Matches tauri.conf.json.
+const WINDOW_W: f64 = 860.0;
+const WINDOW_H: f64 = 660.0;
 
 /// Around the shape, so the flag is already off when a moving cursor arrives.
 const HIT_MARGIN: f64 = 8.0;
@@ -67,6 +71,11 @@ pub struct Gate {
     hovered: AtomicBool,
     /// The window to return to when the panel closes.
     previous: AtomicIsize,
+    /// Window position in physical pixels, read at poll rate without a main-thread hop.
+    origin: Mutex<(f64, f64)>,
+    fullscreen: AtomicBool,
+    user_hidden: AtomicBool,
+    hidden: AtomicBool,
 }
 
 pub fn hwnd(win: &WebviewWindow) -> Option<HWND> {
@@ -137,12 +146,64 @@ pub fn restrict_permissions(win: &WebviewWindow) {
     });
 }
 
-/// Top centre of the primary display.
-pub fn place(app: &AppHandle, win: &WebviewWindow) {
-    let monitor = app.primary_monitor().ok().flatten().or_else(|| win.current_monitor().ok().flatten());
-    let (Some(monitor), Ok(size)) = (monitor, win.outer_size()) else { return };
-    let x = monitor.position().x + (monitor.size().width as i32 - size.width as i32) / 2;
-    let _ = win.set_position(PhysicalPosition::new(x, monitor.position().y));
+fn chosen_monitor(app: &AppHandle, win: &WebviewWindow, pref: &str) -> Option<Monitor> {
+    let named = app.available_monitors().ok().and_then(|all| all.into_iter().find(|m| m.name().is_some_and(|n| n == pref)));
+    // A display that was unplugged falls back to the primary one.
+    named.or_else(|| app.primary_monitor().ok().flatten()).or_else(|| win.current_monitor().ok().flatten())
+}
+
+/// Puts the window at the top of the chosen display, inside its work area so a
+/// taskbar moved to the top is respected. Sized from that display's scale, so
+/// moving between displays keeps the same logical size.
+pub fn place(app: &AppHandle, win: &WebviewWindow, gate: &Gate, pref: &str, align: &str) {
+    let Some(monitor) = chosen_monitor(app, win, pref) else { return };
+    let scale = monitor.scale_factor();
+    let (w, h) = ((WINDOW_W * scale).round() as u32, (WINDOW_H * scale).round() as u32);
+    let area = monitor.work_area();
+    let x = match align {
+        "left" => area.position.x,
+        "right" => area.position.x + area.size.width as i32 - w as i32,
+        _ => area.position.x + (area.size.width as i32 - w as i32) / 2,
+    };
+    let _ = win.set_size(PhysicalSize::new(w, h));
+    let _ = win.set_position(PhysicalPosition::new(x, area.position.y));
+    // Crossing into a display of another scale can resize the window.
+    let _ = win.set_size(PhysicalSize::new(w, h));
+    *gate.origin.lock().unwrap() = (x as f64, area.position.y as f64);
+    apply_style(win, gate);
+}
+
+pub fn monitor_names(app: &AppHandle) -> Vec<String> {
+    let all = app.available_monitors().unwrap_or_default();
+    all.iter().filter_map(|m| m.name().cloned()).collect()
+}
+
+/// Changes when a display is plugged in, removed, rearranged or rescaled.
+fn display_signature(app: &AppHandle) -> String {
+    let all = app.available_monitors().unwrap_or_default();
+    let parts: Vec<String> = all
+        .iter()
+        .map(|m| format!("{:?}{:?}{:?}{}", m.name(), m.position(), m.size(), m.scale_factor()))
+        .collect();
+    parts.join("|")
+}
+
+/// The user's choice and a fullscreen app can both hide the island.
+fn sync_visibility(win: &WebviewWindow, gate: &Gate) {
+    let want = gate.fullscreen.load(Ordering::Relaxed) || gate.user_hidden.load(Ordering::Relaxed);
+    if gate.hidden.swap(want, Ordering::Relaxed) != want {
+        let _ = if want { win.hide() } else { win.show() };
+        apply_style(win, gate);
+    }
+}
+
+pub fn set_user_hidden(win: &WebviewWindow, gate: &Gate, hidden: bool) {
+    gate.user_hidden.store(hidden, Ordering::Relaxed);
+    sync_visibility(win, gate);
+}
+
+pub fn user_hidden(gate: &Gate) -> bool {
+    gate.user_hidden.load(Ordering::Relaxed)
 }
 
 fn cursor() -> Option<(f64, f64)> {
@@ -169,18 +230,16 @@ pub fn spawn_poll(app: AppHandle, gate: Arc<Gate>) {
     std::thread::spawn(move || {
         let Some(win) = app.get_webview_window(LABEL) else { return };
         let mut tick = 0u32;
-        let mut hidden = false;
-        let mut origin = (0.0, 0.0);
+        let mut displays = display_signature(&app);
         loop {
             if tick % SLOW_EVERY == 0 {
-                if let Ok(position) = win.outer_position() {
-                    origin = (position.x as f64, position.y as f64);
-                }
-                let should_hide = fullscreen_in_front();
-                if should_hide != hidden {
-                    hidden = should_hide;
-                    let _ = if hidden { win.hide() } else { win.show() };
-                    apply_style(&win, &gate);
+                gate.fullscreen.store(fullscreen_in_front(), Ordering::Relaxed);
+                sync_visibility(&win, &gate);
+                let now = display_signature(&app);
+                if now != displays {
+                    displays = now;
+                    let settings = app.state::<crate::commands::Core>().settings.lock().unwrap().clone();
+                    place(&app, &win, &gate, &settings.island_monitor, &settings.island_align);
                 }
             }
             tick = tick.wrapping_add(1);
@@ -189,6 +248,7 @@ pub fn spawn_poll(app: AppHandle, gate: Arc<Gate>) {
                 std::thread::sleep(FAR);
                 continue;
             };
+            let origin = *gate.origin.lock().unwrap();
             let (x, y) = (cx - origin.0, cy - origin.1);
             let rect = *gate.rect.lock().unwrap();
             let on_island = rect.contains(x, y, HIT_MARGIN);

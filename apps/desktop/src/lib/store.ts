@@ -8,6 +8,7 @@ import type {
   AgentId,
   AgentInfo,
   Approval,
+  AuthStatus,
   ChatMessage,
   ModelInfo,
   ProviderInfo,
@@ -18,12 +19,16 @@ import { defaultSettings } from "./types";
 export type Tab = "home" | "chat" | "agents" | "providers" | "settings";
 
 export interface LogEntry {
-  kind: "text" | "activity" | "system";
+  kind: "user" | "text" | "activity" | "system";
   text: string;
 }
 
 export interface SessionDetail extends SessionSummary {
   agentId: AgentId;
+  /** Where it lives in the interface: a conversation, or a task in Agents. */
+  surface: "chat" | "agents";
+  title: string;
+  mode: AgentMode;
   cwd: string;
   prompt: string;
   model: string | null;
@@ -41,6 +46,18 @@ export interface ChatState {
   model: string | null;
   models: ModelInfo[];
   usage: { input: number; output: number } | null;
+  /** A few words of what is being asked, for the island. */
+  task: string;
+}
+
+export type AgentMode = "general" | "project";
+
+/** A coding agent selected as the chat engine. Separate from API conversations. */
+export interface AgentChat {
+  agent: AgentId | null;
+  mode: AgentMode;
+  cwd: string | null;
+  sessionId: string | null;
 }
 
 export interface AppState {
@@ -59,7 +76,10 @@ export interface AppState {
   /** Local providers whose server answered the last probe. */
   localOnline: string[];
   agents: AgentInfo[];
+  auth: Partial<Record<AgentId, AuthStatus>>;
   chat: ChatState;
+  agentChat: AgentChat;
+  monitors: string[];
   preview: string | null;
 }
 
@@ -81,7 +101,10 @@ let state: AppState = {
   providers: [],
   localOnline: [],
   agents: [],
-  chat: { messages: [], requestId: null, providerId: null, model: null, models: [], usage: null },
+  auth: {},
+  chat: { messages: [], requestId: null, providerId: null, model: null, models: [], usage: null, task: "" },
+  agentChat: { agent: null, mode: "general", cwd: null, sessionId: null },
+  monitors: [],
   preview: null,
 };
 
@@ -155,6 +178,7 @@ function applyAppearance(s: Settings) {
   document.documentElement.dataset.theme = s.theme;
   document.documentElement.dataset.motion = s.motion;
   document.documentElement.dataset.ambient = String(s.ambient);
+  document.documentElement.dataset.align = s.islandAlign;
 }
 
 export async function updateSettings(patch: Partial<Settings>) {
@@ -238,7 +262,13 @@ export async function sendChat(text: string) {
     : [];
   set({
     chatPending: true,
-    chat: { ...state.chat, requestId, usage: null, messages: [...history, { role: "assistant", content: "" }] },
+    chat: {
+      ...state.chat,
+      requestId,
+      usage: null,
+      task: text.slice(0, 48),
+      messages: [...history, { role: "assistant", content: "" }],
+    },
   });
 
   const finish = () => set({ chatPending: false, chat: { ...state.chat, requestId: null } });
@@ -273,6 +303,45 @@ export function cancelChat() {
 }
 
 export const clearChat = () => set({ chat: { ...state.chat, messages: [], usage: null } });
+
+// ── Engines ─────────────────────────────────────────────────────────────────
+
+export async function refreshAuth(agent: AgentId) {
+  const status = await bridge.agentAuth(agent).catch(() => null);
+  if (status) set({ auth: { ...state.auth, [agent]: status } });
+  return status;
+}
+
+export function selectEngine(id: string) {
+  if (id === "claude-code" || id === "codex") {
+    const latest = state.sessions.find((s) => s.surface === "chat" && s.agentId === id);
+    set({ agentChat: { ...state.agentChat, agent: id, sessionId: latest?.id ?? null, mode: latest?.mode ?? state.agentChat.mode } });
+    void refreshAuth(id);
+    return;
+  }
+  set({ agentChat: { ...state.agentChat, agent: null } });
+  void selectProvider(id);
+}
+
+export const setAgentMode = (mode: AgentMode) =>
+  set({ agentChat: { ...state.agentChat, mode, sessionId: null } });
+export const setAgentCwd = (cwd: string) => set({ agentChat: { ...state.agentChat, cwd, sessionId: null } });
+export const newAgentConversation = () => set({ agentChat: { ...state.agentChat, sessionId: null } });
+export const selectAgentConversation = (sessionId: string) =>
+  set({ agentChat: { ...state.agentChat, sessionId } });
+
+export async function sendAgentChat(text: string) {
+  const { agent, mode, cwd, sessionId } = state.agentChat;
+  if (!agent) return;
+  if (sessionId) return sendToSession(sessionId, text);
+  const dir = mode === "project" ? (cwd ?? state.settings.agentDefaultDir) : await bridge.assistantDir();
+  if (!dir) {
+    pushError({ title: "Choose a project folder", body: "Project mode needs a folder to work in." });
+    return;
+  }
+  const id = await startSession({ agent, cwd: dir, prompt: text, model: null, restricted: mode === "general" }, "chat", mode);
+  if (id) set({ agentChat: { ...state.agentChat, sessionId: id, cwd: mode === "project" ? dir : state.agentChat.cwd } });
+}
 
 // ── Agent sessions ──────────────────────────────────────────────────────────
 
@@ -347,16 +416,23 @@ export function applyAgentEvent(envelope: AgentEnvelope) {
         activity: event.message ?? (ended ? "" : s.activity),
         log: event.message ? appendLog(s, "system", event.message) : s.log,
       }));
-      if (event.status === "completed")
-        pushNotice({ tone: "success", title: `${session.agent} finished`, body: session.project, sessionId });
-      if (event.status === "failed")
+      if (event.status === "completed" && !state.panelOpen)
+        pushNotice({ tone: "success", title: `${session.agent} finished`, body: session.title, sessionId });
+      if (event.status === "failed") {
         pushError({ title: `${session.agent} failed`, body: event.message ?? session.project });
+        // A lapsed sign-in is the usual cause, and it should show where you can fix it.
+        void refreshAuth(session.agentId);
+      }
       break;
     }
   }
 }
 
-export async function startSession(request: StartSession) {
+export async function startSession(
+  request: StartSession,
+  surface: SessionDetail["surface"] = "agents",
+  mode: AgentMode = "project",
+) {
   const agent = state.agents.find((a) => a.id === request.agent);
   try {
     const id = await bridge.startSession(request);
@@ -364,7 +440,10 @@ export async function startSession(request: StartSession) {
       id,
       agentId: request.agent,
       agent: agent?.name ?? request.agent,
-      project: projectName(request.cwd),
+      surface,
+      mode,
+      title: request.prompt.slice(0, 48),
+      project: mode === "general" ? "General" : projectName(request.cwd),
       cwd: request.cwd,
       prompt: request.prompt,
       model: request.model,
@@ -374,7 +453,7 @@ export async function startSession(request: StartSession) {
       endedAt: null,
       approval: null,
       usage: null,
-      log: [],
+      log: [{ kind: "user", text: request.prompt }],
       queued: [],
     };
     set({ sessions: [session, ...state.sessions] });
@@ -392,7 +471,7 @@ export const answerApproval = (sessionId: string, approvalId: string, allow: boo
   void bridge.answerApproval(sessionId, approvalId, allow);
 
 export async function sendToSession(id: string, text: string) {
-  patchSession(id, (s) => ({ ...s, log: appendLog(s, "system", `You: ${text}`) }));
+  patchSession(id, (s) => ({ ...s, log: appendLog(s, "user", text) }));
   try {
     await bridge.sendToSession(id, text);
   } catch (err) {
@@ -406,6 +485,9 @@ const previewSession = (id: string, agent: string, project: string, activity: st
   id,
   agentId: "claude-code",
   agent,
+  surface: "agents",
+  mode: "project",
+  title: activity,
   project,
   cwd: "",
   prompt: "",
@@ -467,9 +549,26 @@ export const PREVIEWS: Preview[] = [
   { name: "expanded", apply: () => ({ ...clear, panelOpen: true, tab: "home" as Tab }) },
 ];
 
+/** The real state, held aside while sample data is on show. */
+let beforePreview: Partial<AppState> | null = null;
+
 export function showPreview(name: string | null) {
   const preview = PREVIEWS.find((p) => p.name === name);
-  set({ ...(preview ? preview.apply() : clear), preview: preview ? preview.name : null });
+  if (preview) {
+    beforePreview ??= {
+      panelOpen: state.panelOpen,
+      listening: state.listening,
+      chatPending: state.chatPending,
+      sessions: state.sessions,
+      notices: state.notices,
+      suggestions: state.suggestions,
+      errors: state.errors,
+    };
+    set({ ...preview.apply(), preview: preview.name });
+  } else {
+    set({ ...beforePreview, preview: null });
+    beforePreview = null;
+  }
 }
 
 // ── Boot ────────────────────────────────────────────────────────────────────
@@ -485,6 +584,8 @@ export async function boot() {
   document.documentElement.dataset.glass = glass ? "native" : "fallback";
   set({ settings, providers, agents, glass });
   void refreshLocal();
+  void bridge.monitors().then((monitors) => set({ monitors }));
+  for (const a of agents) if (a.installed) void refreshAuth(a.id);
   await Promise.all([
     bridge.onAgentEvent(applyAgentEvent),
     bridge.onHover(setHovered),

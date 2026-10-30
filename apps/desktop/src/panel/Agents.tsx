@@ -51,7 +51,6 @@ function Session({ session }: { session: SessionDetail }) {
       )}
 
       <div className="log" ref={log}>
-        <p className="prompt">{session.prompt}</p>
         {session.log.map((entry, i) => (
           <p key={i} className={`log-${entry.kind}`}>{entry.text}</p>
         ))}

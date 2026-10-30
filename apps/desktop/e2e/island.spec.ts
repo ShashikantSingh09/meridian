@@ -70,6 +70,31 @@ test("the listening preview never asks for the microphone", async ({ page }) => 
   await expect(page.locator(".mic-dot")).toHaveCount(0);
 });
 
+test("the clock and hide options change the idle shape", async ({ page }) => {
+  const width = async () => (await island(page).boundingBox())!.width;
+  const setting = (patch: object) =>
+    page.evaluate((p) => (window as never as { __meridian: { updateSettings(p: object): Promise<void> } }).__meridian.updateSettings(p), patch);
+
+  await setting({ showClock: true });
+  await settled(page);
+  expect(await width()).toBeCloseTo(176, 0);
+
+  await setting({ showClock: false, islandAutoHide: true });
+  await settled(page);
+  expect((await island(page).boundingBox())!.height).toBeCloseTo(6, 0);
+});
+
+test("the island can sit left or right, and stays on screen", async ({ page }) => {
+  await page.evaluate(() => (window as never as { __meridian: { updateSettings(p: object): Promise<void> } }).__meridian.updateSettings({ islandAlign: "right" }));
+  await expect(island(page)).toHaveAttribute("data-align", "right");
+  await settled(page);
+  const box = await island(page).boundingBox();
+  expect(box!.x + box!.width).toBeCloseTo(844, 0);
+  await preview(page, "expanded");
+  await settled(page);
+  expect((await island(page).boundingBox())!.x).toBeGreaterThanOrEqual(0);
+});
+
 test("reduced motion lands on the target size immediately", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/");
@@ -93,7 +118,8 @@ test.describe("panel", () => {
 
   test("streams a chat reply and reports usage", async ({ page }) => {
     await page.getByRole("button", { name: "Chat", exact: true }).click();
-    await expect(page.getByLabel("Provider", { exact: true })).toHaveValue("anthropic");
+    await page.getByLabel("AI engine").selectOption("anthropic");
+    await expect(page.getByLabel("Model")).toHaveValue("model-a");
     await page.getByLabel("Message").fill("hello");
     await page.getByRole("button", { name: "Send" }).click();
     await expect(page.locator('.message[data-role="assistant"]')).toContainText("browser stand-in");
@@ -154,12 +180,72 @@ test.describe("panel", () => {
     await expect(key).toHaveAttribute("placeholder", "Key stored");
   });
 
-  test("a chat with no provider ready offers a way forward", async ({ page }) => {
+  test("removing the last key takes that provider out of the engine list", async ({ page }) => {
     await page.getByRole("button", { name: "Providers", exact: true }).click();
     await page.locator(".card", { hasText: "Anthropic" }).getByRole("button", { name: "Remove" }).click();
     await page.getByRole("button", { name: "Chat", exact: true }).click();
-    await page.getByRole("button", { name: "Set up a provider" }).click();
-    await expect(page.getByRole("heading", { name: "Providers" })).toBeVisible();
+    await expect(page.getByLabel("AI engine").locator("option", { hasText: "Anthropic" })).toHaveCount(0);
+  });
+
+  test.describe("Claude Code as a chat engine", () => {
+    test.beforeEach(async ({ page }) => {
+      await page.getByRole("button", { name: "Chat", exact: true }).click();
+      await page.getByLabel("AI engine").selectOption("claude-code");
+    });
+
+    test("needs no API key and shows the plan the CLI reports", async ({ page }) => {
+      await expect(page.locator(".bar .meta", { hasText: "max" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "Sign in" })).toHaveCount(0);
+    });
+
+    test("streams a reply, then continues the same conversation", async ({ page }) => {
+      await page.getByLabel("Message").fill("chat: hello");
+      await page.getByRole("button", { name: "Send" }).click();
+      await expect(page.locator(".log")).toContainText("Hello from the stand-in agent.");
+      await expect(page.getByLabel("Conversation")).not.toHaveValue("");
+
+      await page.getByLabel("Message").fill("and again");
+      await page.getByRole("button", { name: "Send" }).click();
+      await expect(page.locator(".log")).toContainText("Follow-up received: and again");
+      await expect(page.getByLabel("Conversation").locator("option")).toHaveCount(2);
+    });
+
+    test("keeps conversations separate and switchable", async ({ page }) => {
+      await page.getByLabel("Message").fill("chat: first");
+      await page.getByRole("button", { name: "Send" }).click();
+      await expect(page.locator(".log")).toContainText("Hello from the stand-in agent.");
+
+      await page.getByLabel("Conversation").selectOption("");
+      await expect(page.locator(".log")).not.toContainText("Hello from the stand-in agent.");
+      await page.getByLabel("Message").fill("chat: second");
+      await page.getByRole("button", { name: "Send" }).click();
+      await expect(page.getByLabel("Conversation").locator("option")).toHaveCount(3);
+    });
+
+    test("project mode asks for a folder before it starts", async ({ page }) => {
+      await page.getByRole("button", { name: "Project" }).click();
+      await page.getByLabel("Message").fill("chat: work here");
+      await page.getByRole("button", { name: "Send" }).click();
+      await expect(page.locator(".island")).toHaveAttribute("data-view", "expanded");
+      await expect(page.locator(".log")).not.toContainText("Hello from the stand-in agent.");
+      await page.getByRole("button", { name: "Choose folder" }).click();
+      await expect(page.locator(".bar", { hasText: "sample" })).toBeVisible();
+    });
+
+    test("referenced files travel with the message", async ({ page }) => {
+      await page.getByRole("button", { name: "Reference a file" }).click();
+      await expect(page.locator(".attachment")).toHaveText("notes.md");
+      await page.getByLabel("Message").fill("chat: read this");
+      await page.getByRole("button", { name: "Send" }).click();
+      await expect(page.locator(".log-user")).toContainText("notes.md");
+    });
+
+    test("a signed-out CLI offers its own sign-in", async ({ page }) => {
+      await page.evaluate(() => (window as never as { __mock: { setAuthed(v: boolean): void } }).__mock.setAuthed(false));
+      await page.getByLabel("AI engine").selectOption("anthropic");
+      await page.getByLabel("AI engine").selectOption("claude-code");
+      await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
+    });
   });
 
   test("settings apply straight away", async ({ page }) => {

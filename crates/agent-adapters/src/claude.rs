@@ -6,13 +6,21 @@ use std::time::Duration;
 
 use serde_json::{json, Value};
 use tokio::sync::mpsc;
+use tokio::time::Instant;
 
 use crate::approvals::{settings_json, Hook};
-use crate::process::{spawn, Agent};
+use crate::process::spawn;
 use crate::{AgentEvent, Command, Emit, Launch, SessionStatus};
 
-/// Print mode stays alive after its result, even with stdin closed.
-const EXIT_GRACE: Duration = Duration::from_secs(2);
+/// Print mode keeps running after a result and takes the next message on the
+/// same process: about 0.5 s to answer, against 4.5 s from cold. An idle session
+/// keeps its process this long, then resumes from the transcript if needed.
+const IDLE_KEEP: Duration = Duration::from_secs(300);
+/// How long a turn gets to acknowledge an interrupt before the process goes.
+const INTERRUPT_GRACE: Duration = Duration::from_secs(4);
+/// What general assistant mode may use. No shell, no edits, and with
+/// --strict-mcp-config none of the user's connectors.
+const GENERAL_TOOLS: &str = "WebSearch,WebFetch,Read";
 
 pub fn args(launch: &Launch, hook_url: &str) -> Vec<String> {
     let mut args: Vec<String> = [
@@ -33,11 +41,19 @@ pub fn args(launch: &Launch, hook_url: &str) -> Vec<String> {
     if let Some(id) = &launch.resume {
         args.extend(["--resume".to_string(), id.clone()]);
     }
+    if launch.restricted {
+        args.extend(["--tools".to_string(), GENERAL_TOOLS.to_string(), "--strict-mcp-config".to_string()]);
+    }
     args
 }
 
 pub fn user_message(text: &str) -> String {
     json!({ "type": "user", "message": { "role": "user", "content": [{ "type": "text", "text": text }] } }).to_string()
+}
+
+/// Stops the running turn and leaves the session able to continue.
+fn interrupt_message() -> String {
+    json!({ "type": "control_request", "request_id": "meridian-interrupt", "request": { "subtype": "interrupt" } }).to_string()
 }
 
 fn base_name(path: &str) -> &str {
@@ -80,8 +96,9 @@ fn usage_of(message: &Value) -> AgentEvent {
 }
 
 /// One stream-json line. Types not listed here, including ones newer CLI
-/// versions add, are ignored rather than treated as errors.
-pub fn parse(line: &str) -> Parsed {
+/// versions add, are ignored rather than treated as errors. An interrupted turn
+/// ends in an error result, which is the outcome the user asked for.
+pub fn parse(line: &str, interrupted: bool) -> Parsed {
     let mut events = Vec::new();
     let mut finished = false;
     let Ok(message) = serde_json::from_str::<Value>(line) else { return Parsed { events, finished } };
@@ -119,8 +136,10 @@ pub fn parse(line: &str) -> Parsed {
             finished = true;
             events.push(usage_of(&message));
             let failed = message["is_error"].as_bool().unwrap_or(false) || subtype != Some("success");
-            events.push(if failed {
-                let detail = message["result"].as_str().or(subtype).unwrap_or("The run failed.");
+            events.push(if interrupted {
+                AgentEvent::status(SessionStatus::Cancelled)
+            } else if failed {
+                let detail = message["result"].as_str().filter(|d| !d.is_empty()).or(subtype).unwrap_or("The run failed.");
                 AgentEvent::failed(detail.chars().take(300).collect::<String>())
             } else {
                 AgentEvent::status(SessionStatus::Completed)
@@ -131,18 +150,23 @@ pub fn parse(line: &str) -> Parsed {
     Parsed { events, finished }
 }
 
-async fn stop(agent: &mut Agent) {
-    let _ = tokio::time::timeout(EXIT_GRACE, agent.exit_code()).await;
-    agent.kill_tree().await;
-}
-
 pub async fn run(launch: Launch, emit: Emit, commands: mpsc::UnboundedReceiver<Command>, hook: &Hook) {
     let args = args(&launch, &hook.url);
     drive(launch, args, emit, commands).await;
 }
 
 /// The session loop, separated from `args` so tests can drive a stand-in agent.
-pub async fn drive(launch: Launch, args: Vec<String>, emit: Emit, mut commands: mpsc::UnboundedReceiver<Command>) {
+pub async fn drive(launch: Launch, args: Vec<String>, emit: Emit, commands: mpsc::UnboundedReceiver<Command>) {
+    drive_with(launch, args, emit, commands, IDLE_KEEP).await;
+}
+
+async fn drive_with(
+    launch: Launch,
+    args: Vec<String>,
+    emit: Emit,
+    mut commands: mpsc::UnboundedReceiver<Command>,
+    idle_keep: Duration,
+) {
     let mut agent = match spawn(&launch.exe, &args, &launch.cwd) {
         Ok(agent) => agent,
         Err(err) => return emit(AgentEvent::failed(format!("Could not start Claude Code: {err}"))),
@@ -152,19 +176,43 @@ pub async fn drive(launch: Launch, args: Vec<String>, emit: Emit, mut commands: 
         return emit(AgentEvent::failed(format!("Could not reach Claude Code: {err}")));
     }
 
+    // Set between turns. Expiry ends the process, not the session.
+    let mut idle_until: Option<Instant> = None;
+    let mut interrupt_by: Option<Instant> = None;
+
     loop {
+        let deadline = interrupt_by.or(idle_until);
         tokio::select! {
+            _ = async { tokio::time::sleep_until(deadline.unwrap()).await }, if deadline.is_some() => {
+                // Closed first, so a racing follow-up resumes instead of landing here.
+                commands.close();
+                agent.kill_tree().await;
+                if interrupt_by.is_some() {
+                    emit(AgentEvent::status(SessionStatus::Cancelled));
+                }
+                return;
+            }
             line = agent.lines.next_line() => match line {
                 Ok(Some(line)) => {
-                    let parsed = parse(&line);
+                    let parsed = parse(&line, interrupt_by.is_some());
+                    let failed = parsed.events.iter().any(|e| {
+                        matches!(e, AgentEvent::Status { status: SessionStatus::Failed, .. })
+                    });
                     parsed.events.into_iter().for_each(|e| emit(e));
+                    if failed {
+                        return agent.kill_tree().await;
+                    }
                     if parsed.finished {
-                        return stop(&mut agent).await;
+                        interrupt_by = None;
+                        idle_until = Some(Instant::now() + idle_keep);
                     }
                 }
                 // Out of output with no result: a crash, or a CLI killed from outside.
                 _ => {
                     let code = agent.exit_code().await;
+                    if idle_until.is_some() {
+                        return; // Already finished its turn. Nothing was lost.
+                    }
                     let detail = agent.stderr_tail();
                     let detail = if detail.is_empty() { format!("exit code {code:?}") } else { detail };
                     return emit(AgentEvent::failed(format!("Claude Code stopped unexpectedly: {detail}")));
@@ -172,6 +220,7 @@ pub async fn drive(launch: Launch, args: Vec<String>, emit: Emit, mut commands: 
             },
             command = commands.recv() => match command {
                 Some(Command::Send(text)) => {
+                    idle_until = None;
                     if agent.write_line(&user_message(&text)).await.is_err() {
                         emit(AgentEvent::failed("Claude Code is no longer accepting input."));
                         return agent.kill_tree().await;
@@ -179,9 +228,21 @@ pub async fn drive(launch: Launch, args: Vec<String>, emit: Emit, mut commands: 
                 }
                 // Claude Code's approvals are answered at the hook, not here.
                 Some(Command::Answer { .. }) => {}
-                Some(Command::Cancel) | None => {
+                Some(Command::Cancel) => {
+                    if idle_until.is_none() && interrupt_by.is_none() {
+                        interrupt_by = Some(Instant::now() + INTERRUPT_GRACE);
+                        if agent.write_line(&interrupt_message()).await.is_err() {
+                            agent.kill_tree().await;
+                            return emit(AgentEvent::status(SessionStatus::Cancelled));
+                        }
+                    }
+                }
+                Some(Command::Kill) | None => {
                     agent.kill_tree().await;
-                    return emit(AgentEvent::status(SessionStatus::Cancelled));
+                    if idle_until.is_none() {
+                        emit(AgentEvent::status(SessionStatus::Cancelled));
+                    }
+                    return;
                 }
             },
         }
@@ -204,7 +265,7 @@ mod tests {
 
     #[test]
     fn init_starts_the_session_with_its_native_id() {
-        let events = parse(INIT).events;
+        let events = parse(INIT, false).events;
         assert_eq!(
             events[0],
             AgentEvent::Started { native_id: Some("0781dc44".into()), model: Some("claude-haiku-5-5".into()) }
@@ -214,19 +275,19 @@ mod tests {
 
     #[test]
     fn tool_calls_become_activity() {
-        assert_eq!(parse(TOOL).events, [AgentEvent::Activity { label: "$ echo hello > out.txt".into() }]);
+        assert_eq!(parse(TOOL, false).events, [AgentEvent::Activity { label: "$ echo hello > out.txt".into() }]);
     }
 
     #[test]
     fn only_top_level_text_reaches_the_output() {
-        assert_eq!(parse(TEXT).events, [AgentEvent::Text { text: "done".into() }]);
-        assert!(parse(THINKING).events.is_empty());
-        assert!(parse(SUB_TEXT).events.is_empty());
+        assert_eq!(parse(TEXT, false).events, [AgentEvent::Text { text: "done".into() }]);
+        assert!(parse(THINKING, false).events.is_empty());
+        assert!(parse(SUB_TEXT, false).events.is_empty());
     }
 
     #[test]
     fn a_result_finishes_with_usage_and_cost() {
-        let parsed = parse(RESULT);
+        let parsed = parse(RESULT, false);
         assert!(parsed.finished);
         assert_eq!(parsed.events[0], AgentEvent::Usage { input: 113_036, output: 159, cost_usd: Some(0.00930859) });
         assert_eq!(parsed.events[1], AgentEvent::status(SessionStatus::Completed));
@@ -234,15 +295,33 @@ mod tests {
 
     #[test]
     fn a_failed_result_says_why() {
-        let parsed = parse(FAILED);
+        let parsed = parse(FAILED, false);
         assert!(parsed.finished);
         assert_eq!(parsed.events[1], AgentEvent::failed("Not logged in"));
     }
 
     #[test]
+    fn an_interrupted_turn_is_cancelled_not_failed() {
+        let line = r#"{"type":"result","subtype":"error_during_execution","is_error":true,"result":"","usage":{}}"#;
+        let parsed = parse(line, true);
+        assert!(parsed.finished);
+        assert_eq!(parsed.events[1], AgentEvent::status(SessionStatus::Cancelled));
+        assert!(matches!(&parse(line, false).events[1], AgentEvent::Status { status: SessionStatus::Failed, .. }));
+    }
+
+    #[test]
+    fn general_mode_removes_the_shell_and_connectors() {
+        let launch = Launch { exe: "claude".into(), cwd: ".".into(), prompt: "p".into(), model: None, resume: None, restricted: true };
+        let args = args(&launch, "http://127.0.0.1:1/perm/t");
+        assert!(args.windows(2).any(|w| w == ["--tools", GENERAL_TOOLS]));
+        assert!(args.iter().any(|a| a == "--strict-mcp-config"));
+        assert!(!GENERAL_TOOLS.contains("Bash") && !GENERAL_TOOLS.contains("Edit") && !GENERAL_TOOLS.contains("Write"));
+    }
+
+    #[test]
     fn unknown_lines_are_ignored() {
         for line in ["not json", r#"{"type":"rate_limit_event"}"#, r#"{"type":"brand_new_thing"}"#] {
-            let parsed = parse(line);
+            let parsed = parse(line, false);
             assert!(parsed.events.is_empty() && !parsed.finished);
         }
     }
@@ -262,6 +341,7 @@ mod tests {
             prompt: "SECRET PROMPT".into(),
             model: Some("m".into()),
             resume: Some("abc".into()),
+            restricted: false,
         };
         let args = args(&launch, "http://127.0.0.1:1/perm/t");
         assert!(!args.iter().any(|a| a.contains("SECRET")));
@@ -277,6 +357,7 @@ mod tests {
             prompt: "hi".into(),
             model: None,
             resume: None,
+            restricted: false,
         };
         (launch, vec!["-e".to_string(), script.to_string()])
     }
@@ -293,12 +374,22 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cancelling_ends_a_running_agent() {
+    async fn an_agent_that_ignores_an_interrupt_is_ended() {
         let (launch, args) = launch("setInterval(() => {}, 1000)");
         let (emit, events) = recorder();
         let (tx, rx) = mpsc::unbounded_channel();
         tx.send(Command::Cancel).unwrap();
         tokio::time::timeout(Duration::from_secs(10), drive(launch, args, emit, rx)).await.unwrap();
+        assert_eq!(last_status(&events.lock().unwrap()), Some(SessionStatus::Cancelled));
+    }
+
+    #[tokio::test]
+    async fn killing_ends_a_running_agent_at_once() {
+        let (launch, args) = launch("setInterval(() => {}, 1000)");
+        let (emit, events) = recorder();
+        let (tx, rx) = mpsc::unbounded_channel();
+        tx.send(Command::Kill).unwrap();
+        tokio::time::timeout(Duration::from_secs(3), drive(launch, args, emit, rx)).await.unwrap();
         assert_eq!(last_status(&events.lock().unwrap()), Some(SessionStatus::Cancelled));
     }
 
@@ -318,7 +409,25 @@ mod tests {
         let (launch, args) = launch(&script);
         let (emit, events) = recorder();
         let (_tx, rx) = mpsc::unbounded_channel();
-        tokio::time::timeout(Duration::from_secs(10), drive(launch, args, emit, rx)).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(10), drive_with(launch, args, emit, rx, Duration::from_millis(100))).await.unwrap();
         assert_eq!(last_status(&events.lock().unwrap()), Some(SessionStatus::Completed));
+    }
+
+    #[tokio::test]
+    async fn a_follow_up_reaches_the_same_process_between_turns() {
+        let script = format!(
+            "let n = 0; require(`readline`).createInterface({{ input: process.stdin }}).on(`line`, () => {{ n += 1; console.log(String.raw`{RESULT}`); if (n === 2) console.log(JSON.stringify({{ type: `system`, subtype: `api_retry`, attempt: 99 }})); }});"
+        );
+        let (launch, args) = launch(&script);
+        let (emit, events) = recorder();
+        let (tx, rx) = mpsc::unbounded_channel();
+        let run = tokio::spawn(drive_with(launch, args, emit, rx, Duration::from_millis(600)));
+        tokio::time::sleep(Duration::from_millis(400)).await;
+        tx.send(Command::Send("again".into())).unwrap();
+        tokio::time::timeout(Duration::from_secs(10), run).await.unwrap().unwrap();
+        let events = events.lock().unwrap();
+        let completed = events.iter().filter(|e| **e == AgentEvent::status(SessionStatus::Completed)).count();
+        assert_eq!(completed, 2);
+        assert!(events.iter().any(|e| matches!(e, AgentEvent::Activity { label } if label.contains("99"))));
     }
 }

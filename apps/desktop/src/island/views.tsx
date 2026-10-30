@@ -51,12 +51,25 @@ const iconButton = (label: string, icon: Parameters<typeof Icon>[0]["name"], onC
   </button>
 );
 
-export function IdleView({ reduced, hovered }: { reduced: boolean; hovered: boolean }) {
+function Clock() {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    // Aligned to the minute, so the only repaint is the one that changes the digits.
+    const timer = setTimeout(() => setNow(new Date()), 60_000 - (Date.now() % 60_000));
+    return () => clearTimeout(timer);
+  }, [now]);
+  return <span className="meta tabular">{now.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>;
+}
+
+export function IdleView({ reduced, hovered, sliver }: { reduced: boolean; hovered: boolean; sliver: boolean }) {
   const model = useApp((s) => s.chat.model ?? s.settings.defaultModel);
+  const clock = useApp((s) => s.settings.showClock);
+  if (sliver && !hovered) return null;
   if (!hovered) {
     return (
-      <div className="pill-center ambient">
-        <Line mode="rest" color="--state-idle" width={72} height={12} reduced={reduced} />
+      <div className="pill-center ambient" data-clock={clock}>
+        <Line mode="rest" color="--state-idle" width={clock ? 64 : 72} height={12} reduced={reduced} />
+        {clock && <Clock />}
       </div>
     );
   }
@@ -83,17 +96,20 @@ export function ListeningView({ reduced }: { reduced: boolean }) {
 }
 
 export function ThinkingView({ reduced }: { reduced: boolean }) {
-  const model = useApp((s) => s.chat.model);
+  const task = useApp((s) => s.chat.task);
   const provider = useApp((s) => s.providers.find((p) => p.id === s.chat.providerId)?.name);
   return (
     <div className="row pad-pill">
-      <Line mode="think" color="--state-thinking" width={72} height={20} reduced={reduced} />
-      <span className="grow label">{provider ? `${provider} · ${model}` : "Thinking"}</span>
+      <Line mode="think" color="--state-thinking" width={56} height={20} reduced={reduced} />
+      <div className="grow stacked">
+        <span className="label truncate">{provider ?? "Thinking"}</span>
+        {task && <span className="meta truncate tiny">{task}</span>}
+      </div>
     </div>
   );
 }
 
-export function WorkingView({ reduced }: { reduced: boolean }) {
+export function WorkingView({ reduced, hovered }: { reduced: boolean; hovered: boolean }) {
   const sessions = useApp((s) => s.sessions);
   const blocked = waitingApproval(sessions);
   const session = blocked ?? activeSessions(sessions)[0];
@@ -117,10 +133,37 @@ export function WorkingView({ reduced }: { reduced: boolean }) {
     );
   }
 
+  const open = () => openPanel(session.surface === "chat" ? "chat" : "agents");
+
+  if (hovered) {
+    const recent = session.log.filter((l) => l.kind === "activity" || l.kind === "text").slice(-3);
+    return (
+      <div className="stack pad-card">
+        <div className="row">
+          <Line mode="work" color="--state-working" width={36} height={10} reduced={reduced} />
+          <button className="grow text-button" onClick={open}>
+            <span className="label">{session.agent}</span>
+            <span className="meta truncate">{session.title}</span>
+          </button>
+          <span className="meta"><Elapsed since={session.startedAt} /></span>
+          {iconButton("Stop task", "stop", () => cancelSession(session.id))}
+        </div>
+        <div className="peek">
+          {recent.length === 0 && <p className="meta">{session.activity || "Starting"}</p>}
+          {recent.map((entry, i) => (
+            <p key={i} className={entry.kind === "activity" ? "peek-tool truncate" : "meta truncate"}>
+              {entry.text.split("\n").pop()}
+            </p>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="row pad-pill">
       <Line mode="work" color="--state-working" width={56} height={12} reduced={reduced} />
-      <button className="grow text-button" onClick={() => openPanel("agents")}>
+      <button className="grow text-button" onClick={open}>
         <span className="label">{session.agent}</span>
         <span className="meta truncate">{session.activity || session.project}</span>
       </button>
@@ -137,7 +180,7 @@ export function MultitaskView({ reduced }: { reduced: boolean }) {
   return (
     <div className="stack pad-rows">
       {shown.map((s) => (
-        <button key={s.id} className="session-row" onClick={() => { openPanel("agents"); }}>
+        <button key={s.id} className="session-row" onClick={() => openPanel(s.surface === "chat" ? "chat" : "agents")}>
           <Line mode={s.status === "waiting" ? "flare" : "work"} color={statusColor(s)} width={32} height={10} reduced={reduced} />
           <span className="label">{s.agent}</span>
           <span className="meta truncate grow">{s.activity || s.project}</span>
@@ -150,11 +193,12 @@ export function MultitaskView({ reduced }: { reduced: boolean }) {
 
 export function NotificationView({ reduced }: { reduced: boolean }) {
   const notice = useApp((s) => s.notices[0]);
+  const sessions = useApp((s) => s.sessions);
   if (!notice) return null;
   return (
     <div className="row pad-card">
       <Line mode="flare" color={notice.tone === "success" ? "--state-success" : "--state-notice"} width={36} height={10} reduced={reduced} />
-      <button className="grow text-button stacked" onClick={() => { dismissNotice(notice.id); openPanel(notice.sessionId ? "agents" : undefined); }}>
+      <button className="grow text-button stacked" onClick={() => { dismissNotice(notice.id); openPanel(notice.sessionId ? (sessions.find((s) => s.id === notice.sessionId)?.surface === "chat" ? "chat" : "agents") : undefined); }}>
         <span className="label">{notice.title}</span>
         <span className="meta truncate">{notice.body}</span>
       </button>

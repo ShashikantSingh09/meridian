@@ -8,6 +8,7 @@ import type {
   AgentEnvelope,
   AgentId,
   AgentInfo,
+  AuthStatus,
   ChatEvent,
   ChatMessage,
   LocalServer,
@@ -33,6 +34,7 @@ export interface StartSession {
   cwd: string;
   prompt: string;
   model: string | null;
+  restricted?: boolean;
 }
 
 export const bridge = {
@@ -62,10 +64,14 @@ export const bridge = {
   cancelChat: (requestId: string) => (native ? invoke<void>("chat_cancel", { requestId }) : Promise.resolve()),
 
   detectAgents: () => (native ? invoke<AgentInfo[]>("agents_detect") : mock.detectAgents()),
+  agentAuth: (agent: AgentId) => (native ? invoke<AuthStatus | null>("agent_auth", { agent }) : mock.agentAuth(agent)),
+  agentLogin: (agent: AgentId) => (native ? invoke<void>("agent_login", { agent }) : Promise.resolve()),
+  assistantDir: () => (native ? invoke<string>("assistant_dir") : Promise.resolve("C:\\Assistant")),
+  monitors: () => (native ? invoke<string[]>("monitors_list") : Promise.resolve(["Display 1"])),
   startSession: (request: StartSession) =>
     native ? invoke<string>("session_start", { request }) : mock.startSession(request),
   sendToSession: (id: string, text: string) =>
-    native ? invoke<void>("session_send", { id, text }) : Promise.resolve(),
+    native ? invoke<void>("session_send", { id, text }) : mock.sendToSession(id, text),
   cancelSession: (id: string) => (native ? invoke<void>("session_cancel", { id }) : mock.cancelSession(id)),
   answerApproval: (sessionId: string, approvalId: string, allow: boolean) =>
     native
@@ -79,6 +85,17 @@ export const bridge = {
     dialogOpen = true;
     try {
       const picked = await open({ directory: true, multiple: false });
+      return typeof picked === "string" ? picked : null;
+    } finally {
+      dialogOpen = false;
+    }
+  },
+  pickFile: async () => {
+    if (!native) return "C:\\Projects\\sample\\notes.md";
+    const { open } = await import("@tauri-apps/plugin-dialog");
+    dialogOpen = true;
+    try {
+      const picked = await open({ multiple: false });
       return typeof picked === "string" ? picked : null;
     } finally {
       dialogOpen = false;
