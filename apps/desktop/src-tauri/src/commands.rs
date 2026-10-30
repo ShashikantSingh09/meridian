@@ -24,6 +24,7 @@ pub struct Core {
     pub chats: Mutex<HashMap<String, CancellationToken>>,
     /// The last capture, held in memory only until it is sent or discarded.
     pub frame: Mutex<Option<Frame>>,
+    pub media: media::Controller,
 }
 
 fn stringify(err: impl std::fmt::Display) -> String {
@@ -235,6 +236,11 @@ pub async fn session_answer(
     allow: bool,
 ) -> Result<(), String> {
     core.sessions.answer(&session_id, &approval_id, allow).map_err(stringify)
+}
+
+#[tauri::command]
+pub fn media_action(core: State<'_, Core>, action: media::Action) {
+    core.media.perform(action);
 }
 
 // ── Screen ──────────────────────────────────────────────────────────────────

@@ -5,6 +5,7 @@ const base: Snapshot = {
   panelOpen: false,
   listening: false,
   capturing: false,
+  mediaPlaying: false,
   chatPending: false,
   sessions: [],
   notices: [],
@@ -45,6 +46,13 @@ describe("deriveView", () => {
   it("does not count finished sessions as active", () => {
     const sessions = [session({ status: "completed" }), session({ id: "s2", status: "failed" })];
     expect(deriveView({ ...base, sessions })).toBe("idle");
+  });
+
+  it("shows music only when nothing more important is happening", () => {
+    expect(deriveView({ ...base, mediaPlaying: true })).toBe("media");
+    expect(deriveView({ ...base, mediaPlaying: true, chatPending: true })).toBe("thinking");
+    expect(deriveView({ ...base, mediaPlaying: true, sessions: [session()] })).toBe("working");
+    expect(deriveView({ ...base, mediaPlaying: true, notices: [notice] })).toBe("notification");
   });
 
   it("always shows when the screen is being read", () => {

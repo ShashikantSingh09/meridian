@@ -141,7 +141,34 @@ export interface Settings {
   screenIntervalSecs: number;
   screenExclusions: string[];
   monitoringPaused: boolean;
+  mediaEnabled: boolean;
 }
+
+export interface Track {
+  session: string;
+  app: string;
+  title: string;
+  artist: string;
+  album: string;
+  playing: boolean;
+  positionMs: number | null;
+  durationMs: number | null;
+  canToggle: boolean;
+  canNext: boolean;
+  canPrevious: boolean;
+  canSeek: boolean;
+  artwork: string | null;
+}
+
+export interface MediaSnapshot {
+  current: Track | null;
+  sessions: Track[];
+}
+
+export type MediaAction =
+  | { action: "toggle" | "next" | "previous" }
+  | { action: "seek"; positionMs: number }
+  | { action: "select"; session: string };
 
 /** What a CLI reports about its own sign-in. */
 export interface AuthStatus {
@@ -170,4 +197,5 @@ export const defaultSettings: Settings = {
   screenIntervalSecs: 20,
   screenExclusions: [],
   monitoringPaused: false,
+  mediaEnabled: true,
 };

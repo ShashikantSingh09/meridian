@@ -10,6 +10,8 @@ import type {
   Capture,
   ChatEvent,
   LocalServer,
+  MediaAction,
+  MediaSnapshot,
   ModelInfo,
   ProviderInfo,
   Settings,
@@ -27,6 +29,23 @@ const providers: ProviderInfo[] = [
 let settings: Settings = { ...defaultSettings };
 let emit: (e: AgentEnvelope) => void = () => {};
 let authed = true;
+let pushMedia: (s: MediaSnapshot) => void = () => {};
+const sampleTrack = {
+  session: "Spotify.exe",
+  app: "Spotify",
+  title: "Northern Lights",
+  artist: "Sample Artist",
+  album: "Sample Album",
+  playing: true,
+  positionMs: 42_000,
+  durationMs: 210_000,
+  canToggle: true,
+  canNext: true,
+  canPrevious: true,
+  canSeek: true,
+  artwork: null,
+};
+let track = { ...sampleTrack };
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const pendingSecond = (sessionId: string) =>
   (window as never as { __meridian: { getState(): { sessions: { id: string; approval: { id: string } | null }[] } } })
@@ -59,6 +78,20 @@ export const mock = {
     { id: "claude-code", name: "Claude Code", installed: true, path: "claude", version: "stand-in", capabilities: { approvals: true, resume: true, usage: true, progress: false } },
     { id: "codex", name: "Codex CLI", installed: false, path: null, version: null, capabilities: { approvals: true, resume: true, usage: true, progress: false } },
   ],
+
+  async mediaAction(action: MediaAction) {
+    if (action.action === "toggle") track = { ...track, playing: !track.playing };
+    if (action.action === "next") track = { ...track, title: "Next Song" };
+    pushMedia({ current: track, sessions: [track] });
+  },
+  async onMedia(handler: (s: MediaSnapshot) => void) {
+    pushMedia = handler;
+    return () => {};
+  },
+  publishMedia: (present: boolean) => {
+    track = { ...sampleTrack };
+    pushMedia(present ? { current: track, sessions: [track] } : { current: null, sessions: [] });
+  },
 
   screenCapture: async (): Promise<Capture> => ({
     image: "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7",

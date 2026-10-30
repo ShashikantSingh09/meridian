@@ -27,7 +27,8 @@ test("every compact state renders its own content and stays on screen", async ({
     ["working", "working", "Claude Code"],
     ["approval", "working", "Allow"],
     ["notification", "notification", "Claude Code finished"],
-    ["contextual", "contextual", "Investigate"],
+    ["contextual", "contextual", "Suggest fix"],
+    ["media", "media", "Northern Lights"],
     ["multitask", "multitask", "Codex"],
     ["error", "error", "Anthropic unreachable"],
   ];
@@ -93,6 +94,27 @@ test("the island can sit left or right, and stays on screen", async ({ page }) =
   await preview(page, "expanded");
   await settled(page);
   expect((await island(page).boundingBox())!.x).toBeGreaterThanOrEqual(0);
+});
+
+test("playing media takes over an idle island and answers its controls", async ({ page }) => {
+  const publish = (present: boolean) =>
+    page.evaluate((p) => (window as never as { __mock: { publishMedia(p: boolean): void } }).__mock.publishMedia(p), present);
+  await publish(true);
+  await expect(island(page)).toHaveAttribute("data-view", "media");
+  await expect(island(page)).toContainText("Northern Lights");
+
+  await page.getByRole("button", { name: "Pause" }).click();
+  await expect(island(page)).toHaveAttribute("data-view", "idle");
+
+  await publish(false);
+  await expect(island(page)).toHaveAttribute("data-view", "idle");
+});
+
+test("media steps aside for a notification, then returns", async ({ page }) => {
+  await page.evaluate(() => (window as never as { __mock: { publishMedia(p: boolean): void } }).__mock.publishMedia(true));
+  await expect(island(page)).toHaveAttribute("data-view", "media");
+  await page.evaluate(() => (window as never as { __meridian: { pushNotice(n: object): void } }).__meridian.pushNotice({ tone: "info", title: "Heads up", body: "" }));
+  await expect(island(page)).toHaveAttribute("data-view", "notification");
 });
 
 test("reduced motion lands on the target size immediately", async ({ page }) => {

@@ -13,6 +13,8 @@ import type {
   ChatEvent,
   ChatMessage,
   LocalServer,
+  MediaAction,
+  MediaSnapshot,
   ModelInfo,
   ProviderInfo,
   ScreenSuggestion,
@@ -82,6 +84,8 @@ export const bridge = {
       : mock.answerApproval(sessionId, approvalId, allow),
   openProject: (cwd: string) => (native ? invoke<void>("open_project", { cwd }) : Promise.resolve()),
 
+  mediaAction: (action: MediaAction) => (native ? invoke<void>("media_action", { action }) : mock.mediaAction(action)),
+
   screenCapture: (target: "window" | "screen") =>
     native ? invoke<Capture>("screen_capture", { target }) : mock.screenCapture(),
   screenCrop: (x: number, y: number, w: number, h: number) =>
@@ -135,6 +139,10 @@ export const bridge = {
   onBlur(handler: () => void) {
     if (!native) return Promise.resolve(() => {});
     return listen("island-blur", handler).then((un) => un);
+  },
+  onMedia(handler: (s: MediaSnapshot) => void) {
+    if (!native) return mock.onMedia(handler);
+    return listen<MediaSnapshot>("media-state", (e) => handler(e.payload)).then((un) => un);
   },
   onScreenSuggestion(handler: (s: ScreenSuggestion) => void) {
     if (!native) return Promise.resolve(() => {});

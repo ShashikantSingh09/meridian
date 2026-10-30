@@ -35,6 +35,7 @@ pub struct Settings {
     pub screen_exclusions: Vec<String>,
     /// Stops all contextual monitoring at once, whatever else is set.
     pub monitoring_paused: bool,
+    pub media_enabled: bool,
 }
 
 impl Default for Settings {
@@ -59,6 +60,7 @@ impl Default for Settings {
             screen_interval_secs: 20,
             screen_exclusions: Vec::new(),
             monitoring_paused: false,
+            media_enabled: true,
         }
     }
 }

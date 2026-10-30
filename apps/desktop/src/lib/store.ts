@@ -12,9 +12,12 @@ import type {
   Capture,
   ChatMessage,
   ModelInfo,
+  MediaAction,
+  MediaSnapshot,
   ProviderInfo,
   ScreenSuggestion,
   Settings,
+  Track,
 } from "./types";
 import { defaultSettings } from "./types";
 
@@ -71,9 +74,16 @@ export interface ScreenState {
   refused: string | null;
 }
 
+export interface MediaState extends MediaSnapshot {
+  /** When the position was reported, to run the clock on from. */
+  reportedAt: number;
+  recent: Track[];
+}
+
 export interface AppState {
   panelOpen: boolean;
   screen: ScreenState;
+  media: MediaState;
   tab: Tab;
   listening: boolean;
   hovered: boolean;
@@ -100,6 +110,7 @@ const NOTICE_MS = 6000;
 
 let state: AppState = {
   panelOpen: false,
+  media: { current: null, sessions: [], reportedAt: 0, recent: [] },
   screen: { capture: null, capturing: false, question: "", includeImage: true, refused: null },
   tab: "home",
   listening: false,
@@ -493,6 +504,21 @@ export async function sendToSession(id: string, text: string, images: string[] =
   }
 }
 
+// ── Media ───────────────────────────────────────────────────────────────────
+
+const RECENT_TRACKS = 8;
+
+function onMedia(snapshot: MediaSnapshot) {
+  const before = state.media;
+  const changed = before.current && before.current.title !== snapshot.current?.title;
+  const recent = changed
+    ? [before.current!, ...before.recent.filter((t) => t.title !== before.current!.title)].slice(0, RECENT_TRACKS)
+    : before.recent;
+  set({ media: { ...snapshot, reportedAt: Date.now(), recent } });
+}
+
+export const mediaAction = (action: MediaAction) => void bridge.mediaAction(action);
+
 // ── Screen awareness ────────────────────────────────────────────────────────
 
 const setScreen = (patch: Partial<ScreenState>) => set({ screen: { ...state.screen, ...patch } });
@@ -644,6 +670,18 @@ export const PREVIEWS: Preview[] = [
       ],
     }),
   },
+  {
+    name: "media",
+    apply: () => ({
+      ...clear,
+      media: {
+        current: { session: "preview", app: "Spotify", title: "Northern Lights", artist: "Sample Artist", album: "", playing: true, positionMs: 42_000, durationMs: 210_000, canToggle: true, canNext: true, canPrevious: true, canSeek: false, artwork: null },
+        sessions: [],
+        reportedAt: Date.now(),
+        recent: [],
+      },
+    }),
+  },
   { name: "error", apply: () => ({ ...clear, errors: [{ id: "pe", title: "Anthropic unreachable", body: "Network connection lost." }] }) },
   { name: "expanded", apply: () => ({ ...clear, panelOpen: true, tab: "home" as Tab }) },
 ];
@@ -662,6 +700,7 @@ export function showPreview(name: string | null) {
       notices: state.notices,
       suggestions: state.suggestions,
       errors: state.errors,
+      media: state.media,
     };
     set({ ...preview.apply(), preview: preview.name });
   } else {
@@ -693,6 +732,7 @@ export async function boot() {
       if (state.panelOpen && !bridge.dialogOpen()) closePanel();
     }),
     bridge.onOpenTab((tab) => openPanel(tab as Tab)),
+    bridge.onMedia(onMedia),
     bridge.onScreenSuggestion(onScreenSuggestion),
     bridge.onCaptureRequest(() => {
       openPanel("desktop");

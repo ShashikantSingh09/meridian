@@ -10,11 +10,13 @@ import {
   dismissError,
   dismissNotice,
   ignoreSuggestion,
+  mediaAction,
   openPanel,
   setListening,
   useApp,
 } from "../lib/store";
 import { activeSessions, MULTITASK_MAX_ROWS, waitingApproval, type SessionSummary } from "./machine";
+import { Progress } from "./Progress";
 import type { LineMode, LineSegment } from "./line";
 import { MeridianLine } from "./MeridianLine";
 import { useMicLevel } from "./useMicLevel";
@@ -45,8 +47,8 @@ function Elapsed({ since }: { since: number }) {
   return <span className="tabular">{text}</span>;
 }
 
-const iconButton = (label: string, icon: Parameters<typeof Icon>[0]["name"], onClick: () => void) => (
-  <button className="round" aria-label={label} title={label} onClick={onClick}>
+const iconButton = (label: string, icon: Parameters<typeof Icon>[0]["name"], onClick: () => void, disabled = false) => (
+  <button className="round" aria-label={label} title={label} onClick={onClick} disabled={disabled}>
     <Icon name={icon} size={14} />
   </button>
 );
@@ -236,6 +238,50 @@ export function ScreenView({ reduced }: { reduced: boolean }) {
       <div className="grow stacked">
         <span className="label">Reading your screen</span>
         <span className="meta tiny">Stays on this PC until you share it</span>
+      </div>
+    </div>
+  );
+}
+
+function Artwork({ src, size, reduced }: { src: string | null; size: number; reduced: boolean }) {
+  if (src) return <img className="artwork" src={src} alt="" style={{ width: size, height: size }} />;
+  return (
+    <span className="artwork" style={{ width: size, height: size }}>
+      <Line mode="rest" color="--state-listening" width={size - 8} height={8} reduced={reduced} />
+    </span>
+  );
+}
+
+export function MediaView({ reduced, hovered }: { reduced: boolean; hovered: boolean }) {
+  const track = useApp((s) => s.media.current);
+  if (!track) return null;
+  const toggle = iconButton(track.playing ? "Pause" : "Play", track.playing ? "pause" : "play", () => mediaAction({ action: "toggle" }));
+  if (!hovered) {
+    return (
+      <div className="row pad-media">
+        <Artwork src={track.artwork} size={32} reduced={reduced} />
+        <button className="grow text-button stacked" onClick={() => openPanel("media")}>
+          <span className="label truncate">{track.title || track.app}</span>
+          <span className="meta tiny truncate">{track.artist || track.app}</span>
+        </button>
+        {track.canToggle && toggle}
+      </div>
+    );
+  }
+  return (
+    <div className="row pad-card media-card">
+      <Artwork src={track.artwork} size={92} reduced={reduced} />
+      <div className="grow stack">
+        <button className="text-button stacked" onClick={() => openPanel("media")}>
+          <span className="label truncate">{track.title || track.app}</span>
+          <span className="meta truncate">{track.artist}{track.artist && track.app ? " · " : ""}{track.app}</span>
+        </button>
+        <Progress />
+        <div className="row media-controls">
+          {iconButton("Previous", "previous", () => mediaAction({ action: "previous" }), !track.canPrevious)}
+          {iconButton(track.playing ? "Pause" : "Play", track.playing ? "pause" : "play", () => mediaAction({ action: "toggle" }), !track.canToggle)}
+          {iconButton("Next", "next", () => mediaAction({ action: "next" }), !track.canNext)}
+        </div>
       </div>
     </div>
   );

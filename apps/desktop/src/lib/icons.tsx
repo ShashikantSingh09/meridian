@@ -43,6 +43,17 @@ const paths: Record<string, ReactNode> = {
       <path d="m13 13 3.6 3.6" />
     </>
   ),
+  play: <path d="M6.5 4.5v11l9-5.5Z" fill="currentColor" />,
+  pause: <path d="M7 4.5v11M13 4.5v11" />,
+  next: <path d="M5 4.8v10.4l7.5-5.2ZM14.8 4.8v10.4" />,
+  previous: <path d="M15 4.8v10.4L7.5 10ZM5.2 4.8v10.4" />,
+  music: (
+    <>
+      <path d="M7.5 15V5l8-1.6v10" />
+      <circle cx="5.5" cy="15" r="2" />
+      <circle cx="13.5" cy="13.4" r="2" />
+    </>
+  ),
   eye: (
     <>
       <path d="M2.5 10S5.2 4.8 10 4.8 17.5 10 17.5 10 14.8 15.2 10 15.2 2.5 10 2.5 10Z" />

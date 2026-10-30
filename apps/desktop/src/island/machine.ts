@@ -13,6 +13,7 @@ export type IslandView =
   | "contextual"
   | "multitask"
   | "screen"
+  | "media"
   | "error";
 
 export interface SessionSummary {
@@ -52,6 +53,8 @@ export interface Snapshot {
   panelOpen: boolean;
   listening: boolean;
   capturing: boolean;
+  /** Something is playing and media is enabled. */
+  mediaPlaying: boolean;
   chatPending: boolean;
   sessions: SessionSummary[];
   notices: Notice[];
@@ -84,6 +87,7 @@ export function deriveView(s: Snapshot): IslandView {
   if (active.length > 1) return "multitask";
   if (active.length === 1) return "working";
   if (s.chatPending) return "thinking";
+  if (s.mediaPlaying) return "media";
   return "idle";
 }
 
@@ -105,6 +109,7 @@ const SIZES: Record<IslandView, Geometry> = {
   contextual: { w: 408, h: 104, r: 24 },
   multitask: { w: 392, h: 0, r: 24 },
   screen: { w: 244, h: 42, r: 21 },
+  media: { w: 336, h: 50, r: 25 },
   error: { w: 392, h: 76, r: 24 },
 };
 
@@ -117,6 +122,7 @@ export const MULTITASK_MAX_ROWS = 4;
 const IDLE_CLOCK: Geometry = { w: 176, h: 30, r: 15 };
 const SLIVER: Geometry = { w: 84, h: 6, r: 3 };
 const WORKING_HOVER: Geometry = { w: 416, h: 128, r: 24 };
+const MEDIA_HOVER: Geometry = { w: 420, h: 124, r: 26 };
 
 export interface GeometryContext {
   hovered: boolean;
@@ -133,6 +139,7 @@ export function geometryFor(view: IslandView, ctx: GeometryContext): Geometry {
   if (view === "idle" && ctx.clock) return IDLE_CLOCK;
   if (view === "working" && ctx.approval) return APPROVAL;
   if (view === "working" && ctx.hovered) return WORKING_HOVER;
+  if (view === "media" && ctx.hovered) return MEDIA_HOVER;
   if (view === "multitask") {
     const rows = Math.min(ctx.rows, MULTITASK_MAX_ROWS);
     return { ...SIZES.multitask, h: rows * MULTITASK_ROW + MULTITASK_PAD };
@@ -156,6 +163,8 @@ export function stateToken(view: IslandView, s: Snapshot): string {
     case "contextual":
     case "screen":
       return "--state-context";
+    case "media":
+      return "--state-listening";
     case "error":
       return "--state-error";
     default:

@@ -115,6 +115,11 @@ fn setup(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
         let _ = emitter.emit_to(island::LABEL, "agent-event", envelope);
     }))?;
 
+    let emitter = handle.clone();
+    let media = media::watch(move |snapshot| {
+        let _ = emitter.emit_to(island::LABEL, "media-state", snapshot);
+    });
+
     let gate = Arc::new(island::Gate::default());
     app.manage(Core {
         settings,
@@ -122,6 +127,7 @@ fn setup(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
         sessions,
         chats: Mutex::new(HashMap::new()),
         frame: Mutex::new(None),
+        media,
     });
 
     let win = app.get_webview_window(island::LABEL).ok_or("island window missing")?;
@@ -175,6 +181,7 @@ pub fn run() {
             commands::session_send,
             commands::session_cancel,
             commands::session_answer,
+            commands::media_action,
             commands::screen_capture,
             commands::screen_crop,
             commands::screen_discard,

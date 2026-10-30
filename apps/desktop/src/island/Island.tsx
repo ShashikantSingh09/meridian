@@ -14,6 +14,7 @@ import {
   ErrorView,
   IdleView,
   ListeningView,
+  MediaView,
   MultitaskView,
   NotificationView,
   ScreenView,
@@ -33,14 +34,15 @@ function useSnapshot(): Snapshot {
   const panelOpen = useApp((s) => s.panelOpen);
   const listening = useApp((s) => s.listening);
   const capturing = useApp((s) => s.screen.capturing);
+  const mediaPlaying = useApp((s) => s.settings.mediaEnabled && (s.media.current?.playing ?? false));
   const chatPending = useApp((s) => s.chatPending);
   const sessions = useApp((s) => s.sessions);
   const notices = useApp((s) => s.notices);
   const suggestions = useApp((s) => s.suggestions);
   const errors = useApp((s) => s.errors);
   return useMemo(
-    () => ({ panelOpen, listening, capturing, chatPending, sessions, notices, suggestions, errors }),
-    [panelOpen, listening, capturing, chatPending, sessions, notices, suggestions, errors],
+    () => ({ panelOpen, listening, capturing, mediaPlaying, chatPending, sessions, notices, suggestions, errors }),
+    [panelOpen, listening, capturing, mediaPlaying, chatPending, sessions, notices, suggestions, errors],
   );
 }
 
@@ -60,6 +62,8 @@ function CompactContent({ view, reduced, hovered, sliver }: { view: IslandView; 
       return <ContextualView reduced={reduced} />;
     case "screen":
       return <ScreenView reduced={reduced} />;
+    case "media":
+      return <MediaView reduced={reduced} hovered={hovered} />;
     case "error":
       return <ErrorView reduced={reduced} />;
     default:
@@ -136,7 +140,7 @@ export function Island() {
       <span className="sheen" aria-hidden="true" />
       <AnimatePresence mode="popLayout" initial={false}>
         <motion.div
-          key={expanded ? "panel" : view + (hovered && (view === "idle" || view === "working") ? "-hover" : "")}
+          key={expanded ? "panel" : view + (hovered && (view === "idle" || view === "working" || view === "media") ? "-hover" : "")}
           className="island-content"
           style={{ width: target.w, height: target.h }}
           initial={enter.initial}

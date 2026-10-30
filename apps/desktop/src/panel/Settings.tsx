@@ -23,7 +23,7 @@ function Choice<K extends keyof Settings>({ name, label, options }: {
   );
 }
 
-type Flag = "ambient" | "autostart" | "localOnly" | "showClock" | "islandAutoHide";
+type Flag = "ambient" | "autostart" | "localOnly" | "showClock" | "islandAutoHide" | "mediaEnabled";
 
 function Toggle({ name, label, hint }: { name: Flag; label: string; hint: string }) {
   const value = useApp((s) => s.settings[name]);
@@ -100,6 +100,7 @@ export function SettingsPage() {
           { value: 1.35, label: "Quick" },
         ]} />
         <Toggle name="showClock" label="Show the time" hint="Beside the line while idle." />
+        <Toggle name="mediaEnabled" label="Show what is playing" hint="Any player that publishes to Windows media controls." />
         <Toggle name="islandAutoHide" label="Hide when idle" hint="Shrinks to a sliver. Move the pointer to it, or wait for activity, and it returns." />
         <p className="meta">Hide it completely from the tray icon. The shortcut brings it back.</p>
       </section>
@@ -152,9 +153,10 @@ export function SettingsPage() {
       <section className="stack">
         <h2>Privacy</h2>
         <p className="meta">
-          This build reads no screen, clipboard, keyboard or window content. The microphone opens only while
-          the listening view is on screen, shows a dot while open, and nothing is recorded. Chat text goes
-          only to the engine you pick. No telemetry.
+          Your screen is read only as set in Desktop awareness, always on this PC, and shared only from a
+          preview you approve. No keystrokes or clipboard are read. The microphone opens only while the
+          listening view is on screen, shows a dot while open, and nothing is recorded. Chat text goes only
+          to the engine you pick. No telemetry.
         </p>
       </section>
 
