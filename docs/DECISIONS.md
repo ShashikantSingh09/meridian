@@ -332,3 +332,27 @@ list of names so that a game or a call never shows as music, which means a new p
 only its level. Everything else is unchanged: what a session reports is still used for titles, artwork and controls.
 
 The cost is a look every 3 seconds, in place of sleeping until told.
+
+## D41. The island is one drawn path
+
+The notch used to be four pieces: a grey rectangle, a black face inset by a pixel, and two gradient curves placed beside it. The
+grey hairline ran straight up between each curve and the rectangle, and the shadow followed only the rectangle, so the owner could
+see the curves and the body as separate parts. Tuning the pieces could not fix that, because the join was built in.
+
+The shape is now one line, `notchPath` in `island/notch.ts`, driven by the same spring values as before. There is no hairline at
+rest, only black, which is what a hardware notch looks like. Its shadow follows the whole outline. While something is happening the
+outline shows a faint rim in the state colour, and a light runs along the same path, so it follows the curves too. The light is a
+CSS animation on the path, and it replaces a spinning 1100 pixel gradient. Morphs still measure 180 frames a second, with a worst
+frame of 11 ms.
+
+## D42. Releases come from a tag
+
+`npm run release 0.2.0` sets the version in all four places, commits, tags and pushes. The tag starts
+`.github/workflows/release.yml`, which tests the app, builds it on a clean Windows machine and publishes a GitHub release with
+the setup exe, an MSI, a portable exe and checksums. The same workflow run by hand from the Actions tab builds those files without
+publishing.
+
+The shape follows Coucou's Windows workflow, which is also Tauri. Checking that the tag matches every version file is theirs too.
+Actions are pinned to commits, since this workflow can hold signing keys. Optional secrets are passed on only when they have a
+value: the app reads them with `option_env!`, where an empty string counts as set, and a blank client ID would otherwise offer a
+sign-in that can only fail.

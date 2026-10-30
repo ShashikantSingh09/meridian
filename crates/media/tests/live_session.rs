@@ -11,6 +11,7 @@ use windows::core::HSTRING;
 use windows::Foundation::TypedEventHandler;
 use windows::Media::Playback::MediaPlayer;
 use windows::Media::{MediaPlaybackStatus, MediaPlaybackType, SystemMediaTransportControlsButton};
+use windows::Storage::Streams::{DataWriter, InMemoryRandomAccessStream, RandomAccessStreamReference};
 
 const TITLE: &str = "Meridian Test Track";
 
@@ -123,4 +124,50 @@ fn hears_an_app_making_sound() {
         client.Stop().unwrap();
         assert!(heard, "the meter never reported this process");
     }
+}
+
+/// A real picture, sent through Windows the way a player sends one. Set MERIDIAN_HOLD_SECS to
+/// keep the session open and look at it in the running app.
+#[test]
+#[ignore = "publishes a system media session"]
+fn reads_album_art() {
+    // A 1 by 1 red PNG.
+    const PNG: [u8; 69] = [
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0x0d, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 1, 0, 0, 0, 1, 8, 2, 0, 0, 0,
+        0x90, 0x77, 0x53, 0xde, 0, 0, 0, 0x0c, 0x49, 0x44, 0x41, 0x54, 0x08, 0xd7, 0x63, 0xf8, 0xcf, 0xc0, 0, 0, 0x03, 0x01, 0x01, 0,
+        0x18, 0xdd, 0x8d, 0xb0, 0, 0, 0, 0, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+    ];
+    let player = MediaPlayer::new().unwrap();
+    player.CommandManager().unwrap().SetIsEnabled(false).unwrap();
+    let controls = player.SystemMediaTransportControls().unwrap();
+    controls.SetIsEnabled(true).unwrap();
+    controls.SetIsPlayEnabled(true).unwrap();
+    controls.SetIsPauseEnabled(true).unwrap();
+
+    let stream = InMemoryRandomAccessStream::new().unwrap();
+    let writer = DataWriter::CreateDataWriter(&stream).unwrap();
+    writer.WriteBytes(&PNG).unwrap();
+    writer.StoreAsync().unwrap().join().unwrap();
+    writer.FlushAsync().unwrap().join().unwrap();
+    writer.DetachStream().unwrap();
+    stream.Seek(0).unwrap();
+
+    let display = controls.DisplayUpdater().unwrap();
+    display.SetType(MediaPlaybackType::Music).unwrap();
+    display.MusicProperties().unwrap().SetTitle(&HSTRING::from(TITLE)).unwrap();
+    display.SetThumbnail(&RandomAccessStreamReference::CreateFromStream(&stream).unwrap()).unwrap();
+    display.Update().unwrap();
+    controls.SetPlaybackStatus(MediaPlaybackStatus::Playing).unwrap();
+
+    let state = Arc::new(Mutex::new(Snapshot::default()));
+    let sink = state.clone();
+    let _watching = media::watch(move |snapshot| *sink.lock().unwrap() = snapshot);
+    wait_for(
+        || state.lock().unwrap().current.as_ref().is_some_and(|t| t.title == TITLE && t.artwork.is_some()),
+        "the artwork to arrive",
+    );
+    assert!(state.lock().unwrap().current.as_ref().unwrap().artwork.as_ref().unwrap().starts_with("data:image"));
+
+    let hold = std::env::var("MERIDIAN_HOLD_SECS").ok().and_then(|s| s.parse().ok()).unwrap_or(0);
+    std::thread::sleep(Duration::from_secs(hold));
 }

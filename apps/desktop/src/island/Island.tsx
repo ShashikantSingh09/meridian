@@ -10,6 +10,7 @@ import { bridge } from "../lib/bridge";
 import { reportView, togglePanel, useApp } from "../lib/store";
 import { Panel } from "../panel/Panel";
 import { activeSessions, deriveView, geometryFor, stateToken, waitingApproval, type IslandView, type Snapshot } from "./machine";
+import { notchPath } from "./notch";
 import {
   Bubble,
   ContextualView,
@@ -112,7 +113,7 @@ export function Island() {
   const width = useMotionValue(reduced ? target.w : BIRTH.w);
   const height = useMotionValue(reduced ? target.h : BIRTH.h);
   const radius = useMotionValue(target.r);
-  const faceRadius = useTransform(radius, (r) => Math.max(0, r - 1));
+  const outline = useTransform([width, height, radius], ([w, h, r]: number[]) => notchPath(w!, h!, r!));
   const el = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -161,19 +162,24 @@ export function Island() {
       style={{ width, height, "--glow": glow } as never}
       onClick={view === "idle" ? togglePanel : undefined}
     >
-      <span className="ear ear-left" aria-hidden="true" />
-      <span className="ear ear-right" aria-hidden="true" />
+      <svg className="island-body" aria-hidden="true">
+        <motion.path d={outline} />
+      </svg>
+      {lit && (
+        <svg className="island-light" aria-hidden="true">
+          <motion.path className="island-rim" d={outline} />
+          {/* Measured as 1 long, so the dash in the styles is a share of the outline at any size. */}
+          <motion.path className="island-comet" d={outline} ref={(path: SVGPathElement | null) => path?.setAttribute("pathLength", "1")} />
+        </svg>
+      )}
       <Bubble />
       <motion.div className="island-shape" style={{ borderBottomLeftRadius: radius, borderBottomRightRadius: radius }}>
-        {lit && <span className="edge-light" aria-hidden="true" />}
-        <motion.div className="island-face" style={{ borderBottomLeftRadius: faceRadius, borderBottomRightRadius: faceRadius }}>
-          <span className="island-tint" aria-hidden="true" />
-          <AnimatePresence initial={false}>
-            <motion.div key={contentKey} className="island-content" style={{ width: target.w, height: target.h }} initial={enter.initial} animate={enter.animate} exit={enter.exit}>
-              {expanded ? <Panel /> : <CompactContent view={view} reduced={reduced} hovered={hovered} sliver={sliver} mediaOpen={mediaOpen} />}
-            </motion.div>
-          </AnimatePresence>
-        </motion.div>
+        <span className="island-tint" aria-hidden="true" />
+        <AnimatePresence initial={false}>
+          <motion.div key={contentKey} className="island-content" style={{ width: target.w, height: target.h }} initial={enter.initial} animate={enter.animate} exit={enter.exit}>
+            {expanded ? <Panel /> : <CompactContent view={view} reduced={reduced} hovered={hovered} sliver={sliver} mediaOpen={mediaOpen} />}
+          </motion.div>
+        </AnimatePresence>
       </motion.div>
     </motion.div>
   );

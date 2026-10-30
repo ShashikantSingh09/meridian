@@ -60,7 +60,9 @@ test("hangs from the top edge of the window with a flat top", async ({ page }) =
   });
   expect(corners[0]).toBe("0px");
   expect(parseFloat(corners[1])).toBeGreaterThan(8);
-  await expect(page.locator(".ear")).toHaveCount(2);
+  const outline = await page.locator(".island-body path").getAttribute("d");
+  expect(outline).toMatch(/^M-[\d.]+ 0/);
+  await expect(page.locator(".island-body path")).toHaveCount(1);
 });
 
 test("old and new content never show at once for long", async ({ page }) => {

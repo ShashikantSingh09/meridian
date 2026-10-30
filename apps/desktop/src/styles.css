@@ -56,25 +56,14 @@ textarea {
 
 /* ── Island shape ────────────────────────────────────────────────────── */
 
-@property --ear {
-  syntax: "<length>";
-  inherits: true;
-  initial-value: 10px;
-}
-
 /* Flat against the top of the screen, round at the bottom, and flowing out of the
-   edge through two small inward curves: the shape of a hardware notch. */
+   edge through two small inward curves: the shape of a hardware notch. The whole shape
+   is one drawn path, in Island.tsx, so no part of it can show as a separate piece. */
 .island {
-  --ear: 10px;
   position: absolute;
   top: 0;
   left: 50%;
   translate: -50% 0;
-  transition: --ear 0.2s ease;
-}
-
-.island[data-small="true"] {
-  --ear: 3px;
 }
 
 .island[data-align="left"] {
@@ -90,30 +79,6 @@ textarea {
 
 .island[data-view="idle"] {
   cursor: pointer;
-}
-
-.ear {
-  position: absolute;
-  top: 0;
-  width: var(--ear);
-  height: var(--ear);
-  pointer-events: none;
-  background: radial-gradient(
-    circle at var(--ear-x) 100%,
-    transparent calc(var(--ear) - 1px),
-    var(--island-edge) calc(var(--ear) - 0.5px),
-    var(--island) calc(var(--ear) + 0.5px)
-  );
-}
-
-.ear-left {
-  --ear-x: 0%;
-  right: 100%;
-}
-
-.ear-right {
-  --ear-x: 100%;
-  left: 100%;
 }
 
 .island-content {
@@ -1270,46 +1235,64 @@ textarea::placeholder {
 @keyframes bubble-pop { from { scale: 0; opacity: 0; } 70% { scale: 1.12; } to { scale: 1; opacity: 1; } }
 @keyframes shape-wobble { 0%, 100% { translate: 0 0; } 20% { translate: -3px 0; } 40% { translate: 3px 0; } 60% { translate: -2px 0; } 80% { translate: 2px 0; } }
 
-/* A hairline shows round a black face, and the moving light runs in that same gap. */
+.island-body,
+.island-light {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.island-body {
+  fill: var(--island);
+  filter: drop-shadow(0 6px 11px rgba(0, 0, 0, 0.34)) drop-shadow(0 0 16px color-mix(in srgb, var(--glow) 26%, transparent));
+}
+
+.island[data-view="idle"] .island-body,
+.island[data-view="expanded"] .island-body {
+  filter: drop-shadow(0 6px 11px rgba(0, 0, 0, 0.34));
+}
+
+/* Runs along the outline, so it follows the curves as well. */
+.island-light {
+  fill: none;
+  stroke: var(--glow);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
+
+.island-rim {
+  stroke-width: 1;
+  opacity: 0.35;
+}
+
+.island-comet {
+  stroke-dasharray: 0.22 1.22;
+  animation: comet-run 2.4s linear infinite forwards;
+}
+
+.island[data-view="thinking"] .island-comet { animation-duration: 1.8s; }
+.island[data-view="notification"] .island-comet,
+.island[data-view="error"] .island-comet { animation-iteration-count: 2; animation-duration: 1.6s; }
+
+@keyframes comet-run {
+  from { stroke-dashoffset: 0.22; }
+  to { stroke-dashoffset: -1; }
+}
+
+/* Clips what is inside. The black itself is the path behind it. */
 .island-shape {
   position: absolute;
   inset: 0;
   overflow: hidden;
-  background: #2a2a2d;
-  box-shadow: var(--island-shadow), 0 0 32px color-mix(in srgb, var(--glow) 26%, transparent);
-  transition: box-shadow 0.4s ease;
 }
 
-.island[data-view="idle"] .island-shape,
-.island[data-view="expanded"] .island-shape {
-  box-shadow: var(--island-shadow);
-}
-
-.island[data-view="error"] .island-shape {
+.island[data-view="error"] .island-shape,
+.island[data-view="error"] .island-body {
   animation: shape-wobble 0.45s ease 1;
 }
-
-.island-face {
-  position: absolute;
-  inset: 0 1px 1px;
-  overflow: hidden;
-  background: var(--island);
-}
-
-.edge-light {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  width: 1100px;
-  height: 1100px;
-  margin: -550px 0 0 -550px;
-  background: conic-gradient(from 0deg, transparent 0 62%, color-mix(in srgb, var(--glow) 55%, #000) 78%, var(--glow) 92%, #fff 97%, transparent 100%);
-  animation: edge-spin 2.4s linear infinite;
-}
-
-.island[data-view="thinking"] .edge-light { animation-duration: 1.8s; }
-.island[data-view="notification"] .edge-light,
-.island[data-view="error"] .edge-light { animation-iteration-count: 2; animation-duration: 1.6s; }
 
 /* Colour rising from the bottom edge: the album, or whatever is happening. */
 .island-tint {

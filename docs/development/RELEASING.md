@@ -1,5 +1,35 @@
 # Releasing Meridian
 
+## Making a release
+
+```powershell
+npm run release 0.2.0
+```
+
+That sets the version, commits, tags and pushes. GitHub then tests the app, builds it and publishes a release with:
+
+| File | What it is |
+|---|---|
+| `Meridian-0.2.0-setup.exe` | The normal installer, per user |
+| `Meridian-0.2.0.msi` | Windows Installer, for managed machines |
+| `Meridian-0.2.0-portable.exe` | Runs with no install. Needs the WebView2 runtime, which Windows 11 includes |
+| `SHA256SUMS.txt` | Checksums for all of the above |
+| `latest.json` | The update feed, only once an update signing key is set |
+
+To try a build without publishing anything, open the Actions tab, choose Release, and press Run workflow. The files stay on that
+run for 7 days. Commit your work first: the script refuses to run with uncommitted changes.
+
+This repository is private, so its releases can be downloaded only by people with access to it.
+
+## What the workflow needs
+
+Nothing, for a working unsigned build. These optional secrets, set under Settings, Secrets and variables, Actions, turn more on:
+
+| Secret | What it turns on |
+|---|---|
+| `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, `MERIDIAN_UPDATE_PUBKEY`, `MERIDIAN_UPDATE_URL` | Automatic updates |
+| The `MERIDIAN_CLIENT_*`, `MERIDIAN_SECRET_*` and Google and Microsoft IDs listed under Customer sign-in | Sign-in for those services |
+
 ## One-time setup
 
 1. Generate the update signing key, once, and keep it out of the repository:
@@ -11,9 +41,9 @@
    login.
 3. Get a code-signing certificate. Without one, Windows SmartScreen warns every customer.
 
-## Each release
+## Building by hand
 
-1. Set the version in `apps/desktop/src-tauri/tauri.conf.json` and the workspace `Cargo.toml`.
+1. Set the version in `apps/desktop/src-tauri/tauri.conf.json`, both `package.json` files and the workspace `Cargo.toml`.
 2. Build, from `apps/desktop`:
    ```powershell
    $env:MERIDIAN_UPDATE_PUBKEY = "<contents of update.key.pub>"

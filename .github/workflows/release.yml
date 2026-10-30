@@ -1,0 +1,159 @@
+name: Release
+
+# A tag like v0.2.0 tests the app, builds it and publishes a GitHub release with the installers.
+# Run by hand from the Actions tab, it builds the same files and keeps them on the run without
+# publishing anything. See docs/development/RELEASING.md.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 75
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install Rust
+        run: rustup toolchain install stable --profile minimal
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-${{ hashFiles('Cargo.lock') }}
+          restore-keys: cargo-
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Read the version
+        id: version
+        shell: pwsh
+        run: |
+          $version = (Get-Content apps/desktop/src-tauri/tauri.conf.json | ConvertFrom-Json).version
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      # The version lives in four files. A tag that says one thing and an installer that says
+      # another is the kind of mistake nobody notices until it is out.
+      - name: Check the tag and every version agree
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}" -replace '^v', ''
+          $found = @{
+            'tauri.conf.json'           = "${{ steps.version.outputs.version }}"
+            'package.json'              = (Get-Content package.json | ConvertFrom-Json).version
+            'apps/desktop/package.json' = (Get-Content apps/desktop/package.json | ConvertFrom-Json).version
+            'Cargo.toml'                = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"(.+)"').Matches[0].Groups[1].Value
+          }
+          $wrong = $found.GetEnumerator() | Where-Object { $_.Value -ne $tag } | ForEach-Object { "$($_.Key) says $($_.Value)" }
+          if ($wrong) { throw "The tag says $tag, but $($wrong -join ', ')" }
+
+      # Rust checks that the interface exists when it compiles, so this comes first.
+      - name: Build the interface
+        run: npm run build
+        working-directory: apps/desktop
+
+      - name: Test
+        shell: pwsh
+        run: |
+          cargo test --workspace
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          Set-Location apps/desktop
+          npx vitest run
+
+      # These are read when the app compiles, and an empty one counts as set: a service would
+      # then offer sign-in with a blank ID. So only the ones with a value are passed on.
+      - name: Use the build secrets that are set
+        shell: pwsh
+        env:
+          MERIDIAN_UPDATE_PUBKEY: ${{ secrets.MERIDIAN_UPDATE_PUBKEY }}
+          MERIDIAN_UPDATE_URL: ${{ secrets.MERIDIAN_UPDATE_URL }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          MERIDIAN_GOOGLE_CLIENT_ID: ${{ secrets.MERIDIAN_GOOGLE_CLIENT_ID }}
+          MERIDIAN_GOOGLE_CLIENT_SECRET: ${{ secrets.MERIDIAN_GOOGLE_CLIENT_SECRET }}
+          MERIDIAN_MICROSOFT_CLIENT_ID: ${{ secrets.MERIDIAN_MICROSOFT_CLIENT_ID }}
+          MERIDIAN_CLIENT_GITHUB: ${{ secrets.MERIDIAN_CLIENT_GITHUB }}
+          MERIDIAN_SECRET_GITHUB: ${{ secrets.MERIDIAN_SECRET_GITHUB }}
+          MERIDIAN_CLIENT_SLACK: ${{ secrets.MERIDIAN_CLIENT_SLACK }}
+          MERIDIAN_SECRET_SLACK: ${{ secrets.MERIDIAN_SECRET_SLACK }}
+          MERIDIAN_CLIENT_ASANA: ${{ secrets.MERIDIAN_CLIENT_ASANA }}
+          MERIDIAN_SECRET_ASANA: ${{ secrets.MERIDIAN_SECRET_ASANA }}
+          MERIDIAN_CLIENT_HUBSPOT: ${{ secrets.MERIDIAN_CLIENT_HUBSPOT }}
+          MERIDIAN_SECRET_HUBSPOT: ${{ secrets.MERIDIAN_SECRET_HUBSPOT }}
+          MERIDIAN_CLIENT_BOX: ${{ secrets.MERIDIAN_CLIENT_BOX }}
+          MERIDIAN_SECRET_BOX: ${{ secrets.MERIDIAN_SECRET_BOX }}
+        run: |
+          $names = 'MERIDIAN_UPDATE_PUBKEY', 'MERIDIAN_UPDATE_URL', 'TAURI_SIGNING_PRIVATE_KEY', 'TAURI_SIGNING_PRIVATE_KEY_PASSWORD',
+            'MERIDIAN_GOOGLE_CLIENT_ID', 'MERIDIAN_GOOGLE_CLIENT_SECRET', 'MERIDIAN_MICROSOFT_CLIENT_ID',
+            'MERIDIAN_CLIENT_GITHUB', 'MERIDIAN_SECRET_GITHUB', 'MERIDIAN_CLIENT_SLACK', 'MERIDIAN_SECRET_SLACK',
+            'MERIDIAN_CLIENT_ASANA', 'MERIDIAN_SECRET_ASANA', 'MERIDIAN_CLIENT_HUBSPOT', 'MERIDIAN_SECRET_HUBSPOT',
+            'MERIDIAN_CLIENT_BOX', 'MERIDIAN_SECRET_BOX'
+          foreach ($name in $names) {
+            $value = [Environment]::GetEnvironmentVariable($name)
+            if ($value) {
+              $mark = "END_$([guid]::NewGuid().ToString('N'))"
+              "$name<<$mark", $value, $mark | Add-Content $env:GITHUB_ENV
+            }
+          }
+
+      - name: Build the installers
+        shell: pwsh
+        working-directory: apps/desktop
+        run: |
+          $extra = @()
+          if ($env:TAURI_SIGNING_PRIVATE_KEY) { $extra = '--config', '{\"bundle\":{\"createUpdaterArtifacts\":true}}' }
+          npx tauri build --bundles nsis,msi @extra
+
+      - name: Collect the release files
+        shell: pwsh
+        run: |
+          $v = "${{ steps.version.outputs.version }}"
+          New-Item -ItemType Directory release | Out-Null
+          Copy-Item "target/release/bundle/nsis/Meridian_${v}_x64-setup.exe" "release/Meridian-$v-setup.exe"
+          Copy-Item "target/release/bundle/msi/Meridian_${v}_x64_en-US.msi" "release/Meridian-$v.msi"
+          Copy-Item target/release/meridian.exe "release/Meridian-$v-portable.exe"
+          if ($env:TAURI_SIGNING_PRIVATE_KEY) {
+            $signature = (Get-Content "target/release/bundle/nsis/Meridian_${v}_x64-setup.exe.sig" -Raw).Trim()
+            $url = "https://github.com/${{ github.repository }}/releases/download/v$v/Meridian-$v-setup.exe"
+            @{ version = $v; platforms = @{ 'windows-x86_64' = @{ signature = $signature; url = $url } } } |
+              ConvertTo-Json -Depth 4 | Set-Content release/latest.json
+          }
+          Get-ChildItem release -File | ForEach-Object { "$((Get-FileHash $_ -Algorithm SHA256).Hash.ToLower())  $($_.Name)" } |
+            Set-Content release/SHA256SUMS.txt
+          Get-ChildItem release | Format-Table Name, Length
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: Meridian-${{ steps.version.outputs.version }}
+          path: release/
+          retention-days: 7
+
+      - name: Publish the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $v = "${{ steps.version.outputs.version }}"
+          $notes = @"
+          Download ``Meridian-$v-setup.exe`` or ``Meridian-$v.msi`` and run it. ``Meridian-$v-portable.exe`` needs no install.
+
+          These are not code-signed yet, so Windows SmartScreen shows a warning: click **More info**, then **Run anyway**.
+          "@
+          gh release create "${{ github.ref_name }}" (Get-ChildItem release -File).FullName --title "Meridian $v" --notes $notes --generate-notes

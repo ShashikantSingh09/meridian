@@ -1,5 +1,22 @@
 # Development ledger
 
+## 2026-10-31: One-path island, album art, release automation
+
+### Completed
+
+- **Island.** Rebuilt as one drawn path, after the owner saw the curves and body as separate shapes (D41).
+- **Album art.** The session chosen was often JioSaavn's one with no details, so it had no art. Fixed by preferring a session with
+  a title. Art is now read once per track rather than on every 3 second look.
+- **Releases.** `npm run release` and a GitHub workflow that builds and publishes installers (D42).
+
+### Testing status
+
+| Check | Result |
+|---|---|
+| Live | Three media tests, one sending a real picture through Windows and reading it back |
+| Real window | That picture loaded in the real app under its content policy, closed and open. Island checked in magnified crops of the real screen |
+| Morphs | 180 frames a second, worst frame 11 ms |
+
 ## 2026-10-31: Music in any player, logos, Chat and Desktop
 
 ### Completed

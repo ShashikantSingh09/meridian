@@ -149,9 +149,29 @@ fn artwork(session: &Session) -> Option<String> {
     Some(format!("data:{kind};base64,{}", base64::engine::general_purpose::STANDARD.encode(bytes)))
 }
 
+/// Artwork for what is on. It can be megabytes and this runs every few seconds, so it is read
+/// again only for a new track, or when a player reports a change, since some send the title
+/// first and the picture a moment later. A track with no picture yet keeps being tried.
+#[derive(Default)]
+struct Art {
+    key: Option<(String, String, String)>,
+    image: Option<String>,
+}
+
+impl Art {
+    fn of(&mut self, session: &Session, track: &Track, reported: bool) -> Option<String> {
+        let key = Some((track.session.clone(), track.title.clone(), track.album.clone()));
+        if reported || self.image.is_none() || self.key != key {
+            self.image = artwork(session);
+            self.key = key;
+        }
+        self.image.clone()
+    }
+}
+
 /// Only the app and its status are required. A player that will not say what is on
 /// still has to show as playing.
-fn read(session: &Session, with_artwork: bool) -> Result<Track> {
+fn read(session: &Session) -> Result<Track> {
     let id = session.SourceAppUserModelId()?.to_string();
     let info = session.GetPlaybackInfo()?;
     let props = session.TryGetMediaPropertiesAsync().and_then(|op| op.join()).ok();
@@ -174,7 +194,7 @@ fn read(session: &Session, with_artwork: bool) -> Result<Track> {
         can_next: can(Controls::IsNextEnabled),
         can_previous: can(Controls::IsPreviousEnabled),
         can_seek: can(Controls::IsPlaybackPositionEnabled),
-        artwork: if with_artwork { artwork(session) } else { None },
+        artwork: None,
     })
 }
 
@@ -234,13 +254,17 @@ fn apply_heard(list: &mut Vec<Track>, heard: Vec<audio::Heard>) {
     }
 }
 
-fn snapshot(manager: &Manager, pick: Option<&str>, ears: &mut audio::Ears) -> Snapshot {
+fn snapshot(manager: &Manager, pick: Option<&str>, ears: &mut audio::Ears, art: &mut Art, reported: bool) -> Snapshot {
     let mut list = Vec::new();
-    for track in all_sessions(manager).unwrap_or_default().iter().filter_map(|s| read(s, false).ok()) {
+    for track in all_sessions(manager).unwrap_or_default().iter().filter_map(|s| read(s).ok()) {
         add(&mut list, track);
     }
     apply_heard(&mut list, ears.players());
-    let shown = chosen(manager, pick).and_then(|s| read(&s, true).ok());
+    let shown = chosen(manager, pick).and_then(|session| {
+        let mut track = read(&session).ok()?;
+        track.artwork = art.of(&session, &track, reported);
+        Some(track)
+    });
     let playing = list.iter().find(|t| t.playing).cloned();
     let current = match (shown, playing) {
         (Some(shown), _) if shown.playing => Some(shown),
@@ -330,6 +354,7 @@ fn run(rx: Receiver<Wake>, tx: Sender<Wake>, on_change: impl Fn(Snapshot)) -> Re
     // Held only so they stay alive.
     let mut _listeners: Vec<Listener> = Vec::new();
     let mut ears = audio::Ears::default();
+    let mut art = Art::default();
     let _ = tx.send(Wake::Sessions);
 
     loop {
@@ -342,6 +367,7 @@ fn run(rx: Receiver<Wake>, tx: Sender<Wake>, on_change: impl Fn(Snapshot)) -> Re
             Err(RecvTimeoutError::Timeout) => None,
             Err(RecvTimeoutError::Disconnected) => return Ok(()),
         };
+        let reported = wake.is_some();
         let mut sessions_changed = false;
         let mut resend = false;
         while let Some(event) = wake.take() {
@@ -357,7 +383,7 @@ fn run(rx: Receiver<Wake>, tx: Sender<Wake>, on_change: impl Fn(Snapshot)) -> Re
         if sessions_changed {
             _listeners = all_sessions(&manager).unwrap_or_default().iter().filter_map(|s| listen_session(s, &tx).ok()).collect();
         }
-        let now = snapshot(&manager, pick.as_deref(), &mut ears);
+        let now = snapshot(&manager, pick.as_deref(), &mut ears, &mut art, reported);
         if now != last || resend {
             on_change(now.clone());
             last = now;
