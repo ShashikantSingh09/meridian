@@ -1,5 +1,8 @@
+import { spring } from "@meridian/design-system/motion";
+import { motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { bridge } from "../lib/bridge";
+import { Brand } from "../lib/brands";
 import { Icon } from "../lib/icons";
 import {
   answerApproval,
@@ -23,38 +26,38 @@ import {
 import type { AgentId } from "../lib/types";
 import { Face } from "../island/faces";
 import { LogLine } from "./LogLine";
+import { Menu } from "./Menu";
 
 const LIVE = ["starting", "running", "waiting"];
 
-/** One selector for every engine, API or agent. */
+/** Every AI that is ready, side by side. One click switches. */
 function EnginePicker() {
   const providers = useApp((s) => s.providers);
   const localOnline = useApp((s) => s.localOnline);
   const agents = useApp((s) => s.agents);
   const providerId = useApp((s) => s.chat.providerId);
   const agent = useApp((s) => s.agentChat.agent);
-  const ready = providers.filter((p) => isReady(p, localOnline));
-  const installed = agents.filter((a) => a.installed);
+  const current = agent ?? providerId;
+  const engines = [...agents.filter((a) => a.installed), ...providers.filter((p) => isReady(p, localOnline))];
 
+  if (engines.length === 0) {
+    return <button className="engine-connect" onClick={() => openSettings("models")}>Connect an AI</button>;
+  }
   return (
-    <select aria-label="AI engine" value={agent ?? providerId ?? ""} onChange={(e) => selectEngine(e.target.value)}>
-      {ready.length === 0 && installed.length === 0 && <option value="">No engine ready</option>}
-      {ready.length === 0 && installed.length > 0 && !agent && <option value="">Choose an engine</option>}
-      {installed.length > 0 && (
-        <optgroup label="Coding agents">
-          {installed.map((a) => (
-            <option key={a.id} value={a.id}>{a.name}</option>
-          ))}
-        </optgroup>
-      )}
-      {ready.length > 0 && (
-        <optgroup label="API and local models">
-          {ready.map((p) => (
-            <option key={p.id} value={p.id}>{p.name}</option>
-          ))}
-        </optgroup>
-      )}
-    </select>
+    <div className="engines" role="radiogroup" aria-label="AI engine">
+      {engines.map((e) => (
+        <button key={e.id} className="engine" role="radio" aria-checked={e.id === current} onClick={() => selectEngine(e.id)}>
+          {e.id === current && <motion.span layoutId="engine-pill" className="engine-pill" transition={spring.hover} />}
+          <span className="engine-label">
+            <Brand id={e.id} name={e.name} size={18} />
+            {e.name}
+          </span>
+        </button>
+      ))}
+      <button className="engine engine-add" aria-label="Add an AI" title="Add an AI" onClick={() => openSettings("models")}>
+        <Icon name="plus" size={13} />
+      </button>
+    </div>
   );
 }
 
@@ -72,6 +75,7 @@ function SignInBanner({ agent }: { agent: AgentId }) {
 }
 
 function AgentChat({ agent }: { agent: AgentId }) {
+  const face = useApp((s) => s.settings.face);
   const { mode, cwd, sessionId } = useApp((s) => s.agentChat);
   const defaultDir = useApp((s) => s.settings.agentDefaultDir);
   const sessions = useApp((s) => s.sessions);
@@ -112,17 +116,13 @@ function AgentChat({ agent }: { agent: AgentId }) {
     <div className="chat">
       <header className="row bar engine-bar">
         <EnginePicker />
-        <select
-          aria-label="Conversation"
-          className="grow"
+        <Menu
+          label="Conversation"
           value={session?.id ?? ""}
-          onChange={(e) => (e.target.value ? selectAgentConversation(e.target.value) : newAgentConversation())}
-        >
-          <option value="">New conversation</option>
-          {conversations.map((c) => (
-            <option key={c.id} value={c.id}>{c.title}</option>
-          ))}
-        </select>
+          items={[{ value: "", label: "New chat" }, ...conversations.map((c) => ({ value: c.id, label: c.title }))]}
+          empty="New chat"
+          onPick={(id) => (id ? selectAgentConversation(id) : newAgentConversation())}
+        />
         <div className="segmented" role="group" aria-label="Mode">
           <button aria-pressed={mode === "general"} disabled={session !== null} onClick={() => setAgentMode("general")}>General</button>
           <button aria-pressed={mode === "project"} disabled={session !== null} onClick={() => setAgentMode("project")}>Project</button>
@@ -154,11 +154,15 @@ function AgentChat({ agent }: { agent: AgentId }) {
 
       <div className="log" ref={log} aria-live="polite">
         {session === null ? (
-          <p className="meta center">
-            {mode === "general"
-              ? "General assistant: questions, research and explanations. No shell, no file edits, no project access."
-              : "Project assistant: works in your folder, and asks before it changes anything."}
-          </p>
+          <div className="chat-start">
+            <Face id={face} mood="rest" scale={1.4} />
+            <p className="chat-hello">{mode === "general" ? "What can I help with?" : "What should we work on?"}</p>
+            <p className="meta">
+              {mode === "general"
+                ? "Questions, research and explanations. No shell, no file edits, no project access."
+                : "Works in your folder, and asks before it changes anything."}
+            </p>
+          </div>
         ) : (
           session.log.map((entry, i) => <LogLine key={i} entry={entry} />)
         )}
@@ -214,11 +218,15 @@ function ApiChat() {
   const log = useRef<HTMLDivElement>(null);
   const ready = providers.filter((p) => isReady(p, localOnline));
   const first = ready[0]?.id;
-  const noEngine = ready.length === 0 && !agents.some((a) => a.installed);
+  const firstAgent = agents.find((a) => a.installed)?.id;
+  const noEngine = !first && !firstAgent;
 
+  // Chat opens on an AI, so nobody meets an empty choice.
   useEffect(() => {
-    if (!chat.providerId && first) void selectProvider(first);
-  }, [chat.providerId, first]);
+    if (chat.providerId) return;
+    if (first) void selectProvider(first);
+    else if (firstAgent) selectEngine(firstAgent);
+  }, [chat.providerId, first, firstAgent]);
 
   useEffect(() => {
     log.current?.scrollTo({ top: log.current.scrollHeight });
@@ -234,40 +242,38 @@ function ApiChat() {
 
   return (
     <div className="chat">
-      <header className="row bar">
+      <header className="row bar engine-bar">
         <EnginePicker />
-        <select
-          aria-label="Model"
-          className="grow"
-          value={chat.model ?? ""}
-          onChange={(e) => chat.providerId && void selectProvider(chat.providerId, e.target.value)}
-        >
-          {chat.models.length === 0 && <option value="">{chat.model ?? "No models"}</option>}
-          {chat.models.map((m) => (
-            <option key={m.id} value={m.id}>{m.label}</option>
-          ))}
-        </select>
+        {chat.providerId && (
+          <Menu
+            label="Model"
+            value={chat.model ?? ""}
+            items={chat.models.map((m) => ({ value: m.id, label: m.label }))}
+            empty={chat.model ?? "No models"}
+            onPick={(id) => chat.providerId && void selectProvider(chat.providerId, id)}
+          />
+        )}
         {chat.usage && (
           <span className="meta tabular" title="Tokens in / out, as reported by the provider">
             {chat.usage.input} / {chat.usage.output}
           </span>
         )}
-        <button className="ghost" onClick={clearChat} disabled={chat.messages.length === 0}>New</button>
+        <button className="pill-button" onClick={clearChat} disabled={chat.messages.length === 0}>New chat</button>
       </header>
 
       <div className="messages" ref={log} aria-live="polite">
         {chat.messages.length === 0 &&
           (noEngine ? (
-            <div className="empty">
-              <p className="label">No AI engine is ready yet</p>
-              <p className="meta">Add an API key, or start a local server such as Ollama or LM Studio.</p>
-              <button className="solid" onClick={() => openSettings("models")}>Set up a provider</button>
+            <div className="chat-start">
+              <Face id={face} mood="asleep" scale={1.4} />
+              <p className="chat-hello">Connect an AI to start</p>
+              <p className="meta">Sign in with the account you already have, or run a model on this PC.</p>
+              <button className="solid" onClick={() => openSettings("models")}>Choose your AI</button>
             </div>
           ) : (
             <div className="chat-start">
-              <Face id={face} mood="rest" scale={1.2} />
-              <p className="label">What can I help with?</p>
-              <p className="meta">Pick an AI above, or sign in to one in Settings.</p>
+              <Face id={face} mood="rest" scale={1.4} />
+              <p className="chat-hello">What can I help with?</p>
             </div>
           ))}
         {chat.messages.map((m, i) => (

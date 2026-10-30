@@ -86,7 +86,7 @@ function MusicCard() {
     <motion.section className="tile tile-music" {...cardEnter(2)}>
       <Artwork src={track?.artwork ?? null} size={52} />
       <button className="grow text-button stacked" onClick={() => setTab("media")}>
-        <span className="tile-title truncate">{track?.title || "Nothing playing"}</span>
+        <span className="tile-title truncate">{track?.title || track?.app || "Nothing playing"}</span>
         <span className="meta truncate">{track?.artist || (track ? track.app : "Any music app shows here")}</span>
       </button>
       <Bars playing={track?.playing ?? false} height={24} />

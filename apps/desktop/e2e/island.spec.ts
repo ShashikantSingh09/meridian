@@ -216,8 +216,8 @@ test.describe("panel", () => {
 
   test("streams a chat reply and reports usage", async ({ page }) => {
     await page.getByRole("button", { name: "Chat", exact: true }).click();
-    await page.getByLabel("AI engine").selectOption("anthropic");
-    await expect(page.getByLabel("Model")).toHaveValue("model-a");
+    await page.getByRole("radio", { name: "Anthropic" }).click();
+    await expect(page.getByRole("button", { name: "Model" })).toContainText("Model A");
     await page.getByLabel("Message").fill("hello");
     await page.getByRole("button", { name: "Send" }).click();
     await expect(page.locator('.message[data-role="assistant"]')).toContainText("browser stand-in");
@@ -293,11 +293,48 @@ test.describe("panel", () => {
     await expect(key).toHaveAttribute("placeholder", "Key stored");
   });
 
+  test("the model list is the app's own, and works from the keyboard", async ({ page }) => {
+    await page.getByRole("button", { name: "Chat", exact: true }).click();
+    await page.getByRole("radio", { name: "Anthropic" }).click();
+    const model = page.getByRole("button", { name: "Model" });
+    await model.click();
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("Enter");
+    await expect(model).toContainText("Model B");
+    await expect(page.getByRole("menu")).toHaveCount(0);
+
+    await model.click();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("menu")).toHaveCount(0);
+    await expect(model).toBeFocused();
+  });
+
+  test("desktop awareness sets its mode and what is never captured", async ({ page }) => {
+    await page.locator(".dock").getByRole("button", { name: "Desktop" }).click();
+    await page.getByRole("button", { name: "Watch for errors" }).click();
+    await expect(page.getByRole("heading", { name: "Watching for errors" })).toBeVisible();
+    await page.getByRole("switch", { name: "Pause monitoring" }).click();
+    await expect(page.getByRole("heading", { name: "Paused" })).toBeVisible();
+
+    await page.getByRole("button", { name: "Off" }).click();
+    await expect(page.getByRole("button", { name: "Look at this window" })).toHaveCount(0);
+    await page.getByRole("button", { name: "When I ask" }).click();
+    await expect(page.getByRole("button", { name: "Look at this window" })).toBeVisible();
+
+    const add = page.getByLabel("Add an app or window to skip");
+    await add.fill("salary.xlsx");
+    await add.press("Enter");
+    await expect(add).toHaveValue("");
+    await page.getByRole("button", { name: "Allow salary.xlsx again" }).click();
+    await expect(page.getByRole("button", { name: "Allow salary.xlsx again" })).toHaveCount(0);
+    await expect(page.getByText("Password managers")).toBeVisible();
+  });
+
   test("removing the last key takes that provider out of the engine list", async ({ page }) => {
     await openModels(page);
     await page.locator(".card", { hasText: "Anthropic" }).getByRole("button", { name: "Remove" }).click();
     await page.getByRole("button", { name: "Chat", exact: true }).click();
-    await expect(page.getByLabel("AI engine").locator("option", { hasText: "Anthropic" })).toHaveCount(0);
+    await expect(page.getByRole("radio", { name: "Anthropic" })).toHaveCount(0);
   });
 
   test.describe("my day", () => {
@@ -363,7 +400,7 @@ test.describe("panel", () => {
   test.describe("Claude Code as a chat engine", () => {
     test.beforeEach(async ({ page }) => {
       await page.getByRole("button", { name: "Chat", exact: true }).click();
-      await page.getByLabel("AI engine").selectOption("claude-code");
+      await page.getByRole("radio", { name: "Claude Code" }).click();
     });
 
     test("needs no API key and shows the plan the CLI reports", async ({ page }) => {
@@ -375,12 +412,13 @@ test.describe("panel", () => {
       await page.getByLabel("Message").fill("chat: hello");
       await page.getByRole("button", { name: "Send" }).click();
       await expect(page.locator(".log")).toContainText("Hello from the stand-in agent.");
-      await expect(page.getByLabel("Conversation")).not.toHaveValue("");
+      await expect(page.getByRole("button", { name: "Conversation" })).not.toContainText("New chat");
 
       await page.getByLabel("Message").fill("and again");
       await page.getByRole("button", { name: "Send" }).click();
       await expect(page.locator(".log")).toContainText("Follow-up received: and again");
-      await expect(page.getByLabel("Conversation").locator("option")).toHaveCount(2);
+      await page.getByRole("button", { name: "Conversation" }).click();
+      await expect(page.getByRole("menuitemradio")).toHaveCount(2);
     });
 
     test("keeps conversations separate and switchable", async ({ page }) => {
@@ -388,11 +426,13 @@ test.describe("panel", () => {
       await page.getByRole("button", { name: "Send" }).click();
       await expect(page.locator(".log")).toContainText("Hello from the stand-in agent.");
 
-      await page.getByLabel("Conversation").selectOption("");
+      await page.getByRole("button", { name: "Conversation" }).click();
+      await page.getByRole("menuitemradio", { name: "New chat" }).click();
       await expect(page.locator(".log")).not.toContainText("Hello from the stand-in agent.");
       await page.getByLabel("Message").fill("chat: second");
       await page.getByRole("button", { name: "Send" }).click();
-      await expect(page.getByLabel("Conversation").locator("option")).toHaveCount(3);
+      await page.getByRole("button", { name: "Conversation" }).click();
+      await expect(page.getByRole("menuitemradio")).toHaveCount(3);
     });
 
     test("project mode asks for a folder before it starts", async ({ page }) => {
@@ -415,8 +455,8 @@ test.describe("panel", () => {
 
     test("a signed-out CLI offers its own sign-in", async ({ page }) => {
       await page.evaluate(() => (window as never as { __mock: { setAuthed(v: boolean): void } }).__mock.setAuthed(false));
-      await page.getByLabel("AI engine").selectOption("anthropic");
-      await page.getByLabel("AI engine").selectOption("claude-code");
+      await page.getByRole("radio", { name: "Anthropic" }).click();
+      await page.getByRole("radio", { name: "Claude Code" }).click();
       await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
     });
   });
@@ -523,7 +563,7 @@ test.describe("panel", () => {
 
   test("chat survives a restart, without any images, and can be cleared", async ({ page }) => {
     await page.getByRole("button", { name: "Chat", exact: true }).click();
-    await page.getByLabel("AI engine").selectOption("anthropic");
+    await page.getByRole("radio", { name: "Anthropic" }).click();
     await page.getByLabel("Message").fill("remember this");
     await page.getByRole("button", { name: "Send" }).click();
     await expect(page.locator('.message[data-role="assistant"]')).toContainText("browser stand-in");
@@ -532,7 +572,7 @@ test.describe("panel", () => {
     await page.reload();
     await island(page).click();
     await page.getByRole("button", { name: "Chat", exact: true }).click();
-    await page.getByLabel("AI engine").selectOption("anthropic");
+    await page.getByRole("radio", { name: "Anthropic" }).click();
     await expect(page.locator('.message[data-role="user"]')).toContainText("remember this");
 
     await page.getByRole("button", { name: "Settings", exact: true }).click();
@@ -541,7 +581,7 @@ test.describe("panel", () => {
     await page.reload();
     await island(page).click();
     await page.getByRole("button", { name: "Chat", exact: true }).click();
-    await page.getByLabel("AI engine").selectOption("anthropic");
+    await page.getByRole("radio", { name: "Anthropic" }).click();
     await expect(page.locator('.message[data-role="user"]')).toHaveCount(0);
   });
 

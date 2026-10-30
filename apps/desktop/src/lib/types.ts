@@ -209,7 +209,7 @@ export interface MediaSnapshot {
 }
 
 export type MediaAction =
-  | { action: "toggle" | "next" | "previous" }
+  | { action: "toggle" | "next" | "previous" | "refresh" }
   | { action: "seek"; positionMs: number }
   | { action: "select"; session: string };
 

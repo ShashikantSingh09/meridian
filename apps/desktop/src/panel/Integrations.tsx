@@ -6,21 +6,12 @@ import { rowEnter, spring } from "@meridian/design-system/motion";
 import { AnimatePresence, animate, motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { hostOf } from "../island/views";
+import { Brand } from "../lib/brands";
 import { Icon } from "../lib/icons";
 import { connectIntegration, describeWhen, disconnectIntegration, fetchIntegration, openLink, useApp } from "../lib/store";
 import type { FetchedItem, Integration } from "../lib/types";
 
 const FIRST_GROUPS = ["Mail and calendar", "Work", "Development"];
-
-/** A letter on a tile, never the vendor's mark: logos belong to their owners. */
-function Monogram({ name, size = 38 }: { name: string; size?: number }) {
-  const hue = [...name].reduce((sum, c) => (sum * 31 + c.charCodeAt(0)) % 360, 7);
-  return (
-    <span className="monogram" style={{ width: size, height: size, fontSize: size * 0.44, background: `hsl(${hue} 45% 28%)` }} aria-hidden="true">
-      {name[0]}
-    </span>
-  );
-}
 
 /** Counts up to the number of rows, so a result reads as work done just now. */
 function Count({ value }: { value: number }) {
@@ -112,7 +103,7 @@ function Detail({ integration }: { integration: Integration }) {
   return (
     <div className="link-detail">
       <header className="row">
-        <Monogram name={integration.name} size={46} />
+        <Brand id={integration.id} name={integration.name} size={46} />
         <div className="stacked grow">
           <h2 className="link-name">{integration.name}</h2>
           <span className="meta truncate">{integration.connected ? integration.account ?? "Connected" : integration.blurb}</span>
@@ -175,10 +166,10 @@ export function Integrations() {
           <button key={i.id} className="link-tile" aria-current={i.id === current.id ? "true" : undefined} data-ready={i.ready} onClick={() => setSelected(i.id)}>
             {i.id === current.id && <motion.span layoutId="link-pill" className="dock-pill" transition={spring.hover} />}
             <span className="link-mono">
-              <Monogram name={i.name} />
+              <Brand id={i.id} name={i.name} />
               {i.connected && <i className="link-dot" title="Connected" />}
             </span>
-            <span className="link-label truncate">{i.name}</span>
+            <span className="link-label">{i.name}</span>
           </button>
         ))}
       </div>

@@ -136,6 +136,7 @@ export const mock = {
   },
 
   async mediaAction(action: MediaAction) {
+    if (action.action === "refresh") return;
     if (action.action === "toggle") track = { ...track, playing: !track.playing };
     if (action.action === "next") track = { ...track, title: "Next Song" };
     pushMedia({ current: track, sessions: [track] });

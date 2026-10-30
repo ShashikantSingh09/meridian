@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { bridge } from "../lib/bridge";
+import { Brand } from "../lib/brands";
 import { isReady, openLink, refreshLocal, refreshProviders, signInAgent, signInProvider, updateSettings, useApp } from "../lib/store";
 import type { Capabilities, ProviderInfo } from "../lib/types";
 
@@ -43,8 +44,9 @@ function ProviderCard({ provider }: { provider: ProviderInfo }) {
   return (
     <article className="card" data-blocked={blocked}>
       <header className="row">
-        <span className="status-dot" data-status={isReady(provider, localOnline) ? "completed" : "idle"} />
+        <Brand id={provider.id} name={provider.name} size={28} />
         <h3 className="grow">{provider.name}</h3>
+        <span className="status-dot" data-status={isReady(provider, localOnline) ? "completed" : "idle"} />
         <span className="tag">{provider.kind}</span>
       </header>
 
@@ -137,7 +139,10 @@ function SignIn() {
     <section className="stack">
       <div className="pick-grid">
         {SIGN_INS.map((s) => (
-          <button key={s.id} className="sign-tile" aria-pressed={s.id === current} onClick={() => setCurrent(s.id)}>{s.name}</button>
+          <button key={s.id} className="sign-tile" aria-pressed={s.id === current} onClick={() => setCurrent(s.id)}>
+            <Brand id={s.id} name={s.name} size={44} />
+            {s.name}
+          </button>
         ))}
       </div>
       <p className="meta">{choice.explain}</p>

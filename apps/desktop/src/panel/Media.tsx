@@ -18,7 +18,7 @@ export function Media() {
           )}
           <div className="grow stack">
             <div className="row">
-              <p className="tile-value truncate grow" title={track.title}>{track.title || "Unknown title"}</p>
+              <p className="tile-value truncate grow" title={track.title}>{track.title || track.app}</p>
               <Bars playing={track.playing} height={24} />
             </div>
             <p className="meta truncate">{[track.artist, track.album, track.app].filter(Boolean).join(" · ")}</p>
@@ -37,7 +37,7 @@ export function Media() {
           </div>
         </section>
       ) : (
-        <p className="meta">Nothing is playing. Any app that publishes to Windows media controls appears here on its own.</p>
+        <p className="meta">Nothing is playing. Start something in any music app and it appears here on its own.</p>
       )}
 
       {media.sessions.length > 1 && (

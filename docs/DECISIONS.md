@@ -186,14 +186,13 @@ as `main. tf`, so matching closes that gap without changing what the user sees.
 
 ## D25. Media through the system transport controls
 
-Every player that publishes to Windows' media controls works with no per-service code, and each control is enabled only if
+Replaced in part by D40: sound now decides whether something is playing. Every player that publishes to Windows' media controls works with no per-service code, and each control is enabled only if
 that player says it is. Per-app volume is not implemented. One thread sleeps until the system reports a change, and playback
 position runs on locally only while the hover card is open, so a compact track costs no repaints.
 
 ## D26. No third-party logos
 
-The island shows Claude Code and Codex by name, with original iconography. Product logos are their owners' marks, and
-Meridian is not affiliated with them.
+Replaced by D39 on the owner's request. The island itself still uses an original spark for Claude Code, as D34 describes.
 
 ## D27. The island is a black notch, and the glass is gone
 
@@ -308,3 +307,28 @@ the pointer leaves. Those sizes sit inside Apple's Live Activity range of 84 to 
 ## D38. Every page sets its own size
 
 The panel morphs between pages, so moving around is itself motion, and a small page never fills the screen for no reason.
+
+## D39. Real logos for services you connect
+
+Replaces D26. The owner asked for icons, because letters on tiles read as unfinished. Providers, AI sign-in and the Chat picker
+now show each company's own logo on a light tile, like an app icon. A logo here names the service a person is about to connect
+to, and Meridian is not affiliated with any of them.
+
+The logos are copied into `src/lib/brand-marks.ts` by `scripts/brands.mjs`, from CC0 and MIT icon sets, so no icon set is a
+dependency and only the logos in use ship (64 KB). The licence on those sets covers the drawings, not the trademarks. Slack,
+OpenAI, Canva and Microsoft have asked the largest open set to remove their marks, so **before a public release each logo
+should be checked against that company's brand rules**. Granola, Jan and llama.cpp have no open logo and keep their initial.
+
+## D40. Sound decides what is playing
+
+Windows' media controls are not reliable enough to be the only source. JioSaavn holds two sessions under one app id. One answers
+`0x80070015, the device is not ready` when asked for details, and when a second session starts playing, Windows can drop it from
+its list while the idle one stays. VLC, iTunes and Winamp publish nothing.
+
+So the watcher now listens per session, not per app id, and a session that will not give details is kept. It also asks Windows
+which apps are making sound, using the same per-app meter as the volume mixer. An app named in `PLAYERS` that is audible counts
+as playing whatever its session says, and one with no session is added, with its title read from its window. The list is a
+list of names so that a game or a call never shows as music, which means a new player has to be added to it. No audio is read,
+only its level. Everything else is unchanged: what a session reports is still used for titles, artwork and controls.
+
+The cost is a look every 3 seconds, in place of sleeping until told.

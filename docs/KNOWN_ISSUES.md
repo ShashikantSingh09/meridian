@@ -18,7 +18,7 @@ The 20 criteria from the enhancement brief, as they stand.
 | 7 | Analysis of the current screen | Done | Live: capture, OCR, and an image read by Claude Code |
 | 8 | Identifies visible errors | Done | Live on a real terminal and a test window |
 | 9 | Screen awareness pausable | Done | Settings, tray, tests |
-| 10 | Media sessions detected | Done | Live, with a silent session. No real player tried |
+| 10 | Media sessions detected | Done | Live with a silent session, and JioSaavn's real sessions read in the real app, paused. **Not yet seen while JioSaavn is audibly playing** |
 | 11 | Media controls | Done | Live: controls reached the session |
 | 12 | Connect email accounts | **Not verified** | Tested against canned servers. Needs your app registration |
 | 13 | Booking and delivery extraction | Done | Live from a pasted email, plus fixtures. Not from a real mailbox |
@@ -28,7 +28,7 @@ The 20 criteria from the enhancement brief, as they stand.
 | 17 | Prioritized and deduplicated | Done | Unit tests on the engine and store, live reschedule |
 | 18 | Permissions and disconnect | Done in code, with one edge case | Unit tests. Not with a real account. See below |
 | 19 | No data sent without authorization | Done by design | One share path; no network code in `screen` |
-| 20 | Existing features still work | Done | 502 Rust, 35 unit and 48 UI tests pass. Live claude, deny, cancel, engine, resume, activity and chat pass on the M3 code. Screen, vision and media were not rerun: this code did not change, and they would capture the desktop in use |
+| 20 | Existing features still work | Done | 507 Rust, 35 unit and 50 UI tests pass. Live claude, deny, cancel, engine, resume, activity and chat pass on the M3 code. Screen, vision and media were not rerun: this code did not change, and they would capture the desktop in use |
 
 ## Milestone 3 brief
 

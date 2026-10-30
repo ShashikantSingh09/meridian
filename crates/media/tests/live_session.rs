@@ -57,10 +57,17 @@ fn sees_a_session_and_controls_it() {
         .unwrap();
 
     let state = Arc::new(Mutex::new(Snapshot::default()));
-    let sink = state.clone();
-    let controller = media::watch(move |snapshot| *sink.lock().unwrap() = snapshot);
+    let sends = Arc::new(Mutex::new(0));
+    let (sink, count) = (state.clone(), sends.clone());
+    let controller = media::watch(move |snapshot| {
+        *sink.lock().unwrap() = snapshot;
+        *count.lock().unwrap() += 1;
+    });
 
     wait_for(|| find(&state).is_some(), "the session to appear");
+    let before = *sends.lock().unwrap();
+    controller.perform(Action::Refresh);
+    wait_for(|| *sends.lock().unwrap() > before, "a refresh to send the state again");
     let track = find(&state).unwrap();
     assert_eq!(track.artist, "Test Artist");
     assert!(track.playing);
@@ -76,4 +83,44 @@ fn sees_a_session_and_controls_it() {
 
     controls.SetPlaybackStatus(MediaPlaybackStatus::Paused).unwrap();
     wait_for(|| find(&state).is_some_and(|t| !t.playing), "the pause to be seen");
+}
+
+/// Plays a stream far too quiet to hear, and checks the system meter picks it up.
+#[test]
+#[ignore = "opens an audio stream, at a level nobody can hear"]
+fn hears_an_app_making_sound() {
+    use windows::Win32::Media::Audio::*;
+    use windows::Win32::System::Com::*;
+
+    let pid = std::process::id();
+    assert!(!media::audible_now().contains(&pid));
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+        let devices: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).unwrap();
+        let device = devices.GetDefaultAudioEndpoint(eRender, eConsole).unwrap();
+        let client: IAudioClient = device.Activate(CLSCTX_ALL, None).unwrap();
+        let format = client.GetMixFormat().unwrap();
+        let channels = (*format).nChannels as usize;
+        client.Initialize(AUDCLNT_SHAREMODE_SHARED, 0, 2_000_000, 0, format, None).unwrap();
+        let size = client.GetBufferSize().unwrap();
+        let render: IAudioRenderClient = client.GetService().unwrap();
+        client.Start().unwrap();
+
+        let mut sign = 1.0_f32;
+        let mut heard = false;
+        let end = Instant::now() + Duration::from_secs(4);
+        while !heard && Instant::now() < end {
+            let free = size - client.GetCurrentPadding().unwrap();
+            let buffer = render.GetBuffer(free).unwrap() as *mut f32;
+            for i in 0..free as usize * channels {
+                sign = -sign;
+                *buffer.add(i) = sign * 0.0005;
+            }
+            render.ReleaseBuffer(free, 0).unwrap();
+            std::thread::sleep(Duration::from_millis(40));
+            heard = media::audible_now().contains(&pid);
+        }
+        client.Stop().unwrap();
+        assert!(heard, "the meter never reported this process");
+    }
 }

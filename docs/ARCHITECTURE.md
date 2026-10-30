@@ -60,7 +60,7 @@ flowchart TB
 | `crates/ai-core` | Providers | reqwest |
 | `crates/agent-adapters` | Agent sessions | tokio |
 | `crates/screen` | Capture, OCR, signals, exclusions. No network code | Win32, WinRT |
-| `crates/media` | Media sessions and controls | WinRT |
+| `crates/media` | Media sessions and controls, and which players can be heard | WinRT, Core Audio |
 | `crates/activity` | Event model, extraction, store, notifications, connectors | SQLite, reqwest |
 | `crates/mcp` | MCP client, sign-in discovery, service catalog, tool choice, turning results into rows | reqwest, `activity` for OAuth |
 | `src-tauri/watch.rs` | The contextual screen loop | `screen` |

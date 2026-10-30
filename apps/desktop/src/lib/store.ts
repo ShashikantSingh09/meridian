@@ -974,7 +974,7 @@ function onMedia(snapshot: MediaSnapshot) {
     if (art) tintOf(art, (artTint) => set({ artTint }));
     else set({ artTint: null });
   }
-  const changed = before.current && before.current.title !== snapshot.current?.title;
+  const changed = before.current?.title && before.current.title !== snapshot.current?.title;
   const recent = changed
     ? [before.current!, ...before.recent.filter((t) => t.title !== before.current!.title)].slice(0, RECENT_TRACKS)
     : before.recent;
@@ -1250,6 +1250,8 @@ export async function boot() {
       void captureScreen("window");
     }),
   ]);
+  // The first state was sent before anything here was listening.
+  void bridge.mediaAction({ action: "refresh" });
 }
 
 export const newSessionDefaults = (): Pick<StartSession, "agent"> | null => {

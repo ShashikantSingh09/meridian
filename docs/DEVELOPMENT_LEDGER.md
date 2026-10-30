@@ -1,5 +1,36 @@
 # Development ledger
 
+## 2026-10-31: Music in any player, logos, Chat and Desktop
+
+### Completed
+
+- **Music.** JioSaavn was missed for three separate reasons, all fixed. The watcher listened once per app id, and JioSaavn has
+  two sessions. It dropped any session that would not give details, and JioSaavn's first one will not. And the first state was
+  sent before the interface was listening. Sound now decides what is playing (D40), which also covers VLC, iTunes and Winamp.
+- **Logos.** Real logos on Providers, AI sign-in and the Chat picker (D39).
+- **Chat.** Native dropdowns replaced by a row of AI buttons, as in TwoCode, and the app's own menus for models and conversations.
+  Chat opens on an AI, so there is no longer an empty choice.
+- **Desktop awareness.** Rebuilt: what the app is doing, three modes as cards, two clear actions, and the never-capture list as chips.
+
+### Found by testing
+
+- A test built on two players in one process failed even after the first fix. It turned out to be testing Windows, which drops
+  the second session when it starts playing. That is what led to using sound.
+- JioSaavn's failing session answers `0x80070015`, seen by reading its real sessions.
+- With both sessions paused the watcher could pick the one with no details, which showed "JioSaavn" as the title. Caught in a
+  real capture, and fixed by preferring a session that has a title.
+
+### Testing status
+
+| Check | Result |
+|---|---|
+| Rust | 507 passed |
+| Unit | 35 passed |
+| UI, Playwright | 50 passed |
+| Live, ignored by default | 2 media tests passed, one using a stream too quiet to hear |
+| Real window | Chat, Desktop, Providers and AI sign-in captured from WebView2 with no console errors |
+| Not tried | JioSaavn while audibly playing |
+
 ## 2026-10-31: Milestone 4, a living island
 
 ### Completed
