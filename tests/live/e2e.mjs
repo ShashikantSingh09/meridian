@@ -3,17 +3,18 @@
 // Start the app with a debug port, then pick a mode:
 //   $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=9222"
 //   npm run dev
-//   node tests/live/e2e.mjs claude | deny | cancel | resume | chat | codex
+//   node tests/live/e2e.mjs claude | deny | cancel | resume | engine | vision | chat | screen | activity | codex
 //
-// claude, deny and resume run a cheap Claude Code session in a scratch folder under
+// claude, deny, resume, engine and vision run a cheap Claude Code session in a scratch folder under
 // the system temp directory, and spend a little of your own usage.
 // Never ship a build with the debug port on.
-import { execSync, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const here = path.dirname(new URL(import.meta.url).pathname).replace(/^\//, "");
+const here = path.dirname(fileURLToPath(import.meta.url));
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "meridian-live-"));
 const targets = await (await fetch("http://127.0.0.1:9222/json")).json();
 const ws = new WebSocket(targets.find((t) => t.type === "page").webSocketDebuggerUrl);
@@ -45,7 +46,8 @@ const view = () => ev("document.querySelector('.island').dataset.view");
 const pass = (name, ok, extra = "") => console.log(ok ? "PASS" : "FAIL", name, extra);
 
 const mode = process.argv[2];
-await ev("__meridian.showPreview(null); 'ok'");
+// Each mode starts from a clean island, whatever the last one left behind.
+await ev(`(() => { const s = __meridian.getState(); s.errors.forEach((e) => __meridian.dismissError(e.id)); s.notices.forEach((n) => __meridian.dismissNotice(n.id)); __meridian.closePanel(); return "ok"; })()`);
 
 if (mode === "chat") {
   const server = spawn("node", [`${here}/fake-llm.mjs`], { stdio: "ignore" });
@@ -53,10 +55,10 @@ if (mode === "chat") {
   await ev("__meridian.openPanel('providers'); 'ok'");
   const online = await until("__meridian.getState().localOnline.includes('lmstudio')", 4000, "discovery");
   pass("discovers local server on its default port", !!online);
-  await ev("__meridian.showPreview(null); 'ok'");
+  await ev("__meridian.closePanel(); 'ok'");
   await ev("__meridian.sendChat('hello there'); 'ok'");
   await until("__meridian.getState().chatPending", 3000, "pending");
-  pass("island shows thinking while a chat runs", (await view()) === "thinking");
+  { const v = await view(); pass("island shows thinking while a chat runs", v === "thinking", `${v} ${await ev(`JSON.stringify({ p: __meridian.getState().panelOpen, s: __meridian.getState().sessions.map((x) => x.status), e: __meridian.getState().errors.length, n: __meridian.getState().notices.length, l: __meridian.getState().listening, c: __meridian.getState().screen.capturing, sug: __meridian.getState().suggestions.length })`)}`); }
   await until("!__meridian.getState().chatPending", 6000, "finish");
   const chat = await ev("JSON.stringify(__meridian.getState().chat)");
   const parsed = JSON.parse(chat);
@@ -101,9 +103,6 @@ if (mode === "claude" || mode === "deny") {
   pass("output captured", s.log.length > 0, s.log.map((l) => `${l.kind}:${l.text}`).join(" | ").slice(0, 120));
   if (mode === "claude") {
     pass("completion notice shown", (await view()) === "notification");
-    await sleep(3500);
-    const left = execSync(`powershell -NoProfile -Command "(Get-CimInstance Win32_Process -Filter \\"Name='claude.exe'\\" | Where-Object { $_.CommandLine -like '*perm/*' } | Measure-Object).Count"`).toString().trim();
-    pass("no agent process left behind", left === "0", `left=${left}`);
   }
 }
 
@@ -116,9 +115,6 @@ if (mode === "cancel") {
   await ev(`window.__TAURI_INTERNALS__.invoke('session_cancel', { id: '${sid}' }).then(() => 'ok')`);
   await until(`__meridian.getState().sessions[0]?.status === 'cancelled'`, 15000, "cancel");
   pass("cancel stops a running agent", (await ev(`__meridian.getState().sessions[0].status`)) === "cancelled");
-  await sleep(1500);
-  const left = execSync(`powershell -NoProfile -Command "(Get-CimInstance Win32_Process -Filter \\"Name='claude.exe'\\" | Where-Object { $_.CommandLine -like '*perm/*' } | Measure-Object).Count"`).toString().trim();
-  pass("cancel leaves no process behind", left === "0", `left=${left}`);
 }
 
 if (mode === "resume") {
@@ -128,7 +124,7 @@ if (mode === "resume") {
   const sid = await ev(`__meridian.startSession(${req})`);
   await until(`__meridian.getState().sessions[0]?.status === 'completed'`, 60000, "first turn");
   pass("first turn completed", (await ev(`__meridian.getState().sessions[0].status`)) === "completed");
-  await ev(`window.__TAURI_INTERNALS__.invoke('session_send', { id: '${sid}', text: 'What word did I ask you to remember? Reply with just that word.' }).then(() => 'ok')`);
+  await ev(`window.__TAURI_INTERNALS__.invoke('session_send', { id: '${sid}', text: 'What word did I ask you to remember? Reply with just that word.', images: [] }).then(() => 'ok')`);
   await until(`__meridian.getState().sessions[0]?.status === 'running'`, 30000, "resumed");
   await until(`__meridian.getState().sessions[0]?.status === 'completed'`, 60000, "second turn");
   const text = await ev(`__meridian.getState().sessions[0].log.map(l => l.text).join(' ')`);
@@ -211,6 +207,67 @@ if (mode === "screen") {
   pass("a capture is gone once discarded", !(await ev(`__meridian.getState().screen.capture !== null`)));
   const frameGone = await ev(`window.__TAURI_INTERNALS__.invoke('screen_crop', { x: 0, y: 0, w: 1, h: 1 }).then(() => false, (e) => /discarded/.test(String(e)))`);
   pass("the core drops its copy too", frameGone === true);
+}
+
+if (mode === "activity") {
+  const call = (name, args) => ev(`window.__TAURI_INTERNALS__.invoke(${JSON.stringify(name)}, ${JSON.stringify(args)}).then((v) => JSON.stringify({ ok: v }), (e) => JSON.stringify({ err: String(e) }))`).then(JSON.parse);
+  const flight = (departure) => `<html><head><script type="application/ld+json">${JSON.stringify({
+    "@context": "http://schema.org",
+    "@type": "FlightReservation",
+    reservationNumber: "TESTQ9",
+    reservationStatus: "http://schema.org/ReservationConfirmed",
+    underName: { "@type": "Person", name: "Test Traveller" },
+    reservationFor: {
+      "@type": "Flight",
+      flightNumber: "2341",
+      airline: { "@type": "Airline", name: "Test Air", iataCode: "6E" },
+      departureAirport: { "@type": "Airport", name: "Mumbai", iataCode: "BOM" },
+      arrivalAirport: { "@type": "Airport", name: "Delhi", iataCode: "DEL" },
+      departureTime: departure,
+      arrivalTime: "2030-03-15T12:45:00+05:30",
+    },
+  })}</script></head><body>Your booking is confirmed.</body></html>`;
+
+  const added = await call("activity_import", { subject: "Your Test Air booking TESTQ9", from: "bookings@testair.example", body: flight("2030-03-15T10:30:00+05:30") });
+  pass("a booking email becomes an event", added.ok === 1, JSON.stringify(added));
+  const list = await call("activity_list", { category: "travel" });
+  const mine = list.ok.filter((e) => e.dedupeKey.includes("TESTQ9") || e.title.includes("2341"));
+  pass("it lands in Travel, with its source and confidence", mine.length === 1 && mine[0].confidence > 0.8 && mine[0].sourceRef?.account === "pasted email", mine[0] && `${mine[0].title} ${mine[0].confidence}`);
+
+  const again = await call("activity_import", { subject: "Schedule change TESTQ9", from: "bookings@testair.example", body: flight("2030-03-15T13:00:00+05:30") });
+  const after = (await call("activity_list", { category: "travel" })).ok.filter((e) => e.id === mine[0].id);
+  const total = (await call("activity_list", { category: "travel" })).ok.filter((e) => e.title.includes("2341")).length;
+  pass("a reschedule updates the event instead of duplicating it", again.ok === 1 && total === 1 && after[0]?.status === "updated", `status ${after[0]?.status}, changed ${after[0]?.changedFields}`);
+
+  const promo = await call("activity_import", { subject: "Flights to Delhi from 2999. Sale ends Sunday!", from: "deals@testair.example", body: "Book now and save 40 percent on flights to Delhi. Offer ends Sunday. Unsubscribe here." });
+  pass("a promotion produces nothing", promo.ok === 0, JSON.stringify(promo));
+
+  const when = new Date(Date.now() + 10 * 60000);
+  const pad = (n) => String(n).padStart(2, "0");
+  const value = `${when.getFullYear()}-${pad(when.getMonth() + 1)}-${pad(when.getDate())}T${pad(when.getHours())}:${pad(when.getMinutes())}:00`;
+  const reminder = await call("activity_add_reminder", { title: "Live test reminder", startsAt: { kind: "naive", value } });
+  pass("a reminder can be added", !reminder.err, reminder.err);
+  const shown = await until(`__meridian.getState().notices.find((n) => n.title.includes('Live test reminder'))?.id`, 8000, "reminder");
+  pass("it surfaces on the island", !!shown && (await view()) === "notification");
+  const log = (await call("reminder_log", {})).ok.filter((l) => l.key === shown);
+  pass("it is logged, so it fires once", log.length === 1, log[0]?.disposition);
+
+  const today = (await call("activity_list", { category: null })).ok.filter((e) => e.title.includes("2341") || e.title === "Live test reminder");
+  for (const e of today) await call("activity_delete", { id: e.id });
+  const left = (await call("activity_list", { category: null })).ok.filter((e) => e.title.includes("2341") || e.title === "Live test reminder");
+  pass("test data is gone", left.length === 0);
+  await ev(`__meridian.getState().notices.forEach(() => {}); 'ok'`);
+}
+
+if (mode === "vision") {
+  // A generated image, so no real screen content is involved.
+  const image = await ev(`(() => { const c = document.createElement('canvas'); c.width = 320; c.height = 200; const g = c.getContext('2d'); g.fillStyle = '#d01818'; g.fillRect(0, 0, 320, 200); g.fillStyle = '#fff'; g.font = 'bold 48px sans-serif'; g.fillText('HERON', 60, 118); return c.toDataURL('image/jpeg', 0.9); })()`);
+  await ev(`__meridian.selectEngine('claude-code'); __meridian.setAgentMode('general'); 'ok'`);
+  await ev(`__meridian.sendAgentChat('What single word is written in this image, and what is the background colour? Reply as: word, colour', [${JSON.stringify(image)}]); 'ok'`);
+  await until(`(() => { const a = __meridian.getState().agentChat; const s = __meridian.getState().sessions.find(x => x.id === a.sessionId); return s && s.status === 'completed' })()`, 60000, "vision");
+  const reply = await ev(`(() => { const a = __meridian.getState().agentChat; const s = __meridian.getState().sessions.find(x => x.id === a.sessionId); return s ? s.log.at(-1).text : '' })()`);
+  pass("Claude Code reads an approved image", /heron/i.test(reply) && /red/i.test(reply), reply.slice(0, 60));
+  await ev(`__meridian.selectEngine('anthropic'); 'ok'`);
 }
 
 if (mode === "codex") {

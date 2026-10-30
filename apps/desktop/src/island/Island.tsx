@@ -87,6 +87,7 @@ export function Island() {
     approval: waitingApproval(snapshot.sessions) !== null,
     clock,
     sliver,
+    actions: (snapshot.notices[0]?.actions?.length ?? 0) > 0 || snapshot.notices[0]?.eventId !== undefined,
   });
 
   const width = useMotionValue(target.w);

@@ -13,9 +13,10 @@ use crate::process::spawn;
 use crate::{AgentEvent, Command, Emit, Launch, SessionStatus};
 
 /// Print mode keeps running after a result and takes the next message on the
-/// same process: about 0.5 s to answer, against 4.5 s from cold. An idle session
-/// keeps its process this long, then resumes from the transcript if needed.
-const IDLE_KEEP: Duration = Duration::from_secs(300);
+/// same process: about 1.5 s to answer, against 6.7 s from cold. Each one holds
+/// about 300 MB, so an idle session keeps it this long, then resumes from the
+/// transcript if needed.
+const IDLE_KEEP: Duration = Duration::from_secs(180);
 /// How long a turn gets to acknowledge an interrupt before the process goes.
 const INTERRUPT_GRACE: Duration = Duration::from_secs(4);
 /// What general assistant mode may use. No shell, no edits, and with

@@ -10,13 +10,19 @@ import type {
   AgentInfo,
   AuthStatus,
   Capture,
+  Category,
   ChatEvent,
   ChatMessage,
+  ConnectedAccount,
+  ContextEvent,
+  EventTime,
   LocalServer,
   MediaAction,
   MediaSnapshot,
   ModelInfo,
   ProviderInfo,
+  Reminder,
+  ReminderLogEntry,
   ScreenSuggestion,
   Settings,
 } from "./types";
@@ -86,6 +92,29 @@ export const bridge = {
 
   mediaAction: (action: MediaAction) => (native ? invoke<void>("media_action", { action }) : mock.mediaAction(action)),
 
+  activityList: (category: Category | null) =>
+    native ? invoke<ContextEvent[]>("activity_list", { category }) : mock.activityList(category),
+  activityDismiss: (id: string) => (native ? invoke<void>("activity_dismiss", { id }) : mock.activityDelete(id)),
+  activityDelete: (id: string) => (native ? invoke<void>("activity_delete", { id }) : mock.activityDelete(id)),
+  activitySnooze: (id: string, minutes: number) =>
+    native ? invoke<void>("activity_snooze", { id, minutes }) : Promise.resolve(),
+  activityCorrect: (id: string, title: string) =>
+    native ? invoke<void>("activity_correct", { id, title }) : mock.activityCorrect(id, title),
+  activityAddReminder: (title: string, startsAt: EventTime) =>
+    native ? invoke<void>("activity_add_reminder", { title, startsAt }) : mock.activityAddReminder(title, startsAt),
+  activityImport: (subject: string, from: string, body: string) =>
+    native ? invoke<number>("activity_import", { subject, from, body }) : mock.activityImport(subject),
+  activityContext: (agent: boolean, media: boolean, screen: boolean) =>
+    native ? invoke<void>("activity_context", { agent, media, screen }) : Promise.resolve(),
+  reminderLog: () => (native ? invoke<ReminderLogEntry[]>("reminder_log") : Promise.resolve([])),
+  accountsList: () => (native ? invoke<ConnectedAccount[]>("accounts_list") : mock.accountsList()),
+  accountConnect: (provider: ConnectedAccount["provider"], secret: string | null) =>
+    native ? invoke<ConnectedAccount>("account_connect", { provider, secret }) : mock.accountConnect(provider),
+  accountDisconnect: (id: string) =>
+    native ? invoke<void>("account_disconnect", { id }) : mock.accountDisconnect(id),
+  accountSync: (id: string) => (native ? invoke<string>("account_sync", { id }) : Promise.resolve("Up to date.")),
+  openUrl: (url: string) => (native ? invoke<void>("open_url", { url }) : Promise.resolve()),
+
   screenCapture: (target: "window" | "screen") =>
     native ? invoke<Capture>("screen_capture", { target }) : mock.screenCapture(),
   screenCrop: (x: number, y: number, w: number, h: number) =>
@@ -139,6 +168,18 @@ export const bridge = {
   onBlur(handler: () => void) {
     if (!native) return Promise.resolve(() => {});
     return listen("island-blur", handler).then((un) => un);
+  },
+  onSettingsChanged(handler: (s: Settings) => void) {
+    if (!native) return Promise.resolve(() => {});
+    return listen<Settings>("settings-changed", (e) => handler(e.payload)).then((un) => un);
+  },
+  onReminders(handler: (r: Reminder[]) => void) {
+    if (!native) return mock.onReminders(handler);
+    return listen<Reminder[]>("activity-reminders", (e) => handler(e.payload)).then((un) => un);
+  },
+  onActivityChanged(handler: () => void) {
+    if (!native) return Promise.resolve(() => {});
+    return listen("activity-changed", handler).then((un) => un);
   },
   onMedia(handler: (s: MediaSnapshot) => void) {
     if (!native) return mock.onMedia(handler);

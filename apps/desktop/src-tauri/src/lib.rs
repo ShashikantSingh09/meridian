@@ -13,6 +13,7 @@ use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut,
 mod commands;
 mod glass;
 mod island;
+mod life;
 mod secrets;
 mod settings;
 mod watch;
@@ -31,6 +32,20 @@ fn reveal(app: &AppHandle) {
     }
 }
 
+/// The one control that stops all contextual monitoring, from anywhere.
+fn toggle_monitoring(app: &AppHandle) {
+    let core = app.state::<Core>();
+    let settings = {
+        let mut s = core.settings.lock().unwrap();
+        s.monitoring_paused = !s.monitoring_paused;
+        s.clone()
+    };
+    if let Some(path) = settings::path(app) {
+        let _ = settings::save(&path, &settings);
+    }
+    let _ = app.emit_to(island::LABEL, "settings-changed", settings);
+}
+
 fn toggle_visibility(app: &AppHandle) {
     if let Some(win) = app.get_webview_window(island::LABEL) {
         let gate = &app.state::<Core>().gate;
@@ -42,8 +57,9 @@ fn build_tray(app: &App) -> tauri::Result<()> {
     let open = MenuItem::with_id(app, "open", "Open Meridian", true, None::<&str>)?;
     let settings = MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)?;
     let hide = MenuItem::with_id(app, "visibility", "Show or hide island", true, None::<&str>)?;
+    let pause = MenuItem::with_id(app, "pause", "Pause or resume monitoring", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&open, &settings, &hide, &quit])?;
+    let menu = Menu::with_items(app, &[&open, &settings, &hide, &pause, &quit])?;
 
     let mut tray = TrayIconBuilder::new()
         .tooltip("Meridian")
@@ -56,6 +72,7 @@ fn build_tray(app: &App) -> tauri::Result<()> {
                 let _ = app.emit_to(island::LABEL, "island-open-tab", "settings");
             }
             "visibility" => toggle_visibility(app),
+            "pause" => toggle_monitoring(app),
             "quit" => {
                 app.state::<Core>().sessions.shutdown();
                 // Give adapters a moment to end their process trees.
@@ -139,7 +156,8 @@ fn setup(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     island::prepare(&win, &gate);
     island::show_quietly(&win);
     island::spawn_poll(handle.clone(), gate);
-    watch::spawn(handle);
+    watch::spawn(handle.clone());
+    life::spawn(handle);
 
     build_tray(app)?;
     register_shortcuts(app);
@@ -182,6 +200,20 @@ pub fn run() {
             commands::session_cancel,
             commands::session_answer,
             commands::media_action,
+            life::activity_list,
+            life::activity_dismiss,
+            life::activity_delete,
+            life::activity_snooze,
+            life::activity_correct,
+            life::activity_add_reminder,
+            life::activity_import,
+            life::activity_context,
+            life::reminder_log,
+            life::accounts_list,
+            life::account_connect,
+            life::account_disconnect,
+            life::account_sync,
+            life::open_url,
             commands::screen_capture,
             commands::screen_crop,
             commands::screen_discard,

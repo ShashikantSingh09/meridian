@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { bridge } from "../lib/bridge";
-import { PREVIEWS, refreshAuth, showPreview, updateSettings, useApp } from "../lib/store";
+import { connectAccount, disconnectAccount, PREVIEWS, refreshAuth, showPreview, updateSettings, useApp } from "../lib/store";
 import type { AgentInfo, Settings } from "../lib/types";
 
 function Choice<K extends keyof Settings>({ name, label, options }: {
@@ -23,7 +23,7 @@ function Choice<K extends keyof Settings>({ name, label, options }: {
   );
 }
 
-type Flag = "ambient" | "autostart" | "localOnly" | "showClock" | "islandAutoHide" | "mediaEnabled";
+type Flag = "ambient" | "autostart" | "localOnly" | "showClock" | "islandAutoHide" | "mediaEnabled" | "monitoringPaused" | "showNextMeeting";
 
 function Toggle({ name, label, hint }: { name: Flag; label: string; hint: string }) {
   const value = useApp((s) => s.settings[name]);
@@ -35,6 +35,65 @@ function Toggle({ name, label, hint }: { name: Flag; label: string; hint: string
       </span>
       <input type="checkbox" role="switch" checked={value} onChange={(e) => void updateSettings({ [name]: e.target.checked })} />
     </label>
+  );
+}
+
+function Accounts() {
+  const accounts = useApp((s) => s.activity.accounts);
+  const googleId = useApp((s) => s.settings.googleClientId);
+  const microsoftId = useApp((s) => s.settings.microsoftClientId);
+  const [secret, setSecret] = useState("");
+  const [status, setStatus] = useState<string | null>(null);
+
+  const connect = async (provider: "google" | "microsoft") => {
+    setStatus("Finish signing in in your browser.");
+    try {
+      const account = await connectAccount(provider, provider === "google" && secret ? secret : null);
+      setStatus(`Connected ${account.email ?? provider}. Read-only access.`);
+      setSecret("");
+    } catch (err) {
+      setStatus(String(err));
+    }
+  };
+
+  return (
+    <section className="stack">
+      <h2>Connected accounts</h2>
+      <p className="meta">
+        Read-only access through Google and Microsoft sign-in. Your password is never seen here, tokens stay in Windows
+        Credential Manager, and mail is read on this PC. Each provider needs a free app registration of your own, which
+        gives the client ID below.
+      </p>
+      {accounts.map((a) => (
+        <div key={a.id} className="setting">
+          <span className="stacked grow">
+            <span className="label truncate">{a.email ?? a.id}</span>
+            <span className="meta">{a.provider === "google" ? "Gmail and Google Calendar" : "Outlook and Microsoft Calendar"}</span>
+          </span>
+          <button className="ghost" onClick={() => void bridge.accountSync(a.id).then(setStatus, (e) => setStatus(String(e)))}>Sync now</button>
+          <button className="ghost" onClick={() => void disconnectAccount(a.id)}>Disconnect</button>
+        </div>
+      ))}
+      <label className="field">
+        <span className="meta">Google client ID</span>
+        <input aria-label="Google client ID" defaultValue={googleId} onBlur={(e) => void updateSettings({ googleClientId: e.target.value.trim() })} />
+      </label>
+      <label className="field">
+        <span className="meta">Google client secret, from the same registration</span>
+        <input aria-label="Google client secret" type="password" value={secret} onChange={(e) => setSecret(e.target.value)} />
+      </label>
+      <div className="row">
+        <button className="solid" disabled={!googleId} onClick={() => void connect("google")}>Connect Google</button>
+      </div>
+      <label className="field">
+        <span className="meta">Microsoft application ID</span>
+        <input aria-label="Microsoft client ID" defaultValue={microsoftId} onBlur={(e) => void updateSettings({ microsoftClientId: e.target.value.trim() })} />
+      </label>
+      <div className="row">
+        <button className="solid" disabled={!microsoftId} onClick={() => void connect("microsoft")}>Connect Microsoft</button>
+      </div>
+      {status && <p className="meta" role="status">{status}</p>}
+    </section>
   );
 }
 
@@ -100,6 +159,7 @@ export function SettingsPage() {
           { value: 1.35, label: "Quick" },
         ]} />
         <Toggle name="showClock" label="Show the time" hint="Beside the line while idle." />
+        <Toggle name="showNextMeeting" label="Show the next meeting" hint="On the island when you point at it." />
         <Toggle name="mediaEnabled" label="Show what is playing" hint="Any player that publishes to Windows media controls." />
         <Toggle name="islandAutoHide" label="Hide when idle" hint="Shrinks to a sliver. Move the pointer to it, or wait for activity, and it returns." />
         <p className="meta">Hide it completely from the tray icon. The shortcut brings it back.</p>
@@ -135,6 +195,8 @@ export function SettingsPage() {
         </div>
       </section>
 
+      <Accounts />
+
       <section className="stack">
         <h2>Behaviour</h2>
         <Toggle name="autostart" label="Start with Windows" hint="Off by default." />
@@ -152,6 +214,7 @@ export function SettingsPage() {
 
       <section className="stack">
         <h2>Privacy</h2>
+        <Toggle name="monitoringPaused" label="Pause all monitoring" hint="Stops contextual awareness at once. Also in the tray menu." />
         <p className="meta">
           Your screen is read only as set in Desktop awareness, always on this PC, and shared only from a
           preview you approve. No keystrokes or clipboard are read. The microphone opens only while the

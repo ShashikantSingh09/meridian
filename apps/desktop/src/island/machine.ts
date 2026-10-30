@@ -26,12 +26,22 @@ export interface SessionSummary {
   approval: Approval | null;
 }
 
+export interface NoticeAction {
+  label: string;
+  url: string | null;
+}
+
 export interface Notice {
   id: string;
-  tone: "success" | "info";
+  tone: "success" | "info" | "urgent";
   title: string;
   body: string;
   sessionId?: string;
+  /** Set for a reminder, so snooze and dismiss reach the event itself. */
+  eventId?: string;
+  actions?: NoticeAction[];
+  /** Stays on the island until answered. */
+  sticky?: boolean;
 }
 
 export interface Suggestion {
@@ -113,7 +123,7 @@ const SIZES: Record<IslandView, Geometry> = {
   error: { w: 392, h: 76, r: 24 },
 };
 
-const IDLE_HOVER: Geometry = { w: 244, h: 36, r: 18 };
+const IDLE_HOVER: Geometry = { w: 300, h: 36, r: 18 };
 const APPROVAL: Geometry = { w: 416, h: 118, r: 24 };
 const MULTITASK_ROW = 34;
 const MULTITASK_PAD = 18;
@@ -123,6 +133,7 @@ const IDLE_CLOCK: Geometry = { w: 176, h: 30, r: 15 };
 const SLIVER: Geometry = { w: 84, h: 6, r: 3 };
 const WORKING_HOVER: Geometry = { w: 416, h: 128, r: 24 };
 const MEDIA_HOVER: Geometry = { w: 420, h: 124, r: 26 };
+const REMINDER: Geometry = { w: 416, h: 112, r: 24 };
 
 export interface GeometryContext {
   hovered: boolean;
@@ -131,6 +142,8 @@ export interface GeometryContext {
   clock?: boolean;
   /** Idle with auto-hide on: only a sliver remains until the pointer arrives. */
   sliver?: boolean;
+  /** A notice with actions needs room for its buttons. */
+  actions?: boolean;
 }
 
 export function geometryFor(view: IslandView, ctx: GeometryContext): Geometry {
@@ -140,6 +153,7 @@ export function geometryFor(view: IslandView, ctx: GeometryContext): Geometry {
   if (view === "working" && ctx.approval) return APPROVAL;
   if (view === "working" && ctx.hovered) return WORKING_HOVER;
   if (view === "media" && ctx.hovered) return MEDIA_HOVER;
+  if (view === "notification" && ctx.actions) return REMINDER;
   if (view === "multitask") {
     const rows = Math.min(ctx.rows, MULTITASK_MAX_ROWS);
     return { ...SIZES.multitask, h: rows * MULTITASK_ROW + MULTITASK_PAD };
@@ -159,7 +173,11 @@ export function stateToken(view: IslandView, s: Snapshot): string {
     case "multitask":
       return "--state-working";
     case "notification":
-      return s.notices[0]?.tone === "success" ? "--state-success" : "--state-notice";
+      return s.notices[0]?.tone === "success"
+        ? "--state-success"
+        : s.notices[0]?.tone === "urgent"
+          ? "--state-waiting"
+          : "--state-notice";
     case "contextual":
     case "screen":
       return "--state-context";

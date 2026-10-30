@@ -117,6 +117,28 @@ test("media steps aside for a notification, then returns", async ({ page }) => {
   await expect(island(page)).toHaveAttribute("data-view", "notification");
 });
 
+test("an urgent reminder stays, offers its action, and outranks media", async ({ page }) => {
+  await page.evaluate(() => (window as never as { __mock: { publishMedia(p: boolean): void } }).__mock.publishMedia(true));
+  await expect(island(page)).toHaveAttribute("data-view", "media");
+  await page.evaluate(() =>
+    (window as never as { __mock: { publishReminder(r: object): void } }).__mock.publishReminder({
+      key: "r1",
+      eventId: "e1",
+      stage: { type: "lead", minutes: 15 },
+      priority: "important",
+      title: "Your meeting starts in 15 minutes",
+      startsAt: { kind: "zoned", value: "2026-10-30T15:30:00+05:30" },
+      approximateTime: false,
+      actions: [{ label: "Join", actionId: "join", url: "https://example.com/meet" }],
+    }),
+  );
+  await expect(island(page)).toHaveAttribute("data-view", "notification");
+  // Mail can be forged, so a link always shows its real destination.
+  await expect(island(page).getByRole("button", { name: "Join on example.com" })).toBeVisible();
+  await island(page).getByRole("button", { name: "Snooze" }).click();
+  await expect(island(page)).toHaveAttribute("data-view", "media");
+});
+
 test("reduced motion lands on the target size immediately", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   await page.goto("/");
@@ -207,6 +229,66 @@ test.describe("panel", () => {
     await page.locator(".card", { hasText: "Anthropic" }).getByRole("button", { name: "Remove" }).click();
     await page.getByRole("button", { name: "Chat", exact: true }).click();
     await expect(page.getByLabel("AI engine").locator("option", { hasText: "Anthropic" })).toHaveCount(0);
+  });
+
+  test.describe("my day", () => {
+    test.beforeEach(async ({ page }) => {
+      await page.getByRole("button", { name: "My day" }).click();
+    });
+
+    test("shows each item with its source and flags a weak extraction", async ({ page }) => {
+      const flight = page.locator(".event", { hasText: "Flight 6E 2341" });
+      await expect(flight).toContainText("From me@example.com: Confirmation");
+      await expect(flight.locator(".flag")).toHaveCount(0);
+      await expect(page.locator(".event", { hasText: "Package" }).locator(".flag")).toHaveText("Unconfirmed");
+    });
+
+    test("filters by category", async ({ page }) => {
+      await page.getByRole("button", { name: "Travel" }).click();
+      await expect(page.locator(".event")).toHaveCount(1);
+      await expect(page.locator(".event")).toContainText("Flight");
+    });
+
+    test("lets you correct and delete what was extracted", async ({ page }) => {
+      const flight = page.locator(".event", { hasText: "Flight 6E 2341" });
+      await flight.getByRole("button", { name: "Correct" }).click();
+      await page.getByLabel("Title").fill("Flight to Delhi");
+      await page.getByLabel("Title").press("Enter");
+      await expect(page.locator(".event", { hasText: "Flight to Delhi" })).toBeVisible();
+      await page.locator(".event", { hasText: "Flight to Delhi" }).getByRole("button", { name: "Delete" }).click();
+      await expect(page.locator(".event", { hasText: "Flight to Delhi" })).toHaveCount(0);
+    });
+
+    test("adds a reminder of your own", async ({ page }) => {
+      await page.getByLabel("Reminder").fill("Call the bank");
+      await page.getByLabel("When").fill("2026-11-02T09:30");
+      await page.getByRole("button", { name: "Add", exact: true }).click();
+      await expect(page.locator(".event", { hasText: "Call the bank" })).toContainText("Added by you");
+    });
+
+    test("reading an email says when it finds nothing", async ({ page }) => {
+      await page.getByRole("button", { name: "Paste an email" }).click();
+      await page.getByLabel("Subject").fill("Huge flight sale this weekend");
+      await page.getByLabel("Email text").fill("Save 40 percent");
+      await page.getByRole("button", { name: "Read it" }).click();
+      await expect(page.getByRole("status")).toContainText("Nothing reliable");
+    });
+  });
+
+  test("notification preferences include quiet hours", async ({ page }) => {
+    await page.getByRole("button", { name: "Notifications" }).click();
+    await page.getByRole("switch", { name: "Quiet hours" }).check();
+    await expect(page.getByRole("switch", { name: "Quiet hours" })).toBeChecked();
+  });
+
+  test("an account can be connected and disconnected", async ({ page }) => {
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await page.getByLabel("Google client ID").fill("test-id.apps.googleusercontent.com");
+    await page.getByLabel("Google client ID").blur();
+    await page.getByRole("button", { name: "Connect Google" }).click();
+    await expect(page.getByRole("button", { name: "Disconnect" })).toBeVisible();
+    await page.getByRole("button", { name: "Disconnect" }).click();
+    await expect(page.getByRole("button", { name: "Disconnect" })).toHaveCount(0);
   });
 
   test.describe("Claude Code as a chat engine", () => {

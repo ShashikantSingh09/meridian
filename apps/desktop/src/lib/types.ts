@@ -142,6 +142,10 @@ export interface Settings {
   screenExclusions: string[];
   monitoringPaused: boolean;
   mediaEnabled: boolean;
+  activity: ActivityPreferences;
+  googleClientId: string;
+  microsoftClientId: string;
+  showNextMeeting: boolean;
 }
 
 export interface Track {
@@ -169,6 +173,88 @@ export type MediaAction =
   | { action: "toggle" | "next" | "previous" }
   | { action: "seek"; positionMs: number }
   | { action: "select"; session: string };
+
+export type Priority = "low" | "informational" | "important" | "critical";
+export type EventStatus = "active" | "updated" | "cancelled" | "completed" | "dismissed";
+export type Category = "today" | "upcoming" | "travel" | "deliveries" | "meetings" | "orders" | "importantDates" | "completed";
+
+/** A time at the precision its source stated. Date and naive values have no zone. */
+export type EventTime =
+  | { kind: "date"; value: string }
+  | { kind: "naive"; value: string }
+  | { kind: "zoned"; value: string };
+
+export interface SuggestedAction {
+  label: string;
+  actionId: string;
+  url: string | null;
+}
+
+export interface SourceRef {
+  account: string;
+  messageId: string;
+  subject: string;
+  receivedAt: string;
+  link: string | null;
+}
+
+export interface ContextEvent {
+  id: string;
+  kind: string;
+  source: string;
+  occurredAt: string;
+  startsAt: EventTime | null;
+  endsAt: EventTime | null;
+  title: string;
+  body: string | null;
+  metadata: Record<string, unknown>;
+  confidence: number;
+  priority: Priority;
+  status: EventStatus;
+  suggestedActions: SuggestedAction[];
+  expiresAt: string | null;
+  dedupeKey: string;
+  sourceRef: SourceRef | null;
+  userEdited: boolean;
+  revision: number;
+  changedFields: string[];
+  snoozedUntil: string | null;
+}
+
+export interface Reminder {
+  key: string;
+  eventId: string;
+  stage: { type: "lead"; minutes: number } | { type: "changed" | "rescheduled" | "cancelled" };
+  priority: Priority;
+  title: string;
+  startsAt: EventTime | null;
+  approximateTime: boolean;
+  actions: SuggestedAction[];
+}
+
+export interface ReminderLogEntry {
+  key: string;
+  eventId: string;
+  stage: Reminder["stage"];
+  startsAt: EventTime | null;
+  disposition: "surfaced" | "centre" | "held";
+  at: string;
+}
+
+export interface ConnectedAccount {
+  id: string;
+  provider: "google" | "microsoft";
+  email: string | null;
+  scopes: string[];
+  connectedAt: string;
+  lastSyncAt: string | null;
+}
+
+export interface ActivityPreferences {
+  categories: Partial<Record<Category, { enabled: boolean; leadMinutes: number[] }>>;
+  quietHours: { start: string; end: string } | null;
+  maxPerHour: number | null;
+}
 
 /** What a CLI reports about its own sign-in. */
 export interface AuthStatus {
@@ -198,4 +284,8 @@ export const defaultSettings: Settings = {
   screenExclusions: [],
   monitoringPaused: false,
   mediaEnabled: true,
+  activity: { categories: {}, quietHours: null, maxPerHour: null },
+  googleClientId: "",
+  microsoftClientId: "",
+  showNextMeeting: true,
 };

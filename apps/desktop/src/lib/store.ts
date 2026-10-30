@@ -12,16 +12,22 @@ import type {
   Capture,
   ChatMessage,
   ModelInfo,
+  Category,
+  ConnectedAccount,
+  ContextEvent,
+  EventTime,
   MediaAction,
   MediaSnapshot,
   ProviderInfo,
+  Reminder,
+  ReminderLogEntry,
   ScreenSuggestion,
   Settings,
   Track,
 } from "./types";
 import { defaultSettings } from "./types";
 
-export type Tab = "home" | "chat" | "agents" | "desktop" | "media" | "providers" | "settings";
+export type Tab = "home" | "chat" | "agents" | "desktop" | "media" | "day" | "inbox" | "providers" | "settings";
 
 export interface LogEntry {
   kind: "user" | "text" | "activity" | "system";
@@ -80,8 +86,18 @@ export interface MediaState extends MediaSnapshot {
   recent: Track[];
 }
 
+export interface ActivityState {
+  category: Category;
+  events: ContextEvent[];
+  accounts: ConnectedAccount[];
+  log: ReminderLogEntry[];
+  /** The next meeting, for the island. */
+  next: ContextEvent | null;
+}
+
 export interface AppState {
   panelOpen: boolean;
+  activity: ActivityState;
   screen: ScreenState;
   media: MediaState;
   tab: Tab;
@@ -110,6 +126,7 @@ const NOTICE_MS = 6000;
 
 let state: AppState = {
   panelOpen: false,
+  activity: { category: "today", events: [], accounts: [], log: [], next: null },
   media: { current: null, sessions: [], reportedAt: 0, recent: [] },
   screen: { capture: null, capturing: false, question: "", includeImage: true, refused: null },
   tab: "home",
@@ -137,6 +154,19 @@ const listeners = new Set<() => void>();
 function set(patch: Partial<AppState>) {
   state = { ...state, ...patch };
   listeners.forEach((l) => l());
+  reportContext();
+}
+
+/** Tells the core what the user is in the middle of, for interruption decisions. */
+let reported = "";
+function reportContext() {
+  const agent = state.sessions.some((s) => ["starting", "running", "waiting"].includes(s.status));
+  const media = state.media.current?.playing ?? false;
+  const screen = state.screen.capture !== null || state.screen.capturing;
+  const key = `${agent}${media}${screen}`;
+  if (key === reported) return;
+  reported = key;
+  void bridge.activityContext(agent, media, screen);
 }
 
 export const getState = () => state;
@@ -504,6 +534,91 @@ export async function sendToSession(id: string, text: string, images: string[] =
   }
 }
 
+// ── Personal activity ───────────────────────────────────────────────────────
+
+const setActivity = (patch: Partial<ActivityState>) => set({ activity: { ...state.activity, ...patch } });
+
+export async function refreshActivity(category: Category = state.activity.category) {
+  try {
+    const [events, accounts, log, meetings] = await Promise.all([
+      bridge.activityList(category),
+      bridge.accountsList(),
+      bridge.reminderLog(),
+      bridge.activityList("meetings"),
+    ]);
+    const next = meetings.find((m) => m.status !== "cancelled" && m.status !== "completed") ?? null;
+    setActivity({ category, events, accounts, log, next });
+  } catch (err) {
+    pushError({ title: "Could not read your activity", body: describe(err) });
+  }
+}
+
+const activityAction = (action: () => Promise<unknown>) => async () => {
+  try {
+    await action();
+    await refreshActivity();
+  } catch (err) {
+    pushError({ title: "That did not work", body: describe(err) });
+  }
+};
+
+export const dismissEvent = (id: string) => activityAction(() => bridge.activityDismiss(id))();
+export const deleteEvent = (id: string) => activityAction(() => bridge.activityDelete(id))();
+export const renameEvent = (id: string, title: string) => activityAction(() => bridge.activityCorrect(id, title))();
+export const addReminder = (title: string, startsAt: EventTime) =>
+  activityAction(() => bridge.activityAddReminder(title, startsAt))();
+
+export async function importEmail(subject: string, from: string, body: string) {
+  const found = await bridge.activityImport(subject, from, body);
+  await refreshActivity();
+  return found;
+}
+
+export const disconnectAccount = (id: string) => activityAction(() => bridge.accountDisconnect(id))();
+
+export async function connectAccount(provider: ConnectedAccount["provider"], secret: string | null) {
+  const account = await bridge.accountConnect(provider, secret);
+  await refreshActivity();
+  return account;
+}
+
+export const openLink = (url: string) => void bridge.openUrl(url);
+
+export function dismissReminder(notice: Notice) {
+  dismissNotice(notice.id);
+  if (notice.eventId) void dismissEvent(notice.eventId);
+}
+
+export function snoozeReminder(notice: Notice, minutes: number) {
+  dismissNotice(notice.id);
+  if (notice.eventId) void activityAction(() => bridge.activitySnooze(notice.eventId!, minutes))();
+}
+
+function onReminders(reminders: Reminder[]) {
+  for (const r of reminders) {
+    const urgent = r.priority === "critical" || r.priority === "important";
+    const notice: Notice = {
+      id: r.key,
+      eventId: r.eventId,
+      tone: urgent ? "urgent" : "info",
+      title: r.title,
+      body: r.startsAt ? describeTime(r.startsAt) : "",
+      actions: r.actions.filter((a) => a.url).map((a) => ({ label: a.label, url: a.url })),
+      sticky: urgent,
+    };
+    set({ notices: [...state.notices.filter((n) => n.id !== notice.id), notice] });
+    if (!notice.sticky) setTimeout(() => dismissNotice(notice.id), NOTICE_MS);
+  }
+}
+
+/** A time as stated: a date stays a date, and an unzoned time claims no zone. */
+export function describeTime(time: EventTime) {
+  const stated = time.kind === "date" ? new Date(`${time.value}T00:00:00`) : new Date(time.value);
+  return time.kind === "date"
+    ? stated.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" })
+    : stated.toLocaleString(undefined, { weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
+}
+
 // ── Media ───────────────────────────────────────────────────────────────────
 
 const RECENT_TRACKS = 8;
@@ -722,6 +837,7 @@ export async function boot() {
   document.documentElement.dataset.glass = glass ? "native" : "fallback";
   set({ settings, providers, agents, glass });
   void refreshLocal();
+  void refreshActivity();
   void bridge.monitors().then((monitors) => set({ monitors }));
   for (const a of agents) if (a.installed) void refreshAuth(a.id);
   await Promise.all([
@@ -733,6 +849,12 @@ export async function boot() {
     }),
     bridge.onOpenTab((tab) => openPanel(tab as Tab)),
     bridge.onMedia(onMedia),
+    bridge.onReminders(onReminders),
+    bridge.onActivityChanged(() => void refreshActivity()),
+    bridge.onSettingsChanged((changed) => {
+      applyAppearance(changed);
+      set({ settings: changed });
+    }),
     bridge.onScreenSuggestion(onScreenSuggestion),
     bridge.onCaptureRequest(() => {
       openPanel("desktop");

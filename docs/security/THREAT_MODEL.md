@@ -1,8 +1,8 @@
 # Security and privacy model
 
-Scope is M1. Later subsystems that read desktop content must extend this before they are built.
+Scope is M2. Anything that reads more of the desktop must extend this before it is built.
 
-## What M1 touches
+## What the app touches
 
 | Data | Handling |
 |---|---|
@@ -10,7 +10,12 @@ Scope is M1. Later subsystems that read desktop content must extend this before 
 | Chat text | Sent only to the provider the user picked. |
 | Prompts to agents | Sent over stdin, so they never appear in a process list. |
 | Microphone | Opens only on a click, only while the listening view is mounted. A dot shows while it is open. Levels only: audio is neither recorded nor sent. |
-| Screen, clipboard, keystrokes, window titles | Not read. |
+| Screen | Read only on request or in opt-in contextual mode, on this PC. Shared only from a preview the user approves. Frames are held in memory and dropped on send, discard or at once in contextual mode. |
+| Excluded windows | Password managers, private browsing and sign-in windows can never be captured, whatever the user's own list says. Refused before any pixel is read. |
+| Clipboard, keystrokes | Not read. |
+| Mail and calendars | Read-only OAuth with minimum scopes. Read on this PC. Extracted events stay in a local SQLite file. Nothing here is sent to an AI provider. |
+| OAuth tokens | Windows Credential Manager, never in SQLite. Disconnect removes the tokens and the events owned by that account. A booking seen in two accounts is one row, see `KNOWN_ISSUES.md`. |
+| Agent sign-in | Handled entirely by the CLI. The app reads only its status, and drops the account's email and organization. |
 | Telemetry | None. |
 
 ## Trust boundaries
@@ -31,6 +36,15 @@ hooks load without a trust prompt in print mode, so the new-session form warns a
 **Local-only mode** is enforced in Rust on the resolved address, including custom endpoints. A hostname merely containing
 "localhost" does not pass.
 
+**The OAuth loopback listener** binds 127.0.0.1 on a random port for one sign-in, and checks `state` and PKCE.
+
+**Screen text is untrusted.** Text read from the screen goes to an engine as data, but a model can be influenced by it. A
+malicious web page on screen could carry instructions. Approvals stand between that and any action.
+
+**Mail is untrusted.** Senders are not authenticated, so a forged message can create an event and a link. Links open only on
+a click, only for http and https, and each button shows its real host. Extraction uses no model, so mail cannot instruct
+anything.
+
 ## Credentials of other tools
 
 Meridian detects agents from PATH and `--version` only. It reads no agent's config or credential files, and uses each
@@ -40,6 +54,5 @@ agent's own sign-in through its supported CLI.
 
 - Review the `open_project` and session commands against a hostile page.
 - Sign binaries.
-- Remove the `window.__meridian` test hook from release builds.
 - Decide on an audit log for approvals.
 - Never ship with `--remote-debugging-port`. It is used only by the live tests, through an environment variable.

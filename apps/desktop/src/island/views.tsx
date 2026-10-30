@@ -7,12 +7,16 @@ import {
   answerApproval,
   assist,
   cancelSession,
+  describeTime,
   dismissError,
   dismissNotice,
+  dismissReminder,
   ignoreSuggestion,
   mediaAction,
+  openLink,
   openPanel,
   setListening,
+  snoozeReminder,
   useApp,
 } from "../lib/store";
 import { activeSessions, MULTITASK_MAX_ROWS, waitingApproval, type SessionSummary } from "./machine";
@@ -66,6 +70,7 @@ function Clock() {
 export function IdleView({ reduced, hovered, sliver }: { reduced: boolean; hovered: boolean; sliver: boolean }) {
   const model = useApp((s) => s.chat.model ?? s.settings.defaultModel);
   const clock = useApp((s) => s.settings.showClock);
+  const next = useApp((s) => (s.settings.showNextMeeting ? s.activity.next : null));
   const watching = useApp((s) => s.settings.screenMode === "contextual" && !s.settings.monitoringPaused);
   if (sliver && !hovered) return watching ? <span className="watch-dot sliver-dot" title="Screen awareness is on" /> : null;
   if (!hovered) {
@@ -80,8 +85,8 @@ export function IdleView({ reduced, hovered, sliver }: { reduced: boolean; hover
   return (
     <div className="row pad-pill">
       <Line mode="rest" color="--state-idle" width={40} height={12} reduced={reduced} />
-      <span className="grow label">{model ?? "Meridian"}</span>
-      <kbd>Ctrl Alt Space</kbd>
+      <span className="grow label truncate" title={next?.title}>{next?.title ?? model ?? "Meridian"}</span>
+      {next?.startsAt ? <span className="meta tabular">{describeTime(next.startsAt)}</span> : <kbd>Ctrl Alt Space</kbd>}
     </div>
   );
 }
@@ -195,13 +200,47 @@ export function MultitaskView({ reduced }: { reduced: boolean }) {
   );
 }
 
+/** Mail can be forged and nothing here proves a sender, so a link always shows
+ *  where it really goes. */
+export const hostOf = (url: string | null) => {
+  try {
+    return url ? new URL(url).hostname.replace(/^www\./, "") : "";
+  } catch {
+    return "";
+  }
+};
+
 export function NotificationView({ reduced }: { reduced: boolean }) {
   const notice = useApp((s) => s.notices[0]);
   const sessions = useApp((s) => s.sessions);
   if (!notice) return null;
+  const color = notice.tone === "success" ? "--state-success" : notice.tone === "urgent" ? "--state-waiting" : "--state-notice";
+
+  if (notice.eventId) {
+    return (
+      <div className="stack pad-card">
+        <div className="row">
+          <Line mode="flare" color={color} width={36} height={10} reduced={reduced} />
+          <button className="grow text-button stacked" onClick={() => { dismissNotice(notice.id); openPanel("day"); }}>
+            <span className="label truncate">{notice.title}</span>
+            <span className="meta truncate">{notice.body}</span>
+          </button>
+          {iconButton("Dismiss", "close", () => dismissReminder(notice))}
+        </div>
+        <div className="row end">
+          <button className="ghost" onClick={() => snoozeReminder(notice, 15)}>Snooze</button>
+          <button className="ghost" onClick={() => { dismissNotice(notice.id); openPanel("day"); }}>Details</button>
+          {notice.actions?.map((a) => (
+            <button key={a.label} className="solid" title={a.url ?? undefined} onClick={() => a.url && openLink(a.url)}>{a.label} on {hostOf(a.url)}</button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="row pad-card">
-      <Line mode="flare" color={notice.tone === "success" ? "--state-success" : "--state-notice"} width={36} height={10} reduced={reduced} />
+      <Line mode="flare" color={color} width={36} height={10} reduced={reduced} />
       <button className="grow text-button stacked" onClick={() => { dismissNotice(notice.id); openPanel(notice.sessionId ? (sessions.find((s) => s.id === notice.sessionId)?.surface === "chat" ? "chat" : "agents") : undefined); }}>
         <span className="label">{notice.title}</span>
         <span className="meta truncate">{notice.body}</span>

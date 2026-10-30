@@ -159,9 +159,9 @@ provisional must be confirmed by a baseline measurement during M1 and recorded i
 
 | Measure | Result | Status |
 |---|---|---|
-| Idle CPU | About 0.37% of one core once the breath ends, over 30 s, not 5 minutes | Meets target over the shorter window |
+| Idle CPU | About 0.31% of one core once the breath ends, with every M2 module running, over 30 s, not 5 minutes | Meets target over the shorter window |
 | Hidden CPU | Not measured | Open |
-| Memory | About 166 MB at fresh idle, about 268 MB after the panel has been opened | Meets target |
+| Memory | About 178 MB at fresh idle with every M2 module, about 268 MB after the panel was opened in M1 | Meets target |
 | Animation | 180 fps, p95 5.7 ms, 0% of frames over 33 ms across six morphs | Meets target |
 | Time to first token | Not measured | Open |
 | Click reliability | OS-level hit testing correct on and off the shape; no scripted click suite | Partial |
@@ -188,3 +188,17 @@ should look like a polished commercial product in a side-by-side comparison with
 8. **Island position.** Should it stay at top centre, or allow user placement along the top edge or in corners?
 9. **WebView2 budget.** If the memory target fails, is the Direct2D island contingency acceptable, given that it gives up web
    motion tooling and probably real glass?
+
+## 10. Milestone 2 scope
+
+Added by the enhancement brief of 2026-10-30, and implemented in the order it set:
+
+1. Top-center Dynamic Island with display, placement, hiding and new states.
+2. Claude Code as a chat engine, with General and Project modes.
+3. Screen awareness: on demand, then optional contextual mode.
+4. Universal media detection and controls.
+5. Personal activity: accounts, extraction, timeline.
+6. Unified notifications: priority, deduplication, reminders, quiet hours.
+
+The 20 acceptance criteria and their current state are in `docs/KNOWN_ISSUES.md`. Decisions are in `docs/DECISIONS.md`,
+D19 onward.

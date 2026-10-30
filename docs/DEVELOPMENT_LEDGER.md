@@ -1,5 +1,71 @@
 # Development ledger
 
+## 2026-10-30: Milestone 2, the intelligent island
+
+### Completed
+
+- **Island.** Display selection, left, center and right placement, hide from the tray, hide when idle, clock, animation
+  speed, hover detail for agents and media, next meeting, and display-change handling.
+- **Claude Code and Codex as chat engines.** One engine picker. General mode (no shell, no edits, no connectors) and Project
+  mode. Sign-in status from the CLI, sign-in through the CLI's own flow, conversations, follow-ups, stop, tool activity,
+  approvals in chat, file references.
+- **Screen awareness.** `crates/screen`: capture, local OCR, on-device signals, exclusions. A Desktop awareness page with a
+  preview, region selection and an explicit share step. Optional contextual mode, off by default, with interval, pause and
+  always-on exclusions. Images reach Anthropic, OpenAI-compatible providers and Claude Code.
+- **Media.** `crates/media` on the Windows system media controls. Island view, hover controls, Media page, player switching,
+  recent tracks.
+- **Personal activity.** `crates/activity`: unified event model, extraction from JSON-LD, iCalendar and rules, SQLite store,
+  notification engine, OAuth with PKCE, and Gmail, Google Calendar and Microsoft Graph connectors. My day, Notifications and
+  Connected accounts in the app, plus Paste an email and your own reminders.
+- **Global pause** in the tray and Settings.
+
+### Bugs found by running it, all fixed
+
+| Bug | Found by |
+|---|---|
+| Starting the app took focus from the active window | A capture naming our own process as foreground |
+| Previewing a state erased real sessions | Empty state after a test |
+| Credential Manager rejected tokens, because its 2560-byte limit is UTF-16 | Real round trip |
+| OCR reads `main.tf` as `main. tf`, weakening detection | Live OCR test |
+| `--tools` alone left MCP connectors reachable in general mode | Reading `system/init` |
+| A test that claimed to interrupt mid-stream was stopping before any output | Reading the log it printed |
+| Microsoft sign-in would have failed: the port is ignored only for `localhost`, not `127.0.0.1` | Reading the provider's documentation before first use |
+| A forged email could offer a link with no sign of where it went | Reviewing the extraction limits |
+
+### Testing status
+
+| Suite | Result |
+|---|---|
+| Rust | 296 pass, including 197 for `crates/activity` |
+| Vitest | 20 pass |
+| Playwright | 31 pass |
+| Live, Claude Code chat | Sign-in, no key, context, general mode, mid-stream stop, resume, image |
+| Live, screen | Real capture, OCR, detection, crop, island exclusion, discard |
+| Live, media | Silent session seen, controls delivered, pause seen |
+| Live, activity | Email to event, reschedule in place, promo ignored, reminder fires once, cleanup |
+
+### Measurements, release build, every module running
+
+| Measure | Result |
+|---|---|
+| Idle CPU, nothing moving | About 0.31% of one core, over 30 s |
+| `meridian.exe` | 0% |
+| Private memory | About 178 MB fresh |
+| Binary | 12.4 MB |
+| Follow-up on a live Claude Code process | 1.5 s, against 6.7 s from cold |
+
+### Blockers that need you
+
+- `codex login` to verify Codex.
+- A Google and a Microsoft app registration to verify accounts. See `docs/development/CONNECTING_ACCOUNTS.md`.
+
+### Next steps
+
+1. Connect a real account, and fix what real mail reveals.
+2. Persist chats and sessions.
+3. Test multiple monitors and display scaling.
+4. Voice.
+
 ## 2026-10-30: Milestone 1
 
 ### Completed

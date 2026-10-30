@@ -5,7 +5,9 @@ import { Agents } from "./Agents";
 import { Chat } from "./Chat";
 import { Desktop } from "./Desktop";
 import { Home } from "./Home";
+import { Inbox } from "./Inbox";
 import { Media } from "./Media";
+import { MyDay } from "./MyDay";
 import { Providers } from "./Providers";
 import { SettingsPage } from "./Settings";
 
@@ -15,6 +17,8 @@ const NAV: { tab: Tab; icon: IconName; label: string }[] = [
   { tab: "agents", icon: "agents", label: "Agents" },
   { tab: "desktop", icon: "eye", label: "Desktop awareness" },
   { tab: "media", icon: "music", label: "Media" },
+  { tab: "day", icon: "calendar", label: "My day" },
+  { tab: "inbox", icon: "bell", label: "Notifications" },
   { tab: "providers", icon: "providers", label: "Providers" },
   { tab: "settings", icon: "settings", label: "Settings" },
 ];
@@ -25,6 +29,8 @@ const PAGES: Record<Tab, () => React.JSX.Element> = {
   agents: Agents,
   desktop: Desktop,
   media: Media,
+  day: MyDay,
+  inbox: Inbox,
   providers: Providers,
   settings: SettingsPage,
 };

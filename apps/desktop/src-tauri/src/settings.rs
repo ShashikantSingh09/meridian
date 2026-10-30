@@ -36,6 +36,10 @@ pub struct Settings {
     /// Stops all contextual monitoring at once, whatever else is set.
     pub monitoring_paused: bool,
     pub media_enabled: bool,
+    pub activity: activity::Preferences,
+    pub google_client_id: String,
+    pub microsoft_client_id: String,
+    pub show_next_meeting: bool,
 }
 
 impl Default for Settings {
@@ -61,6 +65,10 @@ impl Default for Settings {
             screen_exclusions: Vec::new(),
             monitoring_paused: false,
             media_enabled: true,
+            activity: activity::Preferences::default(),
+            google_client_id: String::new(),
+            microsoft_client_id: String::new(),
+            show_next_meeting: true,
         }
     }
 }

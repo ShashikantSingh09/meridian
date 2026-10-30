@@ -8,12 +8,17 @@ import type {
   AgentInfo,
   AuthStatus,
   Capture,
+  Category,
   ChatEvent,
+  ConnectedAccount,
+  ContextEvent,
+  EventTime,
   LocalServer,
   MediaAction,
   MediaSnapshot,
   ModelInfo,
   ProviderInfo,
+  Reminder,
   Settings,
 } from "./types";
 import { defaultSettings } from "./types";
@@ -29,6 +34,39 @@ const providers: ProviderInfo[] = [
 let settings: Settings = { ...defaultSettings };
 let emit: (e: AgentEnvelope) => void = () => {};
 let authed = true;
+let pushReminders: (r: Reminder[]) => void = () => {};
+let accounts: ConnectedAccount[] = [];
+const sampleEvent = (id: string, title: string, kind: string, over: Partial<ContextEvent> = {}): ContextEvent => ({
+  id,
+  kind,
+  source: "email",
+  occurredAt: "2026-10-30T09:00:00Z",
+  startsAt: { kind: "zoned", value: "2026-10-31T10:30:00+05:30" },
+  endsAt: null,
+  title,
+  body: null,
+  metadata: {},
+  confidence: 0.95,
+  priority: "important",
+  status: "active",
+  suggestedActions: [],
+  expiresAt: null,
+  dedupeKey: id,
+  sourceRef: { account: "me@example.com", messageId: "m1", subject: `Confirmation: ${title}`, receivedAt: "2026-10-30T09:00:00Z", link: null },
+  userEdited: false,
+  revision: 1,
+  changedFields: [],
+  snoozedUntil: null,
+  ...over,
+});
+let events: ContextEvent[] = [
+  sampleEvent("e1", "Flight 6E 2341 to Delhi", "flight"),
+  sampleEvent("e2", "Package from Sample Store", "delivery", { confidence: 0.55, priority: "informational", startsAt: { kind: "date", value: "2026-10-31" } }),
+];
+const inCategory = (e: ContextEvent, category: Category | null) => {
+  if (!category || category === "today" || category === "upcoming") return true;
+  return (category === "travel" && e.kind === "flight") || (category === "deliveries" && e.kind === "delivery");
+};
 let pushMedia: (s: MediaSnapshot) => void = () => {};
 const sampleTrack = {
   session: "Spotify.exe",
@@ -92,6 +130,30 @@ export const mock = {
     track = { ...sampleTrack };
     pushMedia(present ? { current: track, sessions: [track] } : { current: null, sessions: [] });
   },
+
+  activityList: async (category: Category | null) => events.filter((e) => inCategory(e, category)),
+  activityDelete: async (id: string) => void (events = events.filter((e) => e.id !== id)),
+  activityCorrect: async (id: string, title: string) =>
+    void (events = events.map((e) => (e.id === id ? { ...e, title, userEdited: true } : e))),
+  activityAddReminder: async (title: string, startsAt: EventTime) =>
+    void (events = [...events, sampleEvent(crypto.randomUUID(), title, "userReminder", { source: "user", startsAt, sourceRef: null })]),
+  activityImport: async (subject: string) => {
+    if (/sale|deal/i.test(subject)) return 0;
+    events = [...events, sampleEvent(crypto.randomUUID(), subject, "order")];
+    return 1;
+  },
+  accountsList: async () => accounts,
+  accountConnect: async (provider: ConnectedAccount["provider"]) => {
+    const account = { id: `${provider}:me`, provider, email: "me@example.com", scopes: [], connectedAt: "2026-10-30T09:00:00Z", lastSyncAt: null };
+    accounts = [...accounts, account];
+    return account;
+  },
+  accountDisconnect: async (id: string) => void (accounts = accounts.filter((a) => a.id !== id)),
+  async onReminders(handler: (r: Reminder[]) => void) {
+    pushReminders = handler;
+    return () => {};
+  },
+  publishReminder: (reminder: Reminder) => pushReminders([reminder]),
 
   screenCapture: async (): Promise<Capture> => ({
     image: "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7",

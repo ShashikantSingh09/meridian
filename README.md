@@ -1,10 +1,10 @@
 # Meridian
 
 A universal AI companion for the Windows desktop. A small island of real glass sits at the top of your screen, and one
-line of light tells you what your AI is doing. Chat with any model, run Claude Code and Codex side by side, and approve
-what they want to do without leaving your work.
+line of light tells you what your AI is doing. Chat with any model or with Claude Code, ask about what is on your screen,
+control your music, and see your day, all from one place.
 
-Meridian is a working title. This is milestone 1: a real, running app, not the finished product. See
+Meridian is a working title. This is milestone 2: a real, running app, not the finished product. See
 [what works](#status) below.
 
 ## Run it
@@ -23,11 +23,20 @@ The island appears at the top of your screen.
 | Open the panel | `Ctrl+Alt+Space`, click the island, or click the tray icon |
 | Close it | `Esc`, or click anywhere else |
 | Quit | Tray icon, Quit |
+| Ask about your screen | `Ctrl+Alt+S`. You see a preview, and nothing leaves your PC until you share it |
+| Pause all monitoring | Tray icon, or Settings |
 | See every island state | Settings, Preview island states |
 
 To use a model, open Providers and add an API key, or start a local server such as Ollama or LM Studio and choose Find
-local servers. To run an agent, open Agents, pick a folder you trust, and describe the task. Its permission requests
-appear on the island.
+local servers. To chat with Claude Code, pick it as the engine in Chat. It uses your own installed CLI and sign-in, so no
+API key is needed. To run a task, open Agents, pick a folder you trust, and describe it. Permission requests appear on the
+island.
+
+To connect mail and calendars, see [Connecting accounts](docs/development/CONNECTING_ACCOUNTS.md).
+
+**Personal use only for now.** Anthropic does not permit third-party apps to offer Claude.ai login or to route requests
+through subscription plans on behalf of their users, so read [the licensing note](docs/KNOWN_ISSUES.md#licensing-read-before-distributing)
+before giving this to anyone else.
 
 ## Test it
 
@@ -47,14 +56,15 @@ npx --prefix apps/desktop tauri build --no-bundle
 
 ## Status
 
-**Working, and verified in the real app:** real desktop blur, all nine island states, click-through, tray, global shortcut,
-settings, Claude Code sessions with approve, deny, cancel and resume, local server discovery and streaming, clean failure
-when a server dies.
+**Working, and verified in the real app:** real desktop blur, every island state, click-through, tray, global shortcuts,
+placement, Claude Code as a chat engine and as task sessions with approve, deny, stop and resume, screen capture with local
+OCR and error detection, media detection and controls, reading bookings from a pasted email, reminders, and local server
+streaming.
 
-**Built, but not yet proven against the real thing:** a full Codex turn (the sign-in here has expired), live cloud APIs,
-real Ollama or LM Studio.
+**Built, but not yet proven against the real thing:** Gmail, Google Calendar, Outlook and Microsoft Calendar (they need your
+own app registration), a full Codex turn, live cloud APIs, real Ollama or LM Studio.
 
-**Not built yet:** speech, desktop context awareness, workflows, saved history, installer.
+**Not built yet:** speech, saved chat history, workflows, installer.
 
 The full list is in [docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md).
 
@@ -68,6 +78,9 @@ apps/desktop/          The app
   src-tauri/           Window, tray, glass, commands
 crates/ai-core/        Providers: catalog, streaming, discovery
 crates/agent-adapters/ Claude Code and Codex sessions, approvals
+crates/screen/         Capture, local OCR, error signals
+crates/media/          Windows media sessions and controls
+crates/activity/       Events, extraction, notifications, accounts
 packages/design-system Tokens for colour, surface and motion
 docs/                  Research, PRD, architecture, decisions
 tests/live/            Checks against the real app and CLIs
@@ -81,5 +94,6 @@ tests/live/            Checks against the real app and CLIs
 
 ## Privacy
 
-This build reads no screen, clipboard, keyboard or window content, and has no telemetry. Keys stay in Windows Credential
-Manager. See the [threat model](docs/security/THREAT_MODEL.md).
+Your screen is read only when you ask, or in contextual mode if you turn it on, and always on this PC. Nothing is shared
+until you approve a preview. Mail and calendars are read-only and read locally. Keys and tokens stay in Windows Credential
+Manager. No keystrokes, no clipboard, no telemetry. See the [threat model](docs/security/THREAT_MODEL.md).

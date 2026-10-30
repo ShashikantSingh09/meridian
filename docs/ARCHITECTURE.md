@@ -26,10 +26,14 @@ flowchart TB
   subgraph Crates["Rust crates, no Tauri dependency"]
     AI["ai-core\ncatalog, Provider trait, SSE, discovery"]
     Agents["agent-adapters\nsessions, approvals, processes"]
+    Screen["screen\ncapture, OCR, signals, no network"]
+    MediaC["media\nsystem media controls"]
+    Activity["activity\nevents, extraction, store, notify, OAuth"]
   end
 
   Bridge -- "invoke, channels, events" --> Commands
-  Commands --> Win & Glass & Settings & Secrets & AI & Agents
+  Commands --> Win & Glass & Settings & Secrets & AI & Agents & Screen & MediaC & Activity
+  Activity -- "read-only OAuth" --> Mail[("Gmail, Calendar, Graph")]
   AI -- HTTPS or loopback --> LLM[("Cloud and local models")]
   Agents -- "stdio JSON" --> CLI[("claude, codex")]
   CLI -- "http hook, loopback" --> Agents
@@ -51,6 +55,11 @@ flowchart TB
 | `src-tauri/glass.rs` | The blurred backdrop, entirely optional | WinRT Composition |
 | `crates/ai-core` | Providers | reqwest |
 | `crates/agent-adapters` | Agent sessions | tokio |
+| `crates/screen` | Capture, OCR, signals, exclusions. No network code | Win32, WinRT |
+| `crates/media` | Media sessions and controls | WinRT |
+| `crates/activity` | Event model, extraction, store, notifications, connectors | SQLite, reqwest |
+| `src-tauri/watch.rs` | The contextual screen loop | `screen` |
+| `src-tauri/life.rs` | Activity timers, keychain, sign-in, commands | `activity` |
 
 The frontend never sees a provider or agent wire format. A provider failure comes back as a typed error, and every chat
 ends in exactly one terminal event, so the UI can never be left waiting.
@@ -70,9 +79,31 @@ window's.
 
 ## What the island shows
 
-`deriveView` is a pure priority list, highest first: expanded, listening, blocked approval, error, notification,
-contextual, multitask, working, thinking, idle. An approval outranks everything automatic because an agent is stuck until
-someone answers. A suggestion never interrupts active work.
+`deriveView` is a pure priority list, highest first: expanded, listening, screen being read, blocked approval, error,
+notification, contextual, multitask, working, thinking, media, idle. An approval outranks everything automatic because an
+agent is stuck until someone answers. Reading the screen always shows. A suggestion never interrupts active work, and media
+only fills an otherwise empty island.
+
+## Unified events
+
+Everything personal becomes one `ContextEvent`, whatever its source, with a dedupe key so an update changes the existing
+entry. Every minute `activity::decide` weighs events against preferences, the reminder log, and what the user is doing,
+which the store reports to the core. Each reminder fires once, and a reschedule starts a new set. Informational news during
+agent work goes to the activity centre, not the island. Quiet hours hold everything except critical.
+
+## Screen
+
+```mermaid
+flowchart LR
+  Ask["Ctrl Alt S, or a suggestion"] --> Check{"Mode on?\nWindow excluded?"}
+  Check -- no --> Refuse["Refused, with the reason"]
+  Check -- yes --> Grab["Capture, island kept out"] --> Local["Local OCR and signals"] --> Preview["Preview: what, and to whom"]
+  Preview -- Discard --> Gone["Dropped in page and core"]
+  Preview -- Share --> Engine["The selected engine"]
+  Watch["Contextual loop, off by default"] --> Check2{"Paused?\nExcluded?"} -- no --> Read["Capture, OCR, drop frame"] --> Suggest["Local suggestion with the matched line"] --> Ask
+```
+
+`shareCapture` in the store is the only way screen content leaves the machine.
 
 ## Chat
 
@@ -93,9 +124,9 @@ Local-only mode is enforced on the resolved address in Rust, so no interface pat
 
 ## Agent sessions
 
-Each session is one task owning one child process, driven by a channel of commands. Everything comes back as a normalized
-`AgentEvent`. A session retires at its terminal event, not when its process finally exits, so a follow-up can resume it
-straight away.
+Each run is one task owning one child process, driven by a channel of commands. Everything comes back as a normalized
+`AgentEvent`. Claude Code keeps its process between turns for 3 minutes, so a follow-up is fast, and after that a follow-up
+resumes from the transcript under the same session id. The chat and the Agents page are two views of the same sessions.
 
 ### Claude Code approval
 
@@ -130,5 +161,6 @@ Stubs for later subsystems do not exist on purpose. See `docs/DECISIONS.md`, D17
 
 ## Path to macOS and Linux
 
-Frontend, `ai-core` and most of `agent-adapters` are portable. Windows-specific code sits in `island.rs`, `glass.rs` and
-`secrets.rs`, and the process-tree kill in `process.rs`. Those would need a platform split.
+Frontend, `ai-core`, `activity` and most of `agent-adapters` are portable. Windows-specific code sits in `island.rs`,
+`glass.rs`, `secrets.rs`, `life.rs` keychain code, the process-tree kill in `process.rs`, and all of `screen` and `media`.
+Those would need a platform split.

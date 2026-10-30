@@ -118,3 +118,79 @@ webview.
 A meridian is a line across the top of the sky, which suits a line of light at the top of the screen. It has not been
 trademark-cleared. Choosing the final name means changing the bundle identifier, which is the Credential Manager
 service name too, so do that before any public release.
+
+## D19. Claude Code as a chat engine, through the user's own CLI
+
+Chat drives the installed `claude` CLI in print mode with stream-json, under whatever sign-in that CLI already has. The app
+never logs in itself, never reads a credential, and never handles a token. `claude auth status --json` reports sign-in, and
+`claude auth login` opens Anthropic's own flow in its own window. The account's email and organization are dropped before
+anything reaches the interface. Verified live: chat with no Anthropic API key, on a Max plan.
+
+**Licensing, read this before distributing.** From Anthropic's documentation, retrieved 2026-10-30:
+
+> OAuth authentication is intended exclusively for purchasers of Claude Free, Pro, Max, Team, and Enterprise subscription
+> plans and is designed to support ordinary use of Claude Code and other native Anthropic applications.
+
+> Developers building products or services that interact with Claude's capabilities, including those using the Agent SDK,
+> should use API key authentication through Claude Console or a supported cloud provider. Anthropic does not permit
+> third-party developers to offer Claude.ai login into their own applications, or to route requests through Free, Pro, or
+> Max plan credentials on behalf of their users. Moreover, developers may not collect, store, or intermediate Claude.ai
+> credentials or session tokens — sign-in to a Claude account must complete through Anthropic's own flow.
+
+> Unless previously approved, Anthropic does not allow third party developers to offer claude.ai login or rate limits for
+> their products, including agents built on the Claude Agent SDK.
+
+What this means here: one person running the app on their own machine, against their own installed CLI and their own plan,
+fits the design above, but this note is an engineering reading and not legal advice. Shipping this app to other people so
+their usage runs on their plans is a different case, and needs Anthropic's approval or an API-key path first. The design
+keeps that door open, because the app holds no Claude credential of any kind.
+
+The Agent SDK was not used: it needs a JavaScript or Python runtime in the app, and its documentation directs developers to
+API keys. The CLI's documented print mode gives the same streaming and session control.
+
+## D20. Keep the agent's process between turns
+
+Print mode accepts further messages on stdin after a result. A follow-up on the live process took 1.5 s, against 6.7 s from
+cold, so a session keeps its process for 3 minutes and then falls back to `--resume`, which the user notices only as a slower
+reply. Each idle process holds about 300 MB, which is why the window is short. An
+interrupt uses the stream-json `control_request`, which keeps the conversation alive, and falls back to ending the process
+tree after 4 s. This control message is what the Agent SDK uses and is not separately documented for direct use, so it
+carries more risk of changing than the rest of the protocol. The fallback covers that.
+
+## D21. General mode is restricted, not just relocated
+
+A dedicated empty folder is not enough: `--tools` alone still exposed the user's MCP connectors in testing, which include
+real accounts. General mode passes `--tools WebSearch,WebFetch,Read` and `--strict-mcp-config`. Project mode has the full
+tool set, and asks before acting through the approval hook.
+
+## D22. Screen capture by BitBlt, not Windows.Graphics.Capture
+
+`BitBlt` reads what is shown, is a few lines, and needs no Direct3D device. Graphics Capture would add a system capture
+border, which is a real privacy benefit, and handles occluded windows, which is not needed here because the app reads only
+what the user can see. It can replace this later behind the same functions. The island is kept out of its own captures with
+`WDA_EXCLUDEFROMCAPTURE`, held only for the moment of capture so the user's own screenshot tools still see it. Verified by
+painting the island magenta and sampling the capture.
+
+## D23. Screen content leaves the machine at exactly one point
+
+`crates/screen` has no network code. Capture and OCR are local. `shareCapture` in the store is the only path out, and it
+runs only on a click on a preview that names the engine and says what will be sent. Contextual mode raises local suggestions
+with the matched line; acting on one opens that same preview rather than sending anything. Frames are dropped immediately in
+contextual mode, and a discarded capture is dropped from the core too.
+
+## D24. Signals are observed, never inferred
+
+`screen::detect` matches text that is on screen: an IAM denial, a build failure, a traceback. It says "seen 3 times", and
+never "you seem stuck". Word lists require context, so a novel called Terror does not trigger anything. OCR reads `main.tf`
+as `main. tf`, so matching closes that gap without changing what the user sees.
+
+## D25. Media through the system transport controls
+
+Every player that publishes to Windows' media controls works with no per-service code, and each control is enabled only if
+that player says it is. Per-app volume is not implemented. One thread sleeps until the system reports a change, and playback
+position runs on locally only while the hover card is open, so a compact track costs no repaints.
+
+## D26. No third-party logos
+
+The island shows Claude Code and Codex by name, with original iconography. Product logos are their owners' marks, and
+Meridian is not affiliated with them.

@@ -8,7 +8,10 @@ import {
   boot,
   cancelSession,
   captureScreen,
+  closePanel,
   discardCapture,
+  dismissError,
+  dismissNotice,
   getState,
   openPanel,
   pushNotice,
@@ -25,8 +28,9 @@ createRoot(document.getElementById("root")!).render(<Island />);
 
 void boot();
 
-// Test hook: lets end-to-end tests drive the real store and components.
-Object.assign(window, {
+// Test hook: lets end-to-end tests drive the real store and components. Dev builds
+// only, so a release exposes nothing beyond its normal interface.
+if (import.meta.env.DEV) Object.assign(window, {
   __meridian: {
     showPreview,
     getState,
@@ -34,7 +38,10 @@ Object.assign(window, {
     answerApproval,
     cancelSession,
     captureScreen,
+    closePanel,
     discardCapture,
+    dismissError,
+    dismissNotice,
     sendChat,
     sendAgentChat,
     selectEngine,

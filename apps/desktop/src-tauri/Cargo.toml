@@ -13,9 +13,11 @@ crate-type = ["rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+activity = { path = "../../../crates/activity" }
 agent-adapters = { path = "../../../crates/agent-adapters" }
 ai-core = { path = "../../../crates/ai-core" }
 base64 = "0.22"
+chrono = "0.4"
 media = { path = "../../../crates/media" }
 screen = { path = "../../../crates/screen" }
 serde.workspace = true
