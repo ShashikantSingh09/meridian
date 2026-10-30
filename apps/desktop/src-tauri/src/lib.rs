@@ -15,6 +15,7 @@ mod glass;
 mod island;
 mod secrets;
 mod settings;
+mod watch;
 
 use commands::Core;
 
@@ -78,17 +79,27 @@ fn build_tray(app: &App) -> tauri::Result<()> {
     Ok(())
 }
 
-fn register_shortcut(app: &App) {
-    let shortcut = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::Space);
+fn register_shortcuts(app: &App) {
+    let open = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::Space);
     let handle = app.handle().clone();
-    let registered = app.global_shortcut().on_shortcut(shortcut, move |_, _, event| {
+    let opened = app.global_shortcut().on_shortcut(open, move |_, _, event| {
         if event.state == ShortcutState::Pressed {
             toggle(&handle);
         }
     });
-    // Another app may own the combination. The tray still opens the panel.
-    if let Err(err) = registered {
-        eprintln!("global shortcut unavailable: {err}");
+    let capture = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyS);
+    let handle = app.handle().clone();
+    let captured = app.global_shortcut().on_shortcut(capture, move |_, _, event| {
+        if event.state == ShortcutState::Pressed {
+            reveal(&handle);
+            let _ = handle.emit_to(island::LABEL, "screen-capture-request", ());
+        }
+    });
+    // Another app may own a combination. The tray and the panel still work.
+    for result in [opened, captured] {
+        if let Err(err) = result {
+            eprintln!("global shortcut unavailable: {err}");
+        }
     }
 }
 
@@ -105,7 +116,13 @@ fn setup(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     }))?;
 
     let gate = Arc::new(island::Gate::default());
-    app.manage(Core { settings, gate: gate.clone(), sessions, chats: Mutex::new(HashMap::new()) });
+    app.manage(Core {
+        settings,
+        gate: gate.clone(),
+        sessions,
+        chats: Mutex::new(HashMap::new()),
+        frame: Mutex::new(None),
+    });
 
     let win = app.get_webview_window(island::LABEL).ok_or("island window missing")?;
     island::restrict_permissions(&win);
@@ -113,12 +130,13 @@ fn setup(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     if let Some(hwnd) = island::hwnd(&win) {
         glass::attach(hwnd);
     }
-    win.show()?;
     island::prepare(&win, &gate);
-    island::spawn_poll(handle, gate);
+    island::show_quietly(&win);
+    island::spawn_poll(handle.clone(), gate);
+    watch::spawn(handle);
 
     build_tray(app)?;
-    register_shortcut(app);
+    register_shortcuts(app);
     Ok(())
 }
 
@@ -157,6 +175,10 @@ pub fn run() {
             commands::session_send,
             commands::session_cancel,
             commands::session_answer,
+            commands::screen_capture,
+            commands::screen_crop,
+            commands::screen_discard,
+            watch::screen_ignore,
             commands::open_project,
         ])
         .setup(setup)

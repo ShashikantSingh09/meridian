@@ -81,6 +81,9 @@ pub struct StartRequest {
     /// General assistant: no shell, no file edits, no connectors.
     #[serde(default)]
     pub restricted: bool,
+    /// Data URLs the user approved for sharing.
+    #[serde(default)]
+    pub images: Vec<String>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -96,7 +99,7 @@ pub enum AgentError {
 }
 
 pub(crate) enum Command {
-    Send(String),
+    Send { text: String, images: Vec<String> },
     Answer { id: String, allow: bool },
     /// Stop the current turn, keeping the session where the agent allows it.
     Cancel,
@@ -114,6 +117,7 @@ pub(crate) struct Launch {
     pub model: Option<String>,
     pub resume: Option<String>,
     pub restricted: bool,
+    pub images: Vec<String>,
 }
 
 struct Record {
@@ -167,6 +171,7 @@ impl Sessions {
             model: request.model.clone(),
             resume: None,
             restricted: request.restricted,
+            images: request.images,
         };
         let record = Record {
             agent: request.agent,
@@ -224,12 +229,12 @@ impl Sessions {
 
     /// Delivers an instruction: straight to a running process, or by resuming
     /// the session if its process has gone.
-    pub fn send(&self, id: &str, text: String) -> Result<(), AgentError> {
+    pub fn send(&self, id: &str, text: String, images: Vec<String>) -> Result<(), AgentError> {
         let launch = {
             let inner = self.inner.lock().unwrap();
             let record = inner.records.get(id).ok_or(AgentError::UnknownSession)?;
             if let Some((_, tx)) = &record.live {
-                if tx.send(Command::Send(text.clone())).is_ok() {
+                if tx.send(Command::Send { text: text.clone(), images: images.clone() }).is_ok() {
                     return Ok(());
                 }
             }
@@ -240,6 +245,7 @@ impl Sessions {
                 model: record.model.clone(),
                 resume: Some(record.native_id.clone().ok_or(AgentError::UnknownSession)?),
                 restricted: record.restricted,
+                images,
             }
         };
         let agent = self.inner.lock().unwrap().records[id].agent;

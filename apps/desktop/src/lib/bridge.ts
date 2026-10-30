@@ -9,11 +9,13 @@ import type {
   AgentId,
   AgentInfo,
   AuthStatus,
+  Capture,
   ChatEvent,
   ChatMessage,
   LocalServer,
   ModelInfo,
   ProviderInfo,
+  ScreenSuggestion,
   Settings,
 } from "./types";
 
@@ -35,6 +37,7 @@ export interface StartSession {
   prompt: string;
   model: string | null;
   restricted?: boolean;
+  images?: string[];
 }
 
 export const bridge = {
@@ -70,14 +73,21 @@ export const bridge = {
   monitors: () => (native ? invoke<string[]>("monitors_list") : Promise.resolve(["Display 1"])),
   startSession: (request: StartSession) =>
     native ? invoke<string>("session_start", { request }) : mock.startSession(request),
-  sendToSession: (id: string, text: string) =>
-    native ? invoke<void>("session_send", { id, text }) : mock.sendToSession(id, text),
+  sendToSession: (id: string, text: string, images: string[] = []) =>
+    native ? invoke<void>("session_send", { id, text, images }) : mock.sendToSession(id, text),
   cancelSession: (id: string) => (native ? invoke<void>("session_cancel", { id }) : mock.cancelSession(id)),
   answerApproval: (sessionId: string, approvalId: string, allow: boolean) =>
     native
       ? invoke<void>("session_answer", { sessionId, approvalId, allow })
       : mock.answerApproval(sessionId, approvalId, allow),
   openProject: (cwd: string) => (native ? invoke<void>("open_project", { cwd }) : Promise.resolve()),
+
+  screenCapture: (target: "window" | "screen") =>
+    native ? invoke<Capture>("screen_capture", { target }) : mock.screenCapture(),
+  screenCrop: (x: number, y: number, w: number, h: number) =>
+    native ? invoke<Capture>("screen_crop", { x, y, w, h }) : mock.screenCapture(),
+  screenDiscard: () => (native ? invoke<void>("screen_discard") : Promise.resolve()),
+  screenIgnore: (key: string) => (native ? invoke<void>("screen_ignore", { key }) : Promise.resolve()),
 
   pickFolder: async () => {
     if (!native) return "C:\\Projects\\sample";
@@ -125,6 +135,14 @@ export const bridge = {
   onBlur(handler: () => void) {
     if (!native) return Promise.resolve(() => {});
     return listen("island-blur", handler).then((un) => un);
+  },
+  onScreenSuggestion(handler: (s: ScreenSuggestion) => void) {
+    if (!native) return Promise.resolve(() => {});
+    return listen<ScreenSuggestion>("screen-suggestion", (e) => handler(e.payload)).then((un) => un);
+  },
+  onCaptureRequest(handler: () => void) {
+    if (!native) return Promise.resolve(() => {});
+    return listen("screen-capture-request", handler).then((un) => un);
   },
   onOpenTab(handler: (tab: string) => void) {
     if (!native) return Promise.resolve(() => {});

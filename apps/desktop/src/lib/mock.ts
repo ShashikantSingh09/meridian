@@ -7,6 +7,7 @@ import type {
   AgentId,
   AgentInfo,
   AuthStatus,
+  Capture,
   ChatEvent,
   LocalServer,
   ModelInfo,
@@ -58,6 +59,15 @@ export const mock = {
     { id: "claude-code", name: "Claude Code", installed: true, path: "claude", version: "stand-in", capabilities: { approvals: true, resume: true, usage: true, progress: false } },
     { id: "codex", name: "Codex CLI", installed: false, path: null, version: null, capabilities: { approvals: true, resume: true, usage: true, progress: false } },
   ],
+
+  screenCapture: async (): Promise<Capture> => ({
+    image: "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7",
+    text: "terraform plan\nError: Invalid reference\n  on main.tf line 12",
+    window: { title: "main.tf - infra", process: "Code.exe" },
+    signals: [{ kind: "terraform", title: "Looks like a Terraform configuration issue", evidence: "Error: Invalid reference" }],
+    width: 1280,
+    height: 720,
+  }),
 
   agentAuth: async (agent: AgentId): Promise<AuthStatus> =>
     agent === "claude-code"

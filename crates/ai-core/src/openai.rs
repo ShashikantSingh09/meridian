@@ -7,10 +7,19 @@ use serde_json::{json, Value};
 use tokio_util::sync::CancellationToken;
 
 use crate::sse::read_events;
-use crate::{ChatEvent, ChatRequest, Endpoint, ErrorKind, ModelInfo, Provider, ProviderError, Sink};
+use crate::{ChatEvent, ChatRequest, Endpoint, ErrorKind, Message, ModelInfo, Provider, ProviderError, Sink};
 
 /// Listed by `/models` but unable to chat.
 const NOT_CHAT: &[&str] = &["embed", "whisper", "tts", "dall-e", "moderation", "transcribe", "sora", "image"];
+
+fn wire_message(message: &Message) -> Value {
+    if message.images.is_empty() {
+        return json!({ "role": message.role, "content": message.content });
+    }
+    let mut content = vec![json!({ "type": "text", "text": message.content })];
+    content.extend(message.images.iter().map(|url| json!({ "type": "image_url", "image_url": { "url": url } })));
+    json!({ "role": message.role, "content": content })
+}
 
 pub struct OpenAi {
     http: Client,
@@ -34,7 +43,8 @@ impl OpenAi {
     }
 
     async fn post(&self, request: &ChatRequest, usage: bool) -> Result<Response, ProviderError> {
-        let mut body = json!({ "model": request.model, "messages": request.messages, "stream": true });
+        let messages: Vec<Value> = request.messages.iter().map(wire_message).collect();
+        let mut body = json!({ "model": request.model, "messages": messages, "stream": true });
         if usage {
             body["stream_options"] = json!({ "include_usage": true });
         }
@@ -123,10 +133,10 @@ impl Provider for OpenAi {
 mod tests {
     use super::*;
     use crate::test_server::{serve, Canned};
-    use crate::{run_chat, Message, Protocol, Role};
+    use crate::{run_chat, Protocol, Role};
 
     fn request() -> ChatRequest {
-        ChatRequest { model: "m".into(), messages: vec![Message { role: Role::User, content: "hi".into() }] }
+        ChatRequest { model: "m".into(), messages: vec![Message { role: Role::User, content: "hi".into(), images: vec![] }] }
     }
 
     async fn collect(base_url: String, cancel: CancellationToken) -> Vec<ChatEvent> {
@@ -134,6 +144,15 @@ mod tests {
         let mut events = Vec::new();
         run_chat(provider.as_ref(), &request(), &mut |e| events.push(e), &cancel).await;
         events
+    }
+
+    #[test]
+    fn images_become_content_parts_and_plain_text_stays_plain() {
+        let plain = wire_message(&Message { role: Role::User, content: "hi".into(), images: vec![] });
+        assert_eq!(plain["content"], "hi");
+        let with = wire_message(&Message { role: Role::User, content: "hi".into(), images: vec!["data:image/jpeg;base64,AA".into()] });
+        assert_eq!(with["content"][0]["text"], "hi");
+        assert_eq!(with["content"][1]["image_url"]["url"], "data:image/jpeg;base64,AA");
     }
 
     #[tokio::test]

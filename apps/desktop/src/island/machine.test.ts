@@ -4,6 +4,7 @@ import { deriveView, geometryFor, MULTITASK_MAX_ROWS, type SessionSummary, type 
 const base: Snapshot = {
   panelOpen: false,
   listening: false,
+  capturing: false,
   chatPending: false,
   sessions: [],
   notices: [],
@@ -44,6 +45,10 @@ describe("deriveView", () => {
   it("does not count finished sessions as active", () => {
     const sessions = [session({ status: "completed" }), session({ id: "s2", status: "failed" })];
     expect(deriveView({ ...base, sessions })).toBe("idle");
+  });
+
+  it("always shows when the screen is being read", () => {
+    expect(deriveView({ ...base, capturing: true, sessions: [session()], notices: [notice] })).toBe("screen");
   });
 
   it("lets the open panel win over everything", () => {

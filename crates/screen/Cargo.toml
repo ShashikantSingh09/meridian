@@ -1,0 +1,23 @@
+[package]
+name = "screen"
+description = "Screen capture, local OCR and on-device error signals for Windows"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+thiserror.workspace = true
+windows = { version = "0.62", features = [
+  "Foundation",
+  "Foundation_Collections",
+  "Graphics_Imaging",
+  "Media_Ocr",
+  "Security_Cryptography",
+  "Storage_Streams",
+  "Win32_Foundation",
+  "Win32_Graphics_Dwm",
+  "Win32_Graphics_Gdi",
+  "Win32_System_Threading",
+  "Win32_UI_WindowsAndMessaging",
+] }

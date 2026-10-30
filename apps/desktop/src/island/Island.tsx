@@ -16,6 +16,7 @@ import {
   ListeningView,
   MultitaskView,
   NotificationView,
+  ScreenView,
   ThinkingView,
   WorkingView,
 } from "./views";
@@ -31,14 +32,15 @@ function useReduced() {
 function useSnapshot(): Snapshot {
   const panelOpen = useApp((s) => s.panelOpen);
   const listening = useApp((s) => s.listening);
+  const capturing = useApp((s) => s.screen.capturing);
   const chatPending = useApp((s) => s.chatPending);
   const sessions = useApp((s) => s.sessions);
   const notices = useApp((s) => s.notices);
   const suggestions = useApp((s) => s.suggestions);
   const errors = useApp((s) => s.errors);
   return useMemo(
-    () => ({ panelOpen, listening, chatPending, sessions, notices, suggestions, errors }),
-    [panelOpen, listening, chatPending, sessions, notices, suggestions, errors],
+    () => ({ panelOpen, listening, capturing, chatPending, sessions, notices, suggestions, errors }),
+    [panelOpen, listening, capturing, chatPending, sessions, notices, suggestions, errors],
   );
 }
 
@@ -56,6 +58,8 @@ function CompactContent({ view, reduced, hovered, sliver }: { view: IslandView; 
       return <NotificationView reduced={reduced} />;
     case "contextual":
       return <ContextualView reduced={reduced} />;
+    case "screen":
+      return <ScreenView reduced={reduced} />;
     case "error":
       return <ErrorView reduced={reduced} />;
     default:

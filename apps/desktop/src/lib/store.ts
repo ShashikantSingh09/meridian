@@ -9,14 +9,16 @@ import type {
   AgentInfo,
   Approval,
   AuthStatus,
+  Capture,
   ChatMessage,
   ModelInfo,
   ProviderInfo,
+  ScreenSuggestion,
   Settings,
 } from "./types";
 import { defaultSettings } from "./types";
 
-export type Tab = "home" | "chat" | "agents" | "providers" | "settings";
+export type Tab = "home" | "chat" | "agents" | "desktop" | "media" | "providers" | "settings";
 
 export interface LogEntry {
   kind: "user" | "text" | "activity" | "system";
@@ -60,8 +62,18 @@ export interface AgentChat {
   sessionId: string | null;
 }
 
+export interface ScreenState {
+  capture: Capture | null;
+  capturing: boolean;
+  question: string;
+  includeImage: boolean;
+  /** Why the last capture did not happen, shown where it was asked for. */
+  refused: string | null;
+}
+
 export interface AppState {
   panelOpen: boolean;
+  screen: ScreenState;
   tab: Tab;
   listening: boolean;
   hovered: boolean;
@@ -88,6 +100,7 @@ const NOTICE_MS = 6000;
 
 let state: AppState = {
   panelOpen: false,
+  screen: { capture: null, capturing: false, question: "", includeImage: true, refused: null },
   tab: "home",
   listening: false,
   hovered: false,
@@ -239,7 +252,7 @@ function patchLastMessage(fn: (text: string) => string) {
   set({ chat: { ...state.chat, messages } });
 }
 
-export async function sendChat(text: string) {
+export async function sendChat(text: string, images: string[] = []) {
   const provider = usableProvider();
   if (!provider) {
     pushError({ title: "No AI provider ready", body: "Add a key or start a local server in Providers." });
@@ -256,7 +269,8 @@ export async function sendChat(text: string) {
   // A reply that failed before its first token leaves an empty turn behind,
   // and providers reject empty messages.
   const earlier = state.chat.messages.filter((m) => m.content);
-  const history: ChatMessage[] = [...earlier, { role: "user", content: text }];
+  const turn: ChatMessage = images.length > 0 ? { role: "user", content: text, images } : { role: "user", content: text };
+  const history: ChatMessage[] = [...earlier, turn];
   const system: ChatMessage[] = state.settings.systemPrompt
     ? [{ role: "system", content: state.settings.systemPrompt }]
     : [];
@@ -330,16 +344,16 @@ export const newAgentConversation = () => set({ agentChat: { ...state.agentChat,
 export const selectAgentConversation = (sessionId: string) =>
   set({ agentChat: { ...state.agentChat, sessionId } });
 
-export async function sendAgentChat(text: string) {
+export async function sendAgentChat(text: string, images: string[] = []) {
   const { agent, mode, cwd, sessionId } = state.agentChat;
   if (!agent) return;
-  if (sessionId) return sendToSession(sessionId, text);
+  if (sessionId) return sendToSession(sessionId, text, images);
   const dir = mode === "project" ? (cwd ?? state.settings.agentDefaultDir) : await bridge.assistantDir();
   if (!dir) {
     pushError({ title: "Choose a project folder", body: "Project mode needs a folder to work in." });
     return;
   }
-  const id = await startSession({ agent, cwd: dir, prompt: text, model: null, restricted: mode === "general" }, "chat", mode);
+  const id = await startSession({ agent, cwd: dir, prompt: text, model: null, restricted: mode === "general", images }, "chat", mode);
   if (id) set({ agentChat: { ...state.agentChat, sessionId: id, cwd: mode === "project" ? dir : state.agentChat.cwd } });
 }
 
@@ -470,13 +484,98 @@ export const cancelSession = (id: string) => void bridge.cancelSession(id);
 export const answerApproval = (sessionId: string, approvalId: string, allow: boolean) =>
   void bridge.answerApproval(sessionId, approvalId, allow);
 
-export async function sendToSession(id: string, text: string) {
+export async function sendToSession(id: string, text: string, images: string[] = []) {
   patchSession(id, (s) => ({ ...s, log: appendLog(s, "user", text) }));
   try {
-    await bridge.sendToSession(id, text);
+    await bridge.sendToSession(id, text, images);
   } catch (err) {
     pushError({ title: "Message not delivered", body: describe(err) });
   }
+}
+
+// ── Screen awareness ────────────────────────────────────────────────────────
+
+const setScreen = (patch: Partial<ScreenState>) => set({ screen: { ...state.screen, ...patch } });
+
+export const setScreenQuestion = (question: string) => setScreen({ question });
+export const setIncludeImage = (includeImage: boolean) => setScreen({ includeImage });
+
+export async function captureScreen(target: "window" | "screen") {
+  setScreen({ capturing: true, refused: null });
+  try {
+    const capture = await bridge.screenCapture(target);
+    setScreen({ capture, capturing: false });
+  } catch (err) {
+    setScreen({ capturing: false, refused: describe(err) });
+  }
+}
+
+export async function cropCapture(x: number, y: number, w: number, h: number) {
+  try {
+    setScreen({ capture: await bridge.screenCrop(x, y, w, h), refused: null });
+  } catch (err) {
+    setScreen({ refused: describe(err) });
+  }
+}
+
+export function discardCapture() {
+  setScreen({ capture: null, question: "", refused: null });
+  void bridge.screenDiscard();
+}
+
+/** What the selected engine can take from a capture. */
+export function shareTarget() {
+  const { agentChat, chat, providers, agents } = state;
+  if (agentChat.agent) {
+    const name = agents.find((a) => a.id === agentChat.agent)?.name ?? agentChat.agent;
+    return { name, vision: agentChat.agent === "claude-code", local: false };
+  }
+  const provider = providers.find((p) => p.id === chat.providerId);
+  return {
+    name: provider?.name ?? "No engine selected",
+    vision: provider?.capabilities.vision ?? false,
+    local: provider?.kind === "local",
+  };
+}
+
+/** The only path by which screen content leaves this machine. */
+export function shareCapture(question: string) {
+  const { capture, includeImage } = state.screen;
+  if (!capture) return;
+  const target = shareTarget();
+  const from = capture.window ? ` (${capture.window.process}: ${capture.window.title})` : "";
+  const text = capture.text
+    ? `${question}\n\nText read from my screen${from}:\n"""\n${capture.text}\n"""`
+    : `${question}${from ? `\n\nFrom my screen${from}.` : ""}`;
+  const images = includeImage && target.vision ? [capture.image] : [];
+  discardCapture();
+  setTab("chat");
+  void (state.agentChat.agent ? sendAgentChat(text, images) : sendChat(text, images));
+}
+
+const suggestionFrom = (s: ScreenSuggestion): Suggestion => ({
+  id: s.key,
+  key: s.key,
+  title: s.title,
+  body: s.seen > 1 ? `${s.evidence} (seen ${s.seen} times)` : s.evidence,
+});
+
+function onScreenSuggestion(s: ScreenSuggestion) {
+  if (state.suggestions.some((x) => x.key === s.key)) return;
+  set({ suggestions: [...state.suggestions, suggestionFrom(s)] });
+}
+
+export function ignoreSuggestion(suggestion: Suggestion) {
+  dismissSuggestion(suggestion.id);
+  if (suggestion.key) void bridge.screenIgnore(suggestion.key);
+}
+
+/** A suggestion never sends anything. It opens the preview, ready to approve. */
+export function assist(suggestion: Suggestion, question: string) {
+  dismissSuggestion(suggestion.id);
+  setScreen({ question });
+  openPanel("desktop");
+  void captureScreen("window");
 }
 
 // ── Preview tour: real components with sample data, flagged as such ─────────
@@ -533,7 +632,7 @@ export const PREVIEWS: Preview[] = [
     }),
   },
   { name: "notification", apply: () => ({ ...clear, notices: [{ id: "pn", tone: "success", title: "Claude Code finished", body: "dock-agent · 14 files changed" }] }) },
-  { name: "contextual", apply: () => ({ ...clear, suggestions: [{ id: "ps", title: "Terminal command failed", body: "cargo build exited with code 101. Want an explanation and a fix?" }] }) },
+  { name: "contextual", apply: () => ({ ...clear, suggestions: [{ id: "ps", title: "Looks like a Terraform configuration issue", body: "Error: Invalid reference on main.tf line 12" }] }) },
   {
     name: "multitask",
     apply: () => ({
@@ -594,6 +693,11 @@ export async function boot() {
       if (state.panelOpen && !bridge.dialogOpen()) closePanel();
     }),
     bridge.onOpenTab((tab) => openPanel(tab as Tab)),
+    bridge.onScreenSuggestion(onScreenSuggestion),
+    bridge.onCaptureRequest(() => {
+      openPanel("desktop");
+      void captureScreen("window");
+    }),
   ]);
 }
 

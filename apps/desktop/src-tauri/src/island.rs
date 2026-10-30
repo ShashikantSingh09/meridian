@@ -18,8 +18,9 @@ use windows::Win32::UI::Shell::{
     SHQueryUserNotificationState, QUNS_BUSY, QUNS_PRESENTATION_MODE, QUNS_RUNNING_D3D_FULL_SCREEN,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetCursorPos, GetForegroundWindow, GetWindowLongPtrW, SetForegroundWindow, SetWindowLongPtrW, GWL_EXSTYLE,
-    WS_EX_LAYERED, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT,
+    GetCursorPos, GetForegroundWindow, GetWindowLongPtrW, SetForegroundWindow, SetWindowDisplayAffinity,
+    SetWindowLongPtrW, ShowWindow, GWL_EXSTYLE, SW_SHOWNOACTIVATE, WDA_EXCLUDEFROMCAPTURE, WDA_NONE, WS_EX_LAYERED,
+    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT,
 };
 
 pub const LABEL: &str = "island";
@@ -80,6 +81,22 @@ pub struct Gate {
 
 pub fn hwnd(win: &WebviewWindow) -> Option<HWND> {
     win.hwnd().ok().map(|h| HWND(h.0))
+}
+
+/// Keeps the island out of the app's own captures. Held only around a capture,
+/// so the user's screenshot tools still see it.
+pub fn exclude_from_capture(win: &WebviewWindow, on: bool) {
+    let Some(hwnd) = hwnd(win) else { return };
+    let affinity = if on { WDA_EXCLUDEFROMCAPTURE } else { WDA_NONE };
+    let _ = unsafe { SetWindowDisplayAffinity(hwnd, affinity) };
+}
+
+/// The window the user was working in: under the panel if it is open.
+pub fn working_window(gate: &Gate) -> Option<screen::WindowInfo> {
+    if gate.interactive.load(Ordering::Relaxed) {
+        return screen::window_at(gate.previous.load(Ordering::Relaxed));
+    }
+    screen::foreground()
 }
 
 /// The one writer of the window's extended style. Tauri's own setters rebuild
@@ -192,8 +209,16 @@ fn display_signature(app: &AppHandle) -> String {
 fn sync_visibility(win: &WebviewWindow, gate: &Gate) {
     let want = gate.fullscreen.load(Ordering::Relaxed) || gate.user_hidden.load(Ordering::Relaxed);
     if gate.hidden.swap(want, Ordering::Relaxed) != want {
-        let _ = if want { win.hide() } else { win.show() };
+        let _ = if want { win.hide() } else { Ok(show_quietly(win)) };
         apply_style(win, gate);
+    }
+}
+
+/// Shows the window without taking focus from whatever the user is doing.
+/// Tauri's `show()` activates the window and rebuilds its style.
+pub fn show_quietly(win: &WebviewWindow) {
+    if let Some(hwnd) = hwnd(win) {
+        let _ = unsafe { ShowWindow(hwnd, SW_SHOWNOACTIVATE) };
     }
 }
 

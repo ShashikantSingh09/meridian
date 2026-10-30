@@ -133,6 +133,80 @@ textarea {
   font-size: var(--text-xs);
 }
 
+.watch-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--state-context);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--state-context) 22%, transparent);
+}
+
+.sliver-dot {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  translate: -50% 0;
+  width: 4px;
+  height: 4px;
+  box-shadow: none;
+}
+
+.preview {
+  position: relative;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--well);
+  cursor: crosshair;
+  touch-action: none;
+  line-height: 0;
+}
+
+.preview img {
+  width: 100%;
+  max-height: 230px;
+  object-fit: contain;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.selection {
+  position: absolute;
+  border: 1px solid var(--focus-ring);
+  background: color-mix(in srgb, var(--focus-ring) 16%, transparent);
+  pointer-events: none;
+}
+
+.ocr {
+  max-height: 96px;
+  overflow-y: auto;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--well);
+  font: 400 var(--text-xs) / 1.5 var(--font-mono);
+  color: var(--ink-2);
+  white-space: pre-wrap;
+  user-select: text;
+}
+
+.signal {
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--state-context) 12%, transparent);
+}
+
+.message-image {
+  display: block;
+  max-width: 100%;
+  max-height: 180px;
+  margin-bottom: var(--space-2);
+  border-radius: var(--radius-sm);
+}
+
+.usage-line {
+  padding: 0 var(--space-4) var(--space-1);
+  text-align: right;
+}
+
 .peek {
   flex: 1;
   min-height: 0;

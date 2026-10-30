@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 use tokio_util::sync::CancellationToken;
 
 use crate::sse::read_events;
-use crate::{ChatEvent, ChatRequest, Endpoint, ErrorKind, ModelInfo, Provider, ProviderError, Role, Sink};
+use crate::{split_data_url, ChatEvent, ChatRequest, Endpoint, ErrorKind, Message, ModelInfo, Provider, ProviderError, Role, Sink};
 
 // This version rejects temperature, top_p and top_k. None are ever sent.
 const API_VERSION: &str = "2026-10-21";
@@ -36,6 +36,20 @@ impl Anthropic {
     }
 }
 
+fn wire_message(message: &Message) -> Value {
+    if message.images.is_empty() {
+        return json!({ "role": message.role, "content": message.content });
+    }
+    let mut content: Vec<Value> = message
+        .images
+        .iter()
+        .filter_map(|url| split_data_url(url))
+        .map(|(media, data)| json!({ "type": "image", "source": { "type": "base64", "media_type": media, "data": data } }))
+        .collect();
+    content.push(json!({ "type": "text", "text": message.content }));
+    json!({ "role": message.role, "content": content })
+}
+
 fn body(request: &ChatRequest) -> Value {
     let system: Vec<&str> = request
         .messages
@@ -43,7 +57,7 @@ fn body(request: &ChatRequest) -> Value {
         .filter(|m| m.role == Role::System)
         .map(|m| m.content.as_str())
         .collect();
-    let messages: Vec<_> = request.messages.iter().filter(|m| m.role != Role::System).collect();
+    let messages: Vec<Value> = request.messages.iter().filter(|m| m.role != Role::System).map(wire_message).collect();
     let mut body = json!({
         "model": request.model,
         "max_tokens": MAX_TOKENS,
@@ -149,10 +163,10 @@ impl Provider for Anthropic {
 mod tests {
     use super::*;
     use crate::test_server::{serve, Canned};
-    use crate::{run_chat, Message, Protocol};
+    use crate::{run_chat, Protocol};
 
     fn message(role: Role, content: &str) -> Message {
-        Message { role, content: content.into() }
+        Message { role, content: content.into(), images: vec![] }
     }
 
     fn request() -> ChatRequest {
@@ -179,6 +193,18 @@ mod tests {
         for removed in ["temperature", "top_p", "top_k"] {
             assert!(body.get(removed).is_none());
         }
+    }
+
+    #[test]
+    fn images_go_first_as_base64_blocks() {
+        let wire = wire_message(&Message {
+            role: Role::User,
+            content: "what is this".into(),
+            images: vec!["data:image/jpeg;base64,AAAA".into()],
+        });
+        assert_eq!(wire["content"][0]["source"]["media_type"], "image/jpeg");
+        assert_eq!(wire["content"][0]["source"]["data"], "AAAA");
+        assert_eq!(wire["content"][1]["text"], "what is this");
     }
 
     #[tokio::test]

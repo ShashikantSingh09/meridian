@@ -29,6 +29,12 @@ pub struct Settings {
     /// Multiplies every spring. 1 is the designed speed.
     pub animation_speed: f64,
     pub agent_default_dir: Option<String>,
+    /// "off", "ondemand" or "contextual".
+    pub screen_mode: String,
+    pub screen_interval_secs: u64,
+    pub screen_exclusions: Vec<String>,
+    /// Stops all contextual monitoring at once, whatever else is set.
+    pub monitoring_paused: bool,
 }
 
 impl Default for Settings {
@@ -49,6 +55,10 @@ impl Default for Settings {
             show_clock: false,
             animation_speed: 1.0,
             agent_default_dir: None,
+            screen_mode: "ondemand".into(),
+            screen_interval_secs: 20,
+            screen_exclusions: Vec::new(),
+            monitoring_paused: false,
         }
     }
 }

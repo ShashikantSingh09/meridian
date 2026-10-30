@@ -45,6 +45,16 @@ pub enum Role {
 pub struct Message {
     pub role: Role,
     pub content: String,
+    /// Data URLs. Sent only to providers declaring vision.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub images: Vec<String>,
+}
+
+/// Splits `data:image/jpeg;base64,AAAA` into its media type and payload.
+pub(crate) fn split_data_url(url: &str) -> Option<(&str, &str)> {
+    let rest = url.strip_prefix("data:")?;
+    let (media, data) = rest.split_once(";base64,")?;
+    Some((media, data))
 }
 
 #[derive(Debug, Clone)]

@@ -12,6 +12,7 @@ export type IslandView =
   | "expanded"
   | "contextual"
   | "multitask"
+  | "screen"
   | "error";
 
 export interface SessionSummary {
@@ -36,6 +37,8 @@ export interface Suggestion {
   id: string;
   title: string;
   body: string;
+  /** Set for a suggestion that came from the screen, to silence it on Ignore. */
+  key?: string;
 }
 
 export interface IslandError {
@@ -48,6 +51,7 @@ export interface IslandError {
 export interface Snapshot {
   panelOpen: boolean;
   listening: boolean;
+  capturing: boolean;
   chatPending: boolean;
   sessions: SessionSummary[];
   notices: Notice[];
@@ -71,6 +75,7 @@ export const waitingApproval = <T extends SessionSummary>(sessions: T[]) =>
 export function deriveView(s: Snapshot): IslandView {
   if (s.panelOpen) return "expanded";
   if (s.listening) return "listening";
+  if (s.capturing) return "screen";
   if (waitingApproval(s.sessions)) return "working";
   if (s.errors.length > 0) return "error";
   if (s.notices.length > 0) return "notification";
@@ -99,6 +104,7 @@ const SIZES: Record<IslandView, Geometry> = {
   expanded: EXPANDED,
   contextual: { w: 408, h: 104, r: 24 },
   multitask: { w: 392, h: 0, r: 24 },
+  screen: { w: 244, h: 42, r: 21 },
   error: { w: 392, h: 76, r: 24 },
 };
 
@@ -148,6 +154,7 @@ export function stateToken(view: IslandView, s: Snapshot): string {
     case "notification":
       return s.notices[0]?.tone === "success" ? "--state-success" : "--state-notice";
     case "contextual":
+    case "screen":
       return "--state-context";
     case "error":
       return "--state-error";

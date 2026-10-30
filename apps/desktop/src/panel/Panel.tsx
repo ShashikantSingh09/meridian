@@ -3,6 +3,7 @@ import { Icon, type IconName } from "../lib/icons";
 import { closePanel, setTab, useApp, type Tab } from "../lib/store";
 import { Agents } from "./Agents";
 import { Chat } from "./Chat";
+import { Desktop } from "./Desktop";
 import { Home } from "./Home";
 import { Providers } from "./Providers";
 import { SettingsPage } from "./Settings";
@@ -11,6 +12,7 @@ const NAV: { tab: Tab; icon: IconName; label: string }[] = [
   { tab: "home", icon: "home", label: "Command center" },
   { tab: "chat", icon: "chat", label: "Chat" },
   { tab: "agents", icon: "agents", label: "Agents" },
+  { tab: "desktop", icon: "eye", label: "Desktop awareness" },
   { tab: "providers", icon: "providers", label: "Providers" },
   { tab: "settings", icon: "settings", label: "Settings" },
 ];
@@ -19,6 +21,8 @@ const PAGES: Record<Tab, () => React.JSX.Element> = {
   home: Home,
   chat: Chat,
   agents: Agents,
+  desktop: Desktop,
+  media: Home,
   providers: Providers,
   settings: SettingsPage,
 };

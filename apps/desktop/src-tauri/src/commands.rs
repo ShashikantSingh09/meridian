@@ -8,6 +8,8 @@ use agent_adapters::{AgentInfo, AgentKind, AuthStatus, Sessions, StartRequest};
 use ai_core::{ChatEvent, ChatRequest, Capabilities, Endpoint, Kind, LocalServer, Message, ModelInfo, ProviderDef};
 use serde::Serialize;
 use tauri::ipc::Channel;
+use base64::Engine;
+use screen::{Frame, Signal, WindowInfo};
 use tauri::{AppHandle, Manager, State};
 use tokio_util::sync::CancellationToken;
 
@@ -20,6 +22,8 @@ pub struct Core {
     pub gate: Arc<Gate>,
     pub sessions: Sessions,
     pub chats: Mutex<HashMap<String, CancellationToken>>,
+    /// The last capture, held in memory only until it is sent or discarded.
+    pub frame: Mutex<Option<Frame>>,
 }
 
 fn stringify(err: impl std::fmt::Display) -> String {
@@ -214,8 +218,8 @@ pub async fn session_start(core: State<'_, Core>, request: StartRequest) -> Resu
 }
 
 #[tauri::command]
-pub async fn session_send(core: State<'_, Core>, id: String, text: String) -> Result<(), String> {
-    core.sessions.send(&id, text).map_err(stringify)
+pub async fn session_send(core: State<'_, Core>, id: String, text: String, images: Vec<String>) -> Result<(), String> {
+    core.sessions.send(&id, text, images).map_err(stringify)
 }
 
 #[tauri::command]
@@ -231,6 +235,78 @@ pub async fn session_answer(
     allow: bool,
 ) -> Result<(), String> {
     core.sessions.answer(&session_id, &approval_id, allow).map_err(stringify)
+}
+
+// ── Screen ──────────────────────────────────────────────────────────────────
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Capture {
+    image: String,
+    text: String,
+    window: Option<WindowInfo>,
+    signals: Vec<Signal>,
+    width: u32,
+    height: u32,
+}
+
+/// Everything shown in the preview. Nothing leaves this function except to the
+/// webview: sharing is a separate step the user takes after seeing it.
+fn prepared(frame: Frame, window: Option<WindowInfo>) -> Result<Capture, String> {
+    let jpeg = screen::to_jpeg(&frame).map_err(stringify)?;
+    let image = format!("data:image/jpeg;base64,{}", base64::engine::general_purpose::STANDARD.encode(jpeg));
+    let text = screen::ocr(&frame).unwrap_or_default();
+    let signals = screen::detect(&text);
+    Ok(Capture { image, text, window, signals, width: frame.width, height: frame.height })
+}
+
+/// Pixels of the given window or its display, with the island kept out of them.
+pub fn take_capture(app: &AppHandle, core: &Core, target: &str) -> Result<(Frame, WindowInfo), String> {
+    let settings = core.settings.lock().unwrap().clone();
+    if settings.screen_mode == "off" {
+        return Err("Screen understanding is turned off in Desktop Awareness.".into());
+    }
+    let window = island::working_window(&core.gate).ok_or("There is no active window to capture.")?;
+    if window.process.eq_ignore_ascii_case("meridian.exe") {
+        return Err("Click the window you want to capture first.".into());
+    }
+    if let Some(rule) = screen::exclusion_reason(&window, &settings.screen_exclusions) {
+        return Err(format!("This window is excluded from capture ({rule})."));
+    }
+    let win = app.get_webview_window(island::LABEL).ok_or("Island window missing")?;
+    island::exclude_from_capture(&win, true);
+    // The exclusion takes effect at the next composition.
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    let frame = match target {
+        "screen" => screen::capture_screen_of(window.hwnd),
+        _ => screen::capture_window(window.hwnd),
+    };
+    island::exclude_from_capture(&win, false);
+    Ok((frame.map_err(stringify)?, window))
+}
+
+#[tauri::command]
+pub async fn screen_capture(app: AppHandle, core: State<'_, Core>, target: String) -> Result<Capture, String> {
+    let (frame, window) = take_capture(&app, &core, &target)?;
+    let keep = Frame { width: frame.width, height: frame.height, bgra: frame.bgra.clone() };
+    *core.frame.lock().unwrap() = Some(keep);
+    tauri::async_runtime::spawn_blocking(move || prepared(frame, Some(window))).await.map_err(stringify)?
+}
+
+/// Narrows the capture to a selected area, re-reading only that part.
+#[tauri::command]
+pub async fn screen_crop(core: State<'_, Core>, x: f64, y: f64, w: f64, h: f64) -> Result<Capture, String> {
+    let part = {
+        let frame = core.frame.lock().unwrap();
+        let frame = frame.as_ref().ok_or("The capture has already been discarded.")?;
+        screen::crop(frame, x, y, w, h).ok_or("That selection is too small.")?
+    };
+    tauri::async_runtime::spawn_blocking(move || prepared(part, None)).await.map_err(stringify)?
+}
+
+#[tauri::command]
+pub fn screen_discard(core: State<'_, Core>) {
+    *core.frame.lock().unwrap() = None;
 }
 
 #[tauri::command]

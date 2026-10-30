@@ -47,8 +47,14 @@ pub fn args(launch: &Launch, hook_url: &str) -> Vec<String> {
     args
 }
 
-pub fn user_message(text: &str) -> String {
-    json!({ "type": "user", "message": { "role": "user", "content": [{ "type": "text", "text": text }] } }).to_string()
+pub fn user_message(text: &str, images: &[String]) -> String {
+    let mut content: Vec<Value> = images
+        .iter()
+        .filter_map(|url| url.strip_prefix("data:")?.split_once(";base64,"))
+        .map(|(media, data)| json!({ "type": "image", "source": { "type": "base64", "media_type": media, "data": data } }))
+        .collect();
+    content.push(json!({ "type": "text", "text": text }));
+    json!({ "type": "user", "message": { "role": "user", "content": content } }).to_string()
 }
 
 /// Stops the running turn and leaves the session able to continue.
@@ -171,7 +177,7 @@ async fn drive_with(
         Ok(agent) => agent,
         Err(err) => return emit(AgentEvent::failed(format!("Could not start Claude Code: {err}"))),
     };
-    if let Err(err) = agent.write_line(&user_message(&launch.prompt)).await {
+    if let Err(err) = agent.write_line(&user_message(&launch.prompt, &launch.images)).await {
         agent.kill_tree().await;
         return emit(AgentEvent::failed(format!("Could not reach Claude Code: {err}")));
     }
@@ -219,9 +225,9 @@ async fn drive_with(
                 }
             },
             command = commands.recv() => match command {
-                Some(Command::Send(text)) => {
+                Some(Command::Send { text, images }) => {
                     idle_until = None;
-                    if agent.write_line(&user_message(&text)).await.is_err() {
+                    if agent.write_line(&user_message(&text, &images)).await.is_err() {
                         emit(AgentEvent::failed("Claude Code is no longer accepting input."));
                         return agent.kill_tree().await;
                     }
@@ -311,11 +317,20 @@ mod tests {
 
     #[test]
     fn general_mode_removes_the_shell_and_connectors() {
-        let launch = Launch { exe: "claude".into(), cwd: ".".into(), prompt: "p".into(), model: None, resume: None, restricted: true };
+        let launch = Launch { exe: "claude".into(), cwd: ".".into(), prompt: "p".into(), model: None, resume: None, restricted: true, images: vec![] };
         let args = args(&launch, "http://127.0.0.1:1/perm/t");
         assert!(args.windows(2).any(|w| w == ["--tools", GENERAL_TOOLS]));
         assert!(args.iter().any(|a| a == "--strict-mcp-config"));
         assert!(!GENERAL_TOOLS.contains("Bash") && !GENERAL_TOOLS.contains("Edit") && !GENERAL_TOOLS.contains("Write"));
+    }
+
+    #[test]
+    fn an_approved_image_travels_before_the_question() {
+        let line = user_message("what is this", &["data:image/jpeg;base64,AAAA".to_string()]);
+        let value: Value = serde_json::from_str(&line).unwrap();
+        let content = &value["message"]["content"];
+        assert_eq!(content[0]["source"]["media_type"], "image/jpeg");
+        assert_eq!(content[1]["text"], "what is this");
     }
 
     #[test]
@@ -342,6 +357,7 @@ mod tests {
             model: Some("m".into()),
             resume: Some("abc".into()),
             restricted: false,
+            images: vec![],
         };
         let args = args(&launch, "http://127.0.0.1:1/perm/t");
         assert!(!args.iter().any(|a| a.contains("SECRET")));
@@ -358,6 +374,7 @@ mod tests {
             model: None,
             resume: None,
             restricted: false,
+            images: vec![],
         };
         (launch, vec!["-e".to_string(), script.to_string()])
     }
@@ -423,7 +440,7 @@ mod tests {
         let (tx, rx) = mpsc::unbounded_channel();
         let run = tokio::spawn(drive_with(launch, args, emit, rx, Duration::from_millis(600)));
         tokio::time::sleep(Duration::from_millis(400)).await;
-        tx.send(Command::Send("again".into())).unwrap();
+        tx.send(Command::Send { text: "again".into(), images: vec![] }).unwrap();
         tokio::time::timeout(Duration::from_secs(10), run).await.unwrap().unwrap();
         let events = events.lock().unwrap();
         let completed = events.iter().filter(|e| **e == AgentEvent::status(SessionStatus::Completed)).count();

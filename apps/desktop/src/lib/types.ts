@@ -29,6 +29,31 @@ export interface ModelInfo {
 export interface ChatMessage {
   role: "user" | "assistant" | "system";
   content: string;
+  /** Data URLs the user approved for sharing. */
+  images?: string[];
+}
+
+export interface ScreenSignal {
+  kind: string;
+  title: string;
+  evidence: string;
+}
+
+export interface Capture {
+  image: string;
+  text: string;
+  window: { title: string; process: string } | null;
+  signals: ScreenSignal[];
+  width: number;
+  height: number;
+}
+
+export interface ScreenSuggestion {
+  key: string;
+  title: string;
+  evidence: string;
+  app: string;
+  seen: number;
 }
 
 export type ChatEvent =
@@ -112,6 +137,10 @@ export interface Settings {
   showClock: boolean;
   animationSpeed: number;
   agentDefaultDir: string | null;
+  screenMode: "off" | "ondemand" | "contextual";
+  screenIntervalSecs: number;
+  screenExclusions: string[];
+  monitoringPaused: boolean;
 }
 
 /** What a CLI reports about its own sign-in. */
@@ -137,4 +166,8 @@ export const defaultSettings: Settings = {
   showClock: false,
   animationSpeed: 1,
   agentDefaultDir: null,
+  screenMode: "ondemand",
+  screenIntervalSecs: 20,
+  screenExclusions: [],
+  monitoringPaused: false,
 };

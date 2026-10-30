@@ -239,7 +239,8 @@ pub async fn run(launch: Launch, emit: Emit, mut commands: mpsc::UnboundedReceiv
                 }
             }
             command = commands.recv() => match command {
-                Some(Command::Send(text)) => {
+                // Images are not sent to Codex yet: the interface says so before sharing.
+                Some(Command::Send { text, .. }) => {
                     if let (Some(thread), Some(turn)) = (&thread_id, &turn_id) {
                         let params = json!({ "threadId": thread, "expectedTurnId": turn, "input": turn_input(&text) });
                         let _ = rpc.call("turn/steer", params, Pending::Other).await;

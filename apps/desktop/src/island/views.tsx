@@ -5,12 +5,12 @@ import { useEffect, useMemo, useState } from "react";
 import { Icon } from "../lib/icons";
 import {
   answerApproval,
+  assist,
   cancelSession,
   dismissError,
   dismissNotice,
-  dismissSuggestion,
+  ignoreSuggestion,
   openPanel,
-  sendChat,
   setListening,
   useApp,
 } from "../lib/store";
@@ -64,10 +64,12 @@ function Clock() {
 export function IdleView({ reduced, hovered, sliver }: { reduced: boolean; hovered: boolean; sliver: boolean }) {
   const model = useApp((s) => s.chat.model ?? s.settings.defaultModel);
   const clock = useApp((s) => s.settings.showClock);
-  if (sliver && !hovered) return null;
+  const watching = useApp((s) => s.settings.screenMode === "contextual" && !s.settings.monitoringPaused);
+  if (sliver && !hovered) return watching ? <span className="watch-dot sliver-dot" title="Screen awareness is on" /> : null;
   if (!hovered) {
     return (
-      <div className="pill-center ambient" data-clock={clock}>
+      <div className="pill-center ambient" data-clock={clock || watching}>
+        {watching && <span className="watch-dot" title="Screen awareness is on" />}
         <Line mode="rest" color="--state-idle" width={clock ? 64 : 72} height={12} reduced={reduced} />
         {clock && <Clock />}
       </div>
@@ -218,9 +220,22 @@ export function ContextualView({ reduced }: { reduced: boolean }) {
       </div>
       <p className="body">{suggestion.body}</p>
       <div className="row end">
-        <button className="ghost" onClick={() => dismissSuggestion(suggestion.id)}>Dismiss</button>
-        <button className="ghost" onClick={() => { dismissSuggestion(suggestion.id); openPanel("chat"); }}>Investigate</button>
-        <button className="solid" onClick={() => { dismissSuggestion(suggestion.id); openPanel("chat"); void sendChat(suggestion.body); }}>Accept</button>
+        <button className="ghost" onClick={() => ignoreSuggestion(suggestion)}>Ignore</button>
+        <button className="ghost" onClick={() => assist(suggestion, "Explain this issue in plain terms.")}>Explain</button>
+        <button className="ghost" onClick={() => assist(suggestion, "Suggest a fix for this.")}>Suggest fix</button>
+        <button className="solid" onClick={() => assist(suggestion, "Analyze this error and tell me the likely cause.")}>Analyze</button>
+      </div>
+    </div>
+  );
+}
+
+export function ScreenView({ reduced }: { reduced: boolean }) {
+  return (
+    <div className="row pad-pill">
+      <Line mode="think" color="--state-context" width={56} height={18} reduced={reduced} />
+      <div className="grow stacked">
+        <span className="label">Reading your screen</span>
+        <span className="meta tiny">Stays on this PC until you share it</span>
       </div>
     </div>
   );

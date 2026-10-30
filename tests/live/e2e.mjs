@@ -179,6 +179,40 @@ if (mode === "engine") {
   await ev(`__meridian.selectEngine('anthropic'); 'ok'`);
 }
 
+if (mode === "screen") {
+  // Captures whatever is in front, so nothing read here is ever printed. The real
+  // OCR check is crates/screen/tests/live_capture.rs, against a window of its own.
+  await ev(`__meridian.updateSettings({ screenMode: 'ondemand' }); 'ok'`);
+  await ev(`__meridian.showPreview('notification'); 'ok'`);
+  await sleep(700);
+  const paint = await ev(`(() => { const s = document.createElement('style'); s.id = 'magenta'; s.textContent = '.island { background: #ff00ff !important; }'; document.head.append(s); const r = document.querySelector('.island').getBoundingClientRect(); return JSON.stringify({ x: r.x + r.width / 2, y: r.y + r.height / 2 }); })()`);
+  await sleep(300);
+  await ev(`__meridian.captureScreen('screen')`);
+  await until(`!__meridian.getState().screen.capturing`, 8000, "capture");
+  const refused = await ev(`__meridian.getState().screen.refused`);
+  if (refused) {
+    console.log("SKIP island exclusion, window in front was refused:", refused);
+  } else {
+    const at = JSON.parse(paint);
+    const sampled = await ev(`(async () => {
+      const shot = __meridian.getState().screen.capture;
+      const img = new Image(); img.src = shot.image; await img.decode();
+      const c = document.createElement('canvas'); c.width = img.width; c.height = img.height;
+      const g = c.getContext('2d'); g.drawImage(img, 0, 0);
+      const scale = img.width / screen.width;
+      const left = (screen.width - innerWidth) / 2;
+      const d = g.getImageData(Math.round((left + ${at.x}) * scale), Math.round(${at.y} * scale), 1, 1).data;
+      return JSON.stringify(Array.from(d.slice(0, 3)));
+    })()`);
+    const [r, g, b] = JSON.parse(sampled);
+    pass("the island stays out of its own capture", !(r > 200 && g < 90 && b > 200), sampled);
+  }
+  await ev(`document.getElementById('magenta').remove(); __meridian.discardCapture(); __meridian.showPreview(null); 'ok'`);
+  pass("a capture is gone once discarded", !(await ev(`__meridian.getState().screen.capture !== null`)));
+  const frameGone = await ev(`window.__TAURI_INTERNALS__.invoke('screen_crop', { x: 0, y: 0, w: 1, h: 1 }).then(() => false, (e) => /discarded/.test(String(e)))`);
+  pass("the core drops its copy too", frameGone === true);
+}
+
 if (mode === "codex") {
   const work = path.join(scratch, "session-codex");
   fs.mkdirSync(work, { recursive: true });
