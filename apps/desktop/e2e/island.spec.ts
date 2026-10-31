@@ -4,6 +4,11 @@ const island = (page: Page) => page.locator(".island");
 const preview = (page: Page, name: string | null) =>
   page.evaluate((n) => (window as never as { __meridian: { showPreview(n: string | null): void } }).__meridian.showPreview(n), name);
 
+const useEngine = async (page: Page, name: string) => {
+  await page.getByRole("button", { name: "AI engine" }).click();
+  await page.getByRole("menuitemradio", { name }).click();
+};
+
 const openModels = async (page: Page) => {
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await page.getByRole("button", { name: "AI models", exact: true }).click();
@@ -33,11 +38,14 @@ test.beforeEach(async ({ page }) => {
 test("every compact state renders its own content and stays on screen", async ({ page }) => {
   const expected: [string, string, string | null][] = [
     ["thinking", "thinking", "Thinking"],
-    ["working", "working", "Claude Code"],
+    ["working", "working", "Editing"],
+    ["to-do list", "working", "Step 3 of 5"],
     ["approval", "working", "Allow"],
     ["notification", "notification", "Claude Code finished"],
+    ["finished", "notification", "dock-agent is done"],
+    ["stopped", "error", "dock-agent stopped"],
     ["contextual", "contextual", "Suggest fix"],
-    ["multitask", "multitask", "Codex"],
+    ["multitask", "multitask", "billing-api"],
     ["error", "error", "Anthropic unreachable"],
   ];
   for (const [name, view, text] of expected) {
@@ -286,7 +294,12 @@ test("playing media takes over an idle island and answers its controls", async (
   await page.getByRole("button", { name: /Open the player/ }).click();
   await expect(island(page).getByRole("button", { name: "Pause" })).toBeVisible();
   await settled(page);
-  expect((await island(page).boundingBox())!.height).toBeCloseTo(160, 0);
+  expect((await island(page).boundingBox())!.height).toBeCloseTo(172, 0);
+  const room = await page.evaluate(() => {
+    const box = (selector: string) => document.querySelector(selector)!.getBoundingClientRect();
+    return { above: box(".transport").top - box(".progress-row").bottom, below: box(".media-open").bottom - box(".transport").bottom };
+  });
+  expect(Math.abs(room.above - room.below), "the controls sit in the middle of the room under the progress bar").toBeLessThan(3);
 
   await page.getByRole("button", { name: "Pause" }).click();
   await expect(island(page)).toHaveAttribute("data-view", "idle");
@@ -354,7 +367,154 @@ test("reduced motion lands on the target size immediately", async ({ page }) => 
   await preview(page, "working");
   await expect(island(page)).toHaveAttribute("data-view", "working");
   await page.waitForTimeout(32);
-  expect((await island(page).boundingBox())!.width).toBeCloseTo(372, 0);
+  expect((await island(page).boundingBox())!.width).toBeCloseTo(324, 0);
+});
+
+test.describe("what an agent is doing", () => {
+  type Mock = { publishWatched(id: string): void; publishEvent(id: string, event: object): void; publishFailure(id: string, why: string): void; publishWatchedApproval(id: string): void };
+  const send = (page: Page, event: object, id = "watch:a") =>
+    page.evaluate(([i, e]) => (window as never as { __mock: Mock }).__mock.publishEvent(i as string, e as object), [id, event]);
+  const watch = (page: Page, id = "watch:a") => page.evaluate((i) => (window as never as { __mock: Mock }).__mock.publishWatched(i), id);
+  const hover = (page: Page, on: boolean) =>
+    page.evaluate((v) => (window as never as { __meridian: { setHovered(v: boolean): void } }).__meridian.setHovered(v), on);
+  const fits = async (page: Page, selector: string) => {
+    await settled(page);
+    const [shape, inner] = await Promise.all([page.locator(".island-shape").boundingBox(), page.locator(selector).last().boundingBox()]);
+    expect(inner!.y + inner!.height).toBeLessThanOrEqual(shape!.y + shape!.height);
+  };
+
+  test("the pill says the stage, the file and how many real steps", async ({ page }) => {
+    await watch(page);
+    await send(page, { type: "activity", label: "Reading src/cart.ts" });
+    await send(page, { type: "activity", label: "Retrying the API, attempt 2" });
+    await send(page, { type: "activity", label: "$ npm test" });
+    await expect(island(page)).toContainText("Running npm test");
+    await expect(island(page)).toContainText("Step 3");
+    await expect(island(page)).not.toContainText("%");
+  });
+
+  test("the stage card opens on the pointer, says what happened, and closes behind it", async ({ page }) => {
+    await preview(page, "working");
+    await hover(page, true);
+    await expect(page.locator(".stage-bar")).toHaveCount(4);
+    await expect(page.locator('.stage-bar[data-state="done"]')).toContainText("4 files");
+    await expect(page.locator('.stage-bar[data-state="now"]')).toContainText("2 files");
+    await expect(page.locator(".stage-card")).toContainText("Fix the island flicker");
+    await expect(page.locator(".stage-steps .step-row").last()).toContainText("views.tsx, 2 lines");
+    await fits(page, ".stage-steps .step-row");
+    await hover(page, false);
+    await expect(page.locator(".stage-card")).toHaveCount(0);
+  });
+
+  test("a click opens the stage card too", async ({ page }) => {
+    await preview(page, "working");
+    await island(page).getByRole("button", { name: /Editing/ }).click();
+    await expect(page.locator(".stage-card")).toBeVisible();
+    await expect(island(page)).toHaveAttribute("data-view", "working");
+  });
+
+  test("the agent's own list replaces the stages, and only while there is one", async ({ page }) => {
+    await watch(page);
+    await hover(page, true);
+    await expect(page.locator(".stage-bars")).toBeVisible();
+    await send(page, { type: "todos", items: [
+      { id: "0", text: "Fix the resize", status: "completed" },
+      { id: "1", text: "Add a test", status: "in_progress" },
+      { id: "2", text: "Run the tests", status: "pending" },
+    ] });
+    await expect(page.locator(".stage-count")).toHaveText("Step 2 of 3");
+    await expect(page.locator(".todo-line")).toHaveCount(3);
+    await expect(page.locator(".stage-bars")).toHaveCount(0);
+    await fits(page, ".todo-line");
+    await hover(page, false);
+    await expect(island(page)).toContainText("Step 2 of 3");
+    await send(page, { type: "todos", items: [] });
+    await hover(page, true);
+    await expect(page.locator(".stage-bars")).toBeVisible();
+  });
+
+  test("a long list stays on the island", async ({ page }) => {
+    await watch(page);
+    const items = Array.from({ length: 12 }, (_, i) => ({ id: String(i), text: `Step number ${i}`, status: i < 7 ? "completed" : i === 7 ? "in_progress" : "pending" }));
+    await send(page, { type: "todos", items });
+    await hover(page, true);
+    await expect(page.locator(".todo-line")).toHaveCount(6);
+    await expect(page.locator(".stage-count")).toHaveText("Step 8 of 12");
+    await expect(page.locator(".todo-list")).toContainText("Step number 7");
+    await fits(page, ".todo-line");
+  });
+
+  test("a finished session shows its real last words and what came of it", async ({ page }) => {
+    await watch(page);
+    await send(page, { type: "activity", label: "Editing src/cart.ts" });
+    await send(page, { type: "diff", path: "cart.ts", removed: ["a"], added: ["b"], linesRemoved: 1, linesAdded: 1 });
+    await send(page, { type: "output", command: "npm test", lines: ["Tests  12 passed (12)"], failed: false });
+    await send(page, { type: "text", text: "The cart now keeps its total." });
+    await send(page, { type: "status", status: "completed" });
+    await expect(island(page)).toHaveAttribute("data-view", "notification");
+    await expect(island(page)).toContainText("shop is done");
+    await expect(island(page)).toContainText("The cart now keeps its total.");
+    await expect(island(page)).toContainText("1 file changed, tests passed");
+    await fits(page, ".stage-actions");
+    await island(page).getByRole("button", { name: "See what changed" }).click();
+    await expect(island(page)).toHaveAttribute("data-view", "expanded");
+    await expect(page.getByRole("button", { name: /Changes \+1 -1/ })).toHaveAttribute("aria-pressed", "true");
+    await expect(page.locator(".change-body")).toContainText("b");
+  });
+
+  test("a session with nothing to quote or compare still ends cleanly", async ({ page }) => {
+    await watch(page);
+    await send(page, { type: "status", status: "completed" });
+    await expect(island(page)).toContainText("shop is done");
+    await expect(island(page).getByRole("button", { name: "Open" })).toBeVisible();
+    await expect(island(page).getByRole("button", { name: "See what changed" })).toHaveCount(0);
+    await fits(page, ".stage-actions");
+    await island(page).getByRole("button", { name: "Dismiss" }).click();
+    await expect(island(page)).toHaveAttribute("data-view", "idle");
+  });
+
+  test("a long last message stops short of the buttons", async ({ page }) => {
+    await watch(page);
+    await send(page, { type: "text", text: "It went on and on. ".repeat(60) });
+    await send(page, { type: "status", status: "completed" });
+    await expect(island(page)).toContainText("It went on and on.");
+    await fits(page, ".stage-actions");
+  });
+
+  test("a failed session says why in its own words, and waits", async ({ page }) => {
+    await watch(page);
+    await page.evaluate(() => (window as never as { __mock: Mock }).__mock.publishFailure("watch:a", "2 tests failed in cart.test.ts"));
+    await expect(island(page)).toContainText("shop stopped");
+    await expect(island(page)).toContainText("2 tests failed in cart.test.ts");
+    await fits(page, ".stage-actions");
+    await page.waitForTimeout(6500);
+    await expect(island(page)).toContainText("shop stopped");
+    await island(page).getByRole("button", { name: "Open" }).click();
+    await expect(island(page)).toHaveAttribute("data-view", "expanded");
+    await expect(page.locator(".session-head")).toContainText("shop");
+  });
+
+  test("several at once take a row each, with what needs the user first", async ({ page }) => {
+    await preview(page, "multitask");
+    await settled(page);
+    const rows = page.locator(".stage-row");
+    await expect(rows).toHaveCount(3);
+    await expect(rows.first()).toContainText("dock-agent");
+    await expect(rows.first()).toContainText("Needs you");
+    await expect(rows.nth(1)).toContainText("Running npm test");
+    await expect(rows.nth(2)).toContainText("Editing index.html");
+    await fits(page, ".stage-row");
+  });
+
+  test("a request stays on the island, with the others shown under it", async ({ page }) => {
+    await watch(page, "watch:one");
+    await watch(page, "watch:two");
+    await page.evaluate(() => (window as never as { __mock: Mock }).__mock.publishWatchedApproval("watch:two"));
+    await expect(island(page).getByRole("button", { name: "Allow once" })).toBeVisible();
+    await expect(page.locator(".stage-row")).toHaveCount(1);
+    await expect(page.locator(".stage-row")).toContainText("Editing cart.ts");
+    await fits(page, ".stage-row");
+  });
 });
 
 test.describe("panel", () => {
@@ -371,7 +531,7 @@ test.describe("panel", () => {
 
   test("streams a chat reply and reports usage", async ({ page }) => {
     await page.getByRole("button", { name: "Chat", exact: true }).click();
-    await page.getByRole("radio", { name: "Anthropic" }).click();
+    await useEngine(page, "Anthropic");
     await expect(page.getByRole("button", { name: "Model" })).toContainText("Model A");
     await page.getByLabel("Message").fill("hello");
     await page.getByRole("button", { name: "Send" }).click();
@@ -386,12 +546,97 @@ test.describe("panel", () => {
       mock.publishWatchedQuestion("watch:q");
     });
     await page.getByRole("button", { name: "Agents", exact: true }).click();
-    await page.locator(".session-list").getByRole("button", { name: /Claude Code/ }).click();
+    await page.locator(".session-row").first().click();
     const approval = page.locator(".approval");
     await expect(approval.getByRole("button", { name: "Allow" })).toHaveCount(0);
+    await expect(approval).toContainText("A question, 1 of 2");
+    await expect(approval.getByRole("button", { name: "Next" })).toBeDisabled();
     await approval.getByRole("button", { name: "Amber" }).click();
+    await approval.getByRole("button", { name: "Next" }).click();
+    await expect(approval).toContainText("A question, 2 of 2");
     await approval.getByRole("button", { name: "Ship it" }).click();
+    await approval.getByRole("button", { name: "Done" }).click();
     await expect.poll(() => page.evaluate(() => (window as never as { __mock: { lastAnswers(): unknown } }).__mock.lastAnswers())).toEqual({ "Which one?": "Amber", "And then?": "Ship it" });
+  });
+
+  test.describe("a session's log", () => {
+    type Mock = { publishWatched(id: string): void; publishEvent(id: string, event: object): void; publishWatchedApproval(id: string): void };
+    const send = (page: Page, event: object, id = "watch:a") =>
+      page.evaluate(([i, e]) => (window as never as { __mock: Mock }).__mock.publishEvent(i as string, e as object), [id, event]);
+    const open = async (page: Page) => {
+      await page.evaluate(() => (window as never as { __mock: Mock }).__mock.publishWatched("watch:a"));
+      await page.getByRole("button", { name: "Agents", exact: true }).click();
+      await page.locator(".session-row").first().click();
+    };
+
+    test("reads as steps with coloured verbs, keeping the conversation between them", async ({ page }) => {
+      await open(page);
+      await send(page, { type: "diff", path: "cart.ts", removed: ["a"], added: ["b", "c"], linesRemoved: 1, linesAdded: 2 });
+      await send(page, { type: "activity", label: "$ npm test" });
+      await send(page, { type: "output", command: "npm test", lines: ["Tests  2 passed (2)"], failed: false });
+      await send(page, { type: "text", text: "All done." });
+      await expect(page.locator(".step-row")).toHaveCount(2);
+      await expect(page.locator(".step-row").first()).toContainText("cart.ts, 2 lines");
+      await expect(page.locator('.step-row[data-kind="run"] .step-verb')).toHaveText("Run");
+      await expect(page.locator(".step-output")).toContainText("2 passed");
+      await expect(page.locator(".log")).toContainText("All done.");
+      const colours = await page.locator(".step-verb").evaluateAll((els) => els.map((el) => getComputedStyle(el).color));
+      expect(new Set(colours).size).toBe(2);
+    });
+
+    test("counts what changed from the real totals, and says when lines were cut short", async ({ page }) => {
+      await open(page);
+      await send(page, { type: "diff", path: "cart.ts", removed: ["old"], added: ["new"], linesRemoved: 3, linesAdded: 18 });
+      await send(page, { type: "diff", path: "tax.ts", removed: [], added: [], linesRemoved: 0, linesAdded: 40 });
+      await page.getByRole("button", { name: /Changes \+58 -3/ }).click();
+      await expect(page.locator(".change-file")).toHaveCount(2);
+      await expect(page.locator('.change-line[data-change="removed"]')).toHaveText(/old/);
+      await expect(page.locator('.change-line[data-change="added"]')).toHaveText(/new/);
+      await expect(page.locator(".change-note")).toContainText("21 lines changed in all");
+      await page.getByRole("button", { name: /tax\.ts/ }).click();
+      await expect(page.locator(".change-note")).toContainText("Written in one go, 40 lines");
+      await expect(page.locator(".log")).toHaveCount(0);
+    });
+
+    test("shows a request under the steps, and it can still be answered from Changes", async ({ page }) => {
+      await open(page);
+      await page.evaluate(() => (window as never as { __mock: Mock }).__mock.publishWatchedApproval("watch:a"));
+      const approval = page.locator(".approval");
+      await expect(approval).toContainText("Wants to run a command");
+      await expect(approval).toContainText("npm install stripe");
+      await expect(approval.getByRole("button")).toHaveText(["Deny", "Allow once"]);
+      await page.getByRole("button", { name: /^Changes/ }).click();
+      await expect(approval.getByRole("button", { name: "Allow once" })).toBeVisible();
+    });
+
+    test("sees everything at once, answers from there, and goes back", async ({ page }) => {
+      await open(page);
+      await send(page, { type: "output", command: "npm test", lines: ["FAIL src/cart.test.ts"], failed: true });
+      await page.getByRole("button", { name: "See all at once" }).click();
+      await expect(page.getByRole("heading", { name: "All agents" })).toBeVisible();
+      await expect(page.locator(".agent-tile")).toHaveCount(1);
+      await expect(page.locator(".agent-tile")).toContainText("Edit src/cart.ts".replace("src/", ""));
+      await page.evaluate(() => (window as never as { __mock: Mock }).__mock.publishWatchedApproval("watch:a"));
+      await expect(page.locator(".agent-tile")).toContainText("npm install stripe");
+      await expect(page.locator('.agent-tile[data-needs="true"]').getByRole("button", { name: "Deny" })).toBeVisible();
+      await page.locator(".agent-tile-head").click();
+      await expect(page.locator(".session-head")).toContainText("shop");
+      await page.getByRole("button", { name: "See all at once" }).click();
+      await page.getByRole("button", { name: "Back to list" }).click();
+      await expect(page.locator(".session-list")).toBeVisible();
+    });
+
+    test("says when a limit stopped it", async ({ page }) => {
+      await open(page);
+      await page.evaluate(() => {
+        const mock = (window as never as { __mock: Mock }).__mock;
+        const resetsAt = Math.floor(Date.now() / 1000) + 3600;
+        mock.publishEvent("watch:a", { type: "limits", windows: [{ window: "five_hour", usedPercent: 100, resetsAt }] });
+        mock.publishEvent("watch:a", { type: "status", status: "failed", message: "Usage limit reached" });
+      });
+      await expect(page.locator(".limit-stop")).toContainText("Claude limit reached");
+      await expect(page.locator('.step-row[data-kind="stop"]')).toContainText("Usage limit reached");
+    });
   });
 
   test("a plan from a terminal is shown in full on the Agents page", async ({ page }) => {
@@ -401,14 +646,76 @@ test.describe("panel", () => {
       mock.publishWatchedPlan("watch:p");
     });
     await page.getByRole("button", { name: "Agents", exact: true }).click();
-    await page.locator(".session-list").getByRole("button", { name: /Claude Code/ }).click();
+    await page.locator(".session-row").first().click();
     await expect(page.locator(".approval .plan-text li")).toHaveCount(2);
     await expect(page.locator(".approval").getByRole("button", { name: "Approve plan" })).toBeVisible();
   });
 
+  test("the ask box on Home goes to the chosen AI and opens Chat", async ({ page }) => {
+    await page.getByLabel("Ask anything").fill("hello from home");
+    await page.getByRole("button", { name: "Send" }).click();
+    await expect(page.locator('.message[data-role="user"]')).toContainText("hello from home");
+    await expect(page.locator('.message[data-role="assistant"]')).toContainText("browser stand-in");
+  });
+
+  test("the player sits in the middle of the Media page, clear of the dock, with the lists and without", async ({ page }) => {
+    const publish = (over: object, others: object[] = []) =>
+      page.evaluate(([o, rest]) => (window as never as { __mock: { publishMedia(p: boolean, o: unknown, r: unknown): void } }).__mock.publishMedia(true, o, rest), [over, others]);
+    const measure = () =>
+      page.evaluate(() => {
+        const box = (selector: string) => document.querySelector(selector)?.getBoundingClientRect();
+        const middleY = (r: DOMRect) => r.top + r.height / 2;
+        const middleX = (r: DOMRect) => r.left + r.width / 2;
+        const [head, dock, art, info, keys, lists] = [".panel-head", ".dock", ".media-art", ".media-info", ".transport", ".media-lists"].map(box);
+        const main = document.querySelector("main.page")!;
+        return {
+          above: art!.top - head!.bottom,
+          below: (lists?.top ?? dock!.top) - art!.bottom,
+          lean: info ? Math.abs(middleY(info) - middleY(art!)) : 0,
+          keysOff: info ? Math.abs(middleX(keys!) - middleX(info)) : 0,
+          clear: dock!.top - (lists?.bottom ?? art!.bottom),
+          spill: main.scrollHeight - main.clientHeight,
+        };
+      });
+    const balanced = async (why: string) => {
+      await settled(page);
+      const room = await measure();
+      expect(Math.abs(room.above - room.below), `${why}: as much room above as below`).toBeLessThan(3);
+      expect(room.lean, `${why}: the words sit level with the picture`).toBeLessThan(3);
+      expect(room.keysOff, `${why}: the keys are in the middle of their column`).toBeLessThan(1);
+      expect(room.clear, `${why}: nothing reaches the dock`).toBeGreaterThanOrEqual(0);
+      expect(room.spill, `${why}: the page has no scroll`).toBeLessThanOrEqual(0);
+    };
+
+    await page.getByRole("button", { name: "Media", exact: true }).click();
+    await balanced("nothing playing");
+
+    await publish({});
+    await expect(page.locator(".media-title")).toHaveText("Northern Lights");
+    await balanced("one player");
+
+    await publish({ title: "First Light" });
+    await publish({ title: "Long Road Home" });
+    await expect(page.locator(".media-lists .list-row")).toHaveCount(2);
+    await balanced("what played before");
+
+    await publish({ title: "Monsoon Letters", session: "jio" }, [{ session: "chrome", app: "Chrome", title: "", playing: false }]);
+    await expect(page.locator(".media-list")).toHaveCount(2);
+    await balanced("two lists");
+
+    for (const title of ["One", "Two", "Three", "Four", "Five"]) await publish({ title, session: "jio" }, [{ session: "chrome", app: "Chrome" }]);
+    await expect(page.locator(".media-list").last().locator(".list-row")).toHaveCount(8);
+    await balanced("long lists");
+
+    await publish({ title: "A radio stream", durationMs: null, artwork: null });
+    await expect(page.locator(".media-stage .progress-row")).toHaveCount(0);
+    await expect(page.locator(".media-art")).toHaveClass(/no-art/);
+    await balanced("no length and no picture");
+  });
+
   test("what is being written survives the panel closing and changing page", async ({ page }) => {
     await page.getByRole("button", { name: "Chat", exact: true }).click();
-    await page.getByRole("radio", { name: "Anthropic" }).click();
+    await useEngine(page, "Anthropic");
     await page.getByLabel("Message").fill("half a thought");
     await page.keyboard.press("Escape");
     await island(page).click();
@@ -457,7 +764,7 @@ test.describe("panel", () => {
     const errors: string[] = [];
     page.on("pageerror", (err) => errors.push(err.message));
     await page.getByRole("button", { name: "Chat", exact: true }).click();
-    await page.getByRole("radio", { name: "Anthropic" }).click();
+    await useEngine(page, "Anthropic");
     await page.getByLabel("Message").fill("hello");
     await page.getByRole("button", { name: "Send" }).click();
     await page.getByRole("button", { name: "New chat" }).click();
@@ -471,7 +778,7 @@ test.describe("panel", () => {
       page.evaluate((w) => (window as never as { __mock: { publishText(id: string, t: string): void } }).__mock.publishText("watch:long", w), words);
     await page.evaluate(() => (window as never as { __mock: { publishWatched(id: string): void } }).__mock.publishWatched("watch:long"));
     await page.getByRole("button", { name: "Agents", exact: true }).click();
-    await page.locator(".session-list").getByRole("button", { name: /Claude Code/ }).click();
+    await page.locator(".session-row").first().click();
     await text("A line.\n\n".repeat(60));
     const log = page.locator(".log");
     const gap = () => log.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight);
@@ -491,7 +798,7 @@ test.describe("panel", () => {
 
   test("a selection on a screenshot is measured against the picture itself", async ({ page }) => {
     await page.getByRole("button", { name: "Chat", exact: true }).click();
-    await page.getByRole("radio", { name: "Anthropic" }).click();
+    await useEngine(page, "Anthropic");
     await page.getByRole("button", { name: "This window" }).click();
     await page.getByRole("button", { name: "See what would be shared" }).click();
     const [box, picture] = await Promise.all([page.locator(".preview").boundingBox(), page.locator(".preview img").boundingBox()]);
@@ -560,7 +867,7 @@ test.describe("panel", () => {
     await expect(page.locator(".approval")).toContainText("cargo test --workspace");
     await page.locator(".approval").getByRole("button", { name: "Allow" }).click();
     await expect(page.locator(".log")).toContainText("All tests pass.");
-    await expect(page.locator(".session footer")).toContainText("1,200 in");
+    await expect(page.locator(".session-facts")).toContainText("1,200 in");
   });
 
   test("parallel requests are answered one at a time, none lost", async ({ page }) => {
@@ -619,7 +926,7 @@ test.describe("panel", () => {
 
   test("the model list is the app's own, and works from the keyboard", async ({ page }) => {
     await page.getByRole("button", { name: "Chat", exact: true }).click();
-    await page.getByRole("radio", { name: "Anthropic" }).click();
+    await useEngine(page, "Anthropic");
     const model = page.getByRole("button", { name: "Model" });
     await model.click();
     await page.keyboard.press("ArrowDown");
@@ -635,9 +942,9 @@ test.describe("panel", () => {
 
   test("looking at the screen happens in chat, and nothing goes until a message is sent", async ({ page }) => {
     await page.getByRole("button", { name: "Chat", exact: true }).click();
-    await page.getByRole("radio", { name: "Anthropic" }).click();
+    await useEngine(page, "Anthropic");
     await page.getByRole("button", { name: "This window" }).click();
-    await expect(page.getByText("I see Code. What do you want to know?")).toBeVisible();
+    await expect(page.locator(".look .tile-title")).toHaveText("Code");
     await expect(page.locator(".look-pill")).toContainText("Code");
 
     await page.getByRole("button", { name: "See what would be shared" }).click();
@@ -655,7 +962,7 @@ test.describe("panel", () => {
 
   test("a conversation carries on after a restart", async ({ page }) => {
     await page.getByRole("button", { name: "Chat", exact: true }).click();
-    await page.getByRole("radio", { name: "Claude Code" }).click();
+    await useEngine(page, "Claude Code");
     await page.getByLabel("Message").fill("chat: hello");
     await page.getByRole("button", { name: "Send" }).click();
     await expect(page.locator(".log")).toContainText("Hello from the stand-in agent.");
@@ -664,9 +971,8 @@ test.describe("panel", () => {
     await page.reload();
     await island(page).click();
     await page.getByRole("button", { name: "Chat", exact: true }).click();
-    await page.getByRole("radio", { name: "Claude Code" }).click();
-    await page.getByRole("button", { name: "Conversation" }).click();
-    await page.getByRole("menuitemradio").nth(1).click();
+    await useEngine(page, "Claude Code");
+    await page.locator(".conv").first().click();
     await expect(page.locator(".log")).toContainText("Hello from the stand-in agent.");
 
     await page.getByLabel("Message").fill("and one more thing");
@@ -743,9 +1049,9 @@ test.describe("panel", () => {
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page.getByRole("button", { name: "Screen", exact: true }).click();
     await page.getByRole("button", { name: "Watch for errors" }).click();
-    await expect(page.getByRole("heading", { name: "Watching for errors" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Watch for errors" })).toHaveAttribute("aria-pressed", "true");
     await page.getByRole("switch", { name: "Pause monitoring" }).click();
-    await expect(page.getByRole("heading", { name: "Paused" })).toBeVisible();
+    await expect(page.getByRole("switch", { name: "Pause monitoring" })).toBeChecked();
 
     await page.getByRole("button", { name: "Off" }).click();
     await page.getByRole("button", { name: "Chat", exact: true }).click();
@@ -766,7 +1072,8 @@ test.describe("panel", () => {
     await openModels(page);
     await page.locator(".card", { hasText: "Anthropic" }).getByRole("button", { name: "Remove" }).click();
     await page.getByRole("button", { name: "Chat", exact: true }).click();
-    await expect(page.getByRole("radio", { name: "Anthropic" })).toHaveCount(0);
+    await page.getByRole("button", { name: "AI engine" }).click();
+    await expect(page.getByRole("menuitemradio", { name: "Anthropic" })).toHaveCount(0);
   });
 
   test.describe("my day", () => {
@@ -832,7 +1139,7 @@ test.describe("panel", () => {
   test.describe("Claude Code as a chat engine", () => {
     test.beforeEach(async ({ page }) => {
       await page.getByRole("button", { name: "Chat", exact: true }).click();
-      await page.getByRole("radio", { name: "Claude Code" }).click();
+      await useEngine(page, "Claude Code");
     });
 
     test("needs no API key and shows the plan the CLI reports", async ({ page }) => {
@@ -844,13 +1151,12 @@ test.describe("panel", () => {
       await page.getByLabel("Message").fill("chat: hello");
       await page.getByRole("button", { name: "Send" }).click();
       await expect(page.locator(".log")).toContainText("Hello from the stand-in agent.");
-      await expect(page.getByRole("button", { name: "Conversation" })).not.toContainText("New chat");
+      await expect(page.locator(".chat-title")).not.toHaveText("New chat");
 
       await page.getByLabel("Message").fill("and again");
       await page.getByRole("button", { name: "Send" }).click();
       await expect(page.locator(".log")).toContainText("Follow-up received: and again");
-      await page.getByRole("button", { name: "Conversation" }).click();
-      await expect(page.getByRole("menuitemradio")).toHaveCount(2);
+      await expect(page.locator(".conv")).toHaveCount(1);
     });
 
     test("keeps conversations separate and switchable", async ({ page }) => {
@@ -858,13 +1164,16 @@ test.describe("panel", () => {
       await page.getByRole("button", { name: "Send" }).click();
       await expect(page.locator(".log")).toContainText("Hello from the stand-in agent.");
 
-      await page.getByRole("button", { name: "Conversation" }).click();
-      await page.getByRole("menuitemradio", { name: "New chat" }).click();
+      await page.getByRole("button", { name: "New chat" }).click();
       await expect(page.locator(".log")).not.toContainText("Hello from the stand-in agent.");
       await page.getByLabel("Message").fill("chat: second");
       await page.getByRole("button", { name: "Send" }).click();
-      await page.getByRole("button", { name: "Conversation" }).click();
-      await expect(page.getByRole("menuitemradio")).toHaveCount(3);
+      await expect(page.locator(".conv")).toHaveCount(2);
+
+      await page.getByLabel("Search chats").fill("first");
+      await expect(page.locator(".conv")).toHaveCount(1);
+      await page.locator(".conv").click();
+      await expect(page.locator(".chat-title")).toContainText("first");
     });
 
     test("project mode asks for a folder before it starts", async ({ page }) => {
@@ -903,8 +1212,8 @@ test.describe("panel", () => {
 
     test("a signed-out CLI offers its own sign-in", async ({ page }) => {
       await page.evaluate(() => (window as never as { __mock: { setAuthed(v: boolean): void } }).__mock.setAuthed(false));
-      await page.getByRole("radio", { name: "Anthropic" }).click();
-      await page.getByRole("radio", { name: "Claude Code" }).click();
+      await useEngine(page, "Anthropic");
+      await useEngine(page, "Claude Code");
       await expect(page.getByRole("button", { name: "Sign in" })).toBeVisible();
     });
   });
@@ -992,7 +1301,7 @@ test.describe("panel", () => {
     test("is off until asked, and the toggle says what it changes", async ({ page }) => {
       await page.getByRole("button", { name: "Settings", exact: true }).click();
       await page.getByRole("button", { name: "Coding agents", exact: true }).click();
-      const toggle = page.getByRole("switch", { name: /Follow my Claude Code sessions/ });
+      const toggle = page.getByRole("switch", { name: /Follow Claude Code in any terminal/ });
       await expect(toggle).not.toBeChecked();
       await expect(page.locator(".settings-body")).toContainText("keeps a backup");
 
@@ -1044,8 +1353,8 @@ test.describe("panel", () => {
     test("appears as a session that can be followed but not steered", async ({ page }) => {
       await publish(page);
       await page.getByRole("button", { name: "Agents", exact: true }).click();
-      await page.locator(".session-list").getByRole("button", { name: /Claude Code/ }).click();
-      await expect(page.locator(".session header, .session .bar").first()).toContainText("shop");
+      await page.locator(".session-row").first().click();
+      await expect(page.locator(".session-head")).toContainText("shop");
       await expect(page.getByText("Terminal", { exact: true })).toBeVisible();
       await expect(page.getByLabel("Instruction")).toHaveCount(0);
       await expect(page.getByRole("button", { name: "Stop session" })).toHaveCount(0);
@@ -1065,7 +1374,7 @@ test.describe("panel", () => {
 
   test("chat survives a restart, without any images, and can be cleared", async ({ page }) => {
     await page.getByRole("button", { name: "Chat", exact: true }).click();
-    await page.getByRole("radio", { name: "Anthropic" }).click();
+    await useEngine(page, "Anthropic");
     await page.getByLabel("Message").fill("remember this");
     await page.getByRole("button", { name: "Send" }).click();
     await expect(page.locator('.message[data-role="assistant"]')).toContainText("browser stand-in");
@@ -1074,7 +1383,7 @@ test.describe("panel", () => {
     await page.reload();
     await island(page).click();
     await page.getByRole("button", { name: "Chat", exact: true }).click();
-    await page.getByRole("radio", { name: "Anthropic" }).click();
+    await useEngine(page, "Anthropic");
     await expect(page.locator('.message[data-role="user"]')).toContainText("remember this");
 
     await page.getByRole("button", { name: "Settings", exact: true }).click();
@@ -1083,7 +1392,7 @@ test.describe("panel", () => {
     await page.reload();
     await island(page).click();
     await page.getByRole("button", { name: "Chat", exact: true }).click();
-    await page.getByRole("radio", { name: "Anthropic" }).click();
+    await useEngine(page, "Anthropic");
     await expect(page.locator('.message[data-role="user"]')).toHaveCount(0);
   });
 

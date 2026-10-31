@@ -146,22 +146,28 @@ export function Integrations() {
   });
 
   return (
-    <div className="links">
-      <div className="links-grid" role="navigation" aria-label="Providers">
-        {sorted.map((i) => (
-          <button key={i.id} className="link-tile" aria-current={i.id === current.id ? "true" : undefined} data-ready={i.ready} onClick={() => setSelected(i.id)}>
-            {i.id === current.id && <motion.span layoutId="link-pill" className="dock-pill" transition={spring.hover} />}
-            <span className="link-mono">
-              <Brand id={i.id} name={i.name} />
-              {i.connected && <i className="link-dot" title="Connected" />}
-            </span>
-            <span className="link-label">{i.name}</span>
-          </button>
-        ))}
+    <div className="links-page">
+      <header className="settings-head">
+        <h1>Providers</h1>
+        <p className="meta">Sign in once in your browser. Only read-only tools are used, and what comes back stays on this PC.</p>
+      </header>
+      <div className="links">
+        <div className="links-grid" role="navigation" aria-label="Providers">
+          {sorted.map((i) => (
+            <button key={i.id} className="link-tile" aria-current={i.id === current.id ? "true" : undefined} data-ready={i.ready} onClick={() => setSelected(i.id)}>
+              {i.id === current.id && <motion.span layoutId="link-pill" className="dock-pill" transition={spring.hover} />}
+              <span className="link-mono">
+                <Brand id={i.id} name={i.name} />
+                {i.connected && <i className="link-dot" title="Connected" />}
+              </span>
+              <span className="link-label">{i.name}</span>
+            </button>
+          ))}
+        </div>
+        <motion.div key={current.id} className="link-pane" initial={{ opacity: 0, x: 6 }} animate={{ opacity: 1, x: 0 }} transition={spring.hover}>
+          <Detail integration={current} />
+        </motion.div>
       </div>
-      <motion.div key={current.id} className="link-pane" initial={{ opacity: 0, x: 6 }} animate={{ opacity: 1, x: 0 }} transition={spring.hover}>
-        <Detail integration={current} />
-      </motion.div>
     </div>
   );
 }

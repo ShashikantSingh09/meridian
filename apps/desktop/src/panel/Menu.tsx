@@ -9,6 +9,7 @@ import { Icon } from "../lib/icons";
 export interface MenuItem {
   value: string;
   label: string;
+  icon?: React.ReactNode;
 }
 
 /** Past this many rows a list gets a search box. OpenRouter alone has hundreds. */
@@ -40,6 +41,8 @@ export function Menu({ label, value, items, empty, onPick }: { label: string; va
   };
 
   const keys = (e: React.KeyboardEvent) => {
+    // Shut, it leaves the keys alone, so Escape still closes the panel from the pill.
+    if (!open) return;
     if (e.key === "Escape") {
       e.stopPropagation();
       close();
@@ -54,6 +57,7 @@ export function Menu({ label, value, items, empty, onPick }: { label: string; va
   return (
     <div className="menu-root" ref={root} onKeyDown={keys}>
       <button ref={button} type="button" className="pill-button" aria-label={label} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>
+        {current?.icon}
         <span className="truncate">{current?.label ?? empty}</span>
         <span className="pill-chevron"><Icon name="chevron" size={11} /></span>
       </button>
@@ -84,6 +88,7 @@ export function Menu({ label, value, items, empty, onPick }: { label: string; va
                   onPick(item.value);
                 }}
               >
+                {item.icon}
                 <span className="truncate grow">{item.label}</span>
                 {item.value === value && <Icon name="check" size={13} />}
               </button>

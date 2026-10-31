@@ -1,9 +1,10 @@
 // The store's timing, against the browser stand-in for the core. Each of these is something a
 // spoken turn or a click depends on happening at once, before anything has been waited for.
 
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { bridge } from "./bridge";
-import { applyAgentEvent, clearChat, closeOnBlur, getState, openPanel, refreshProviders, selectProvider, sendChat, sendToSession, startSession, toggleFromCore } from "./store";
+import { applyAgentEvent, nextEngine, clearAgentFocus, clearChat, closeOnBlur, closePanel, dismissError, dismissNotice, getState, openPanel, openSession, refreshProviders, selectProvider, sendChat, sendToSession, setHovered, startSession, toggleFromCore } from "./store";
+import type { AgentEvent } from "./types";
 
 vi.mock("./sound", () => ({ chime: () => {} }));
 
@@ -72,6 +73,158 @@ describe("a follow-up to an agent", () => {
   });
 });
 
+describe("what an agent is doing", () => {
+  const session = (id: string) => getState().sessions.find((s) => s.id === id)!;
+  const send = (sessionId: string, event: AgentEvent) => applyAgentEvent({ sessionId, event });
+  const started = async (surface: "agents" | "chat" = "agents") =>
+    (await startSession({ agent: "claude-code", cwd: "C:\\Projects\\shop", prompt: "work", model: null }, surface))!;
+
+  beforeEach(() => {
+    closePanel();
+    getState().notices.forEach((n) => dismissNotice(n.id));
+    getState().errors.forEach((e) => dismissError(e.id));
+  });
+
+  it("notes when each step happened", async () => {
+    const id = await started();
+    send(id, { type: "activity", label: "Reading a.ts" });
+    send(id, { type: "diff", path: "a.ts", removed: [], added: ["x"], linesRemoved: 0, linesAdded: 40 });
+    const [step, diff] = session(id).log.slice(-2);
+    expect(step!.at).toBeGreaterThan(0);
+    expect(diff).toMatchObject({ linesAdded: 40, added: ["x"] });
+  });
+
+  it("keeps the agent's list, whole or a line at a time", async () => {
+    const id = await started();
+    send(id, { type: "todos", items: [{ id: "0", text: "One", status: "in_progress" }] });
+    send(id, { type: "todoChanged", id: "0", status: "completed" });
+    send(id, { type: "todoChanged", id: "7", text: "Two" });
+    expect(session(id).todos).toEqual([{ id: "0", text: "One", status: "completed" }, { id: "7", text: "Two", status: "pending" }]);
+  });
+
+  it("goes back to what it was doing once a request is answered", async () => {
+    const id = await started();
+    send(id, { type: "activity", label: "$ npm test" });
+    send(id, { type: "approval", approval: { id: "r", tool: "Bash", summary: "npm test" } });
+    expect(session(id).activity).toBe("Waiting for approval: Bash");
+    send(id, { type: "approvalResolved", id: "r" });
+    expect(session(id).activity).toBe("$ npm test");
+  });
+
+  it("starts a new turn when an ended session runs again, and keeps its replies apart", async () => {
+    const id = await started();
+    send(id, { type: "text", text: "First." });
+    send(id, { type: "status", status: "completed" });
+    expect(session(id).turnAt).toBeUndefined();
+    await new Promise((r) => setTimeout(r, 5));
+    send(id, { type: "status", status: "running" });
+    const { turnAt } = session(id);
+    expect(turnAt).toBeGreaterThan(0);
+    send(id, { type: "text", text: "Second." });
+    expect(session(id).log.filter((e) => e.kind === "text").map((e) => e.text)).toEqual(["First.", "Second."]);
+    send(id, { type: "status", status: "running" });
+    expect(session(id).turnAt, "only an ended session starts a turn").toBe(turnAt);
+  });
+
+  it("lets go of a finished list at the next turn, and keeps one still under way", async () => {
+    const id = await started();
+    send(id, { type: "todos", items: [{ id: "0", text: "One", status: "completed" }] });
+    send(id, { type: "status", status: "completed" });
+    send(id, { type: "status", status: "running" });
+    expect(session(id).todos).toBeUndefined();
+    send(id, { type: "todos", items: [{ id: "0", text: "One", status: "in_progress" }] });
+    send(id, { type: "status", status: "completed" });
+    send(id, { type: "status", status: "running" });
+    expect(session(id).todos).toHaveLength(1);
+  });
+
+  it("finishes on a card that stays 12 seconds, then moves to Notifications", async () => {
+    const id = await started();
+    vi.useFakeTimers();
+    send(id, { type: "status", status: "completed" });
+    expect(getState().notices).toHaveLength(1);
+    expect(getState().notices[0]).toMatchObject({ title: "shop is done", finished: true, sessionId: id });
+    vi.advanceTimersByTime(11_000);
+    expect(getState().notices).toHaveLength(1);
+    vi.advanceTimersByTime(1_500);
+    vi.useRealTimers();
+    expect(getState().notices).toHaveLength(0);
+    expect(getState().pastNotices[0]).toMatchObject({ title: "shop is done", sessionId: id });
+  });
+
+  it("stays while the pointer is on the card", async () => {
+    const id = await started();
+    vi.useFakeTimers();
+    send(id, { type: "status", status: "completed" });
+    setHovered(true);
+    vi.advanceTimersByTime(200);
+    vi.advanceTimersByTime(30_000);
+    expect(getState().notices).toHaveLength(1);
+    setHovered(false);
+    vi.advanceTimersByTime(2_000);
+    vi.useRealTimers();
+    expect(getState().notices).toHaveLength(0);
+  });
+
+  it("keeps a finished card when opening the panel takes it off the island", async () => {
+    const id = await started();
+    send(id, { type: "status", status: "completed" });
+    openPanel("home");
+    expect(getState().notices).toHaveLength(0);
+    expect(getState().pastNotices[0]?.sessionId).toBe(id);
+  });
+
+  it("does not say so twice for a reply already showing in Chat", async () => {
+    const id = await started("chat");
+    openPanel("chat");
+    const before = getState().pastNotices.length;
+    send(id, { type: "status", status: "completed" });
+    closePanel();
+    expect(getState().notices).toHaveLength(0);
+    expect(getState().pastNotices).toHaveLength(before);
+  });
+
+  it("tells the card about a Chat session that ends with the panel closed", async () => {
+    const id = await started("chat");
+    send(id, { type: "status", status: "completed" });
+    expect(getState().notices[0]).toMatchObject({ finished: true, sessionId: id });
+  });
+
+  it("does not call a terminal that went silent done", async () => {
+    const id = await started();
+    send(id, { type: "status", status: "completed", message: "No word from this session" });
+    expect(getState().notices[0]).toMatchObject({ title: "shop went quiet", body: "No word from this session" });
+    expect(getState().notices[0]?.finished).toBeUndefined();
+  });
+
+  it("leaves what went wrong up until it is answered", async () => {
+    const id = await started();
+    vi.useFakeTimers();
+    send(id, { type: "status", status: "failed", message: "2 tests failed in machine.test.ts" });
+    vi.advanceTimersByTime(60_000);
+    vi.useRealTimers();
+    expect(getState().errors.at(-1)).toMatchObject({ body: "2 tests failed in machine.test.ts", sessionId: id });
+  });
+
+  it("does not raise anything when the user stopped it", async () => {
+    const id = await started();
+    send(id, { type: "status", status: "cancelled" });
+    expect(getState().notices).toHaveLength(0);
+    expect(getState().errors).toHaveLength(0);
+  });
+
+  it("opens a session on the view asked for, or in Chat if it lives there", async () => {
+    const task = await started();
+    openSession(task, "changes");
+    expect(getState()).toMatchObject({ panelOpen: true, tab: "agents", agentFocus: { id: task, view: "changes" } });
+    clearAgentFocus();
+    closePanel();
+    const chat = await started("chat");
+    openSession(chat, "changes");
+    expect(getState()).toMatchObject({ tab: "chat", agentFocus: null });
+  });
+});
+
 describe("the tray icon", () => {
   it("closes an open panel, even though its click also toggles", () => {
     openPanel();
@@ -88,5 +241,19 @@ describe("the tray icon", () => {
     toggleFromCore();
     vi.useRealTimers();
     expect(getState().panelOpen).toBe(true);
+  });
+});
+
+describe("choosing an AI", () => {
+  it("keeps a provider that still answers", () => {
+    expect(nextEngine("anthropic", "anthropic", "claude-code")).toBeNull();
+  });
+
+  it("moves to an installed agent when the chosen provider has gone away", () => {
+    expect(nextEngine("lmstudio", undefined, "claude-code")).toBe("claude-code");
+  });
+
+  it("takes a working provider when nothing was chosen", () => {
+    expect(nextEngine(null, "anthropic", "claude-code")).toBe("anthropic");
   });
 });

@@ -140,6 +140,15 @@ textarea {
   opacity: 1;
 }
 
+.progress-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-2);
+}
+
 .progress-track {
   flex: 1;
   height: 3px;
@@ -822,9 +831,192 @@ textarea::placeholder {
 .session-list {
   width: 196px;
   flex: none;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
   padding: var(--space-3) var(--space-2);
   border-right: 1px solid var(--hairline);
+}
+
+.session-rows {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.session-row {
+  align-items: flex-start;
+  min-height: 46px;
+}
+
+.session-top,
+.session-doing {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.session-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin: 0;
+  padding: 10px 10px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-3);
+}
+
+.session-fold {
+  text-align: left;
+}
+
+.session-fold::after {
+  content: "\203A";
+  order: -1;
+  transition: rotate 0.15s ease;
+}
+
+.session-fold[aria-expanded="true"]::after {
+  rotate: 90deg;
+}
+
+.session-clear {
+  font-size: 11px;
+  color: inherit;
+  opacity: 0.8;
+}
+
+.session-clear:hover {
+  opacity: 1;
+  text-decoration: underline;
+}
+
+.session-head {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: var(--space-2) var(--space-3);
+}
+
+.session-facts {
+  gap: 10px;
+  min-height: 22px;
+}
+
+.session-fact {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  background: var(--well);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.limit-card {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: var(--well);
+  text-align: left;
+}
+
+.limit-card:hover,
+.limit-card[data-active="true"] {
+  background: var(--well-active);
+}
+
+.limits {
+  flex: 1;
+  min-width: 0;
+}
+
+.limit-account {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: var(--well);
+}
+
+.meter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 18px;
+  font-size: 11.5px;
+}
+
+.meter-name {
+  flex: none;
+  width: 46px;
+  color: var(--ink-2);
+}
+
+.meter-track {
+  position: relative;
+  flex: 1;
+  height: 5px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--well-active);
+}
+
+.meter-track i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 3px;
+  background: #4c8dff;
+}
+
+.meter[data-level="high"] .meter-track i { background: #ff9f0a; }
+.meter[data-level="full"] .meter-track i { background: #ff5a4f; }
+.meter[data-level="high"] .meter-value { color: #ff9f0a; }
+.meter[data-level="full"] .meter-value { color: #ff5a4f; }
+
+.meter-value {
+  flex: none;
+  width: 32px;
+  text-align: right;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.meter-note {
+  flex: none;
+  width: 132px;
+  overflow: hidden;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink-2);
+}
+
+.limit-account .meter {
+  min-height: 28px;
+  font-size: 13px;
+}
+
+.limit-account .meter-name {
+  width: 62px;
+  font-weight: 600;
+  color: inherit;
+}
+
+.limit-account .meter-track {
+  height: 7px;
+}
+
+.limit-account .meter-value {
+  width: 40px;
 }
 
 .session,
@@ -1552,7 +1744,14 @@ textarea::placeholder {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 12px 14px 6px;
+  padding: 12px 14px 8px;
+}
+
+/* Centred in all the room under the progress bar, however tall the card is. */
+.media-open > .transport-room {
+  flex: 1;
+  display: grid;
+  place-items: center;
 }
 
 .media-title {
@@ -1561,26 +1760,32 @@ textarea::placeholder {
   letter-spacing: -0.012em;
 }
 
-/* Solid white symbols with no circle behind them, as on a phone. */
+/* Solid white symbols in one raised capsule, so they read as a single control. */
 .transport {
+  width: fit-content;
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 18px;
+  gap: 2px;
+  margin-inline: auto;
+  padding: 3px 6px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: var(--radius-full);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.06));
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.16);
 }
 
 .transport-key {
-  width: 46px;
-  height: 40px;
+  width: 44px;
+  height: 34px;
   display: grid;
   place-items: center;
-  border-radius: 12px;
+  border-radius: var(--radius-full);
   color: #fff;
   transition: opacity 0.12s ease, scale 0.16s cubic-bezier(0.3, 1.8, 0.5, 1);
 }
 
 .transport-key:hover:not(:disabled) {
-  opacity: 0.62;
+  background: rgba(255, 255, 255, 0.12);
 }
 
 .transport-key:active:not(:disabled) {

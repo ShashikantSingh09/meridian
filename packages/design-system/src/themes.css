@@ -1,0 +1,98 @@
+/* Themes. Each sets the panel's glass and accent. The island itself stays black in every theme, like
+   the hardware it sits against, so these change the panel only. */
+
+:root {
+  --accent: #2a84ea;
+  --accent-ink: #fff;
+  --accent-shine: linear-gradient(180deg, #2a84ea 0, #0a63c8 100%);
+  --sheet-top: #0b0c14;
+  --sheet-low: #10111c;
+  --glow-a: rgba(112, 86, 255, 0.2);
+  --glow-b: rgba(255, 164, 84, 0.13);
+  --float: linear-gradient(180deg, rgba(255, 255, 255, 0.16) 0, rgba(255, 255, 255, 0.07) 100%);
+  --float-edge: inset 0 1px 0 rgba(255, 255, 255, 0.34), inset 0 -1px 0 rgba(255, 255, 255, 0.08), 0 8px 22px rgba(0, 0, 0, 0.34);
+  --frost: blur(16px) saturate(180%);
+  --track: rgba(255, 255, 255, 0.17);
+  --head-ink: #f7f7f9;
+  --tint-blue: #8cc8ff;
+  --tint-amber: #ffbe5c;
+  --tint-green: #5fe08a;
+  --tint-red: #ff8a80;
+  --tint-violet: #cdbcff;
+}
+
+:root[data-theme="daylight"] {
+  --sheet-top: #e6e9ef;
+  --sheet-low: #f1f3f7;
+  --glow-a: rgba(112, 136, 255, 0.2);
+  --glow-b: rgba(255, 190, 120, 0.2);
+  --float: linear-gradient(180deg, rgba(255, 255, 255, 0.86) 0, rgba(255, 255, 255, 0.56) 100%);
+  --float-edge: inset 0 1px 0 rgba(255, 255, 255, 0.95), 0 8px 22px rgba(10, 20, 40, 0.16);
+  --track: rgba(20, 24, 36, 0.15);
+  --tint-blue: #0a5fb4;
+  --tint-amber: #9a5200;
+  --tint-green: #12713a;
+  --tint-red: #b3261e;
+  --tint-violet: #5b3fb5;
+}
+
+/* Text and fills flip inside the panel only. The title row sits on black in every theme. */
+:root[data-theme="daylight"] .page,
+:root[data-theme="daylight"] .dock {
+  color-scheme: light;
+  --ink-1: #14161c;
+  --ink-2: rgba(20, 22, 30, 0.74);
+  --ink-3: rgba(20, 22, 30, 0.56);
+  --well: rgba(255, 255, 255, 0.58);
+  --well-hover: rgba(255, 255, 255, 0.74);
+  --well-active: rgba(20, 22, 30, 0.1);
+  --hairline: rgba(20, 24, 36, 0.1);
+  color: var(--ink-1);
+}
+
+:root[data-theme="graphite"] {
+  --accent: #c8ccd4;
+  --accent-ink: #15161a;
+  --accent-shine: linear-gradient(180deg, #d9dce2 0, #aeb3bd 100%);
+  --sheet-top: #1b1c1f;
+  --sheet-low: #26272b;
+  --glow-a: rgba(255, 255, 255, 0.07);
+  --glow-b: rgba(255, 255, 255, 0.04);
+}
+
+:root[data-theme="ocean"] {
+  --accent: #17a2b8;
+  --accent-shine: linear-gradient(180deg, #1fb7cf 0, #0c7f93 100%);
+  --sheet-top: #05202e;
+  --sheet-low: #062a3a;
+  --glow-a: rgba(23, 162, 184, 0.3);
+  --glow-b: rgba(64, 120, 255, 0.16);
+}
+
+:root[data-theme="rose"] {
+  --accent: #e0527c;
+  --accent-shine: linear-gradient(180deg, #ea6a90 0, #c23562 100%);
+  --sheet-top: #240d19;
+  --sheet-low: #2e1020;
+  --glow-a: rgba(224, 82, 124, 0.28);
+  --glow-b: rgba(255, 170, 120, 0.14);
+}
+
+/* No glass at all, for the easiest reading. */
+:root[data-theme="solid"] {
+  --sheet-top: #111216;
+  --sheet-low: #17181d;
+  --glow-a: transparent;
+  --glow-b: transparent;
+  --float: #24262d;
+  --float-edge: 0 0 0 1px rgba(255, 255, 255, 0.08);
+  --frost: none;
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --frost: none;
+    --glow-a: transparent;
+    --glow-b: transparent;
+  }
+}

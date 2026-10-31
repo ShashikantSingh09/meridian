@@ -1,0 +1,119 @@
+/* The panel's glass. A lit sheet sits behind everything, and frosted layers float on it, following
+   Apple's rule: controls are glass, content is not, and glass never stacks on glass. The window cannot
+   blur the desktop behind it reliably, so the light comes from the sheet itself. */
+
+.panel {
+  position: relative;
+  isolation: isolate;
+}
+
+.panel::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background:
+    linear-gradient(180deg, #000 0, #000 30px, transparent 62px),
+    radial-gradient(58% 46% at 76% 70%, var(--glow-b), transparent 72%),
+    radial-gradient(70% 62% at 22% 26%, var(--glow-a), transparent 74%),
+    linear-gradient(180deg, var(--sheet-top) 0, var(--sheet-low) 100%);
+  opacity: var(--glass-strength, 1);
+}
+
+.panel::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  border-radius: 0 0 var(--panel-radius, 32px) var(--panel-radius, 32px);
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.14), inset 1px 0 0 rgba(255, 255, 255, 0.05), inset -1px 0 0 rgba(255, 255, 255, 0.05);
+}
+
+.panel-head {
+  color: var(--head-ink);
+}
+
+/* The dock floats on the page rather than taking a strip of it. */
+.panel .page {
+  padding-bottom: 66px;
+}
+
+.dock {
+  position: absolute;
+  left: 50%;
+  bottom: 10px;
+  z-index: 2;
+  width: max-content;
+  height: auto;
+  padding: 4px;
+  gap: 2px;
+  transform: translateX(-50%);
+  border: 0;
+  border-radius: 28px;
+  background: var(--float);
+  box-shadow: var(--float-edge);
+  backdrop-filter: var(--frost);
+}
+
+.dock-pill {
+  background: var(--well-active);
+}
+
+/* Primary actions carry the accent. Nothing else does. */
+.solid,
+.round.solid {
+  background: var(--accent-shine);
+  color: var(--accent-ink);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.34), 0 3px 10px rgba(0, 0, 0, 0.22);
+}
+
+.ghost,
+.round {
+  background: var(--well);
+}
+
+.ghost:hover:not(:disabled),
+.round:hover:not(:disabled) {
+  background: var(--well-hover);
+}
+
+input[role="switch"]:checked {
+  background: var(--state-success);
+}
+
+.segmented {
+  background: var(--well);
+}
+
+.segmented button[aria-pressed="true"] {
+  background: var(--float);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.24), 0 2px 6px rgba(0, 0, 0, 0.2);
+}
+
+/* Rows of a settings page sit together in one card, with a line between them. */
+.settings-body .stack {
+  gap: 0;
+  padding: 2px 14px;
+  border-radius: 14px;
+  background: var(--well);
+}
+
+.settings-body .stack > .setting {
+  min-height: 48px;
+}
+
+.settings-body .stack > .setting + .setting,
+.settings-body .stack > .setting + form.setting {
+  border-top: 1px solid var(--hairline);
+}
+
+.settings-body .stack > .meta {
+  padding: 0 0 8px;
+}
+
+/* A dark band under the head, so scrolled content fades instead of cutting off. */
+.page-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: var(--well-active) transparent;
+}

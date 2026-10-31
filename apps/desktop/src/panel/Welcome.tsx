@@ -17,13 +17,13 @@ export function Welcome() {
   const autostart = useApp((s) => s.settings.autostart);
 
   return (
-    <div className="page-scroll stack-lg welcome">
+    <div className="welcome-page board">
       <header className="stack-sm">
         <h1>Meridian lives at the top of your screen</h1>
-        <p className="meta">It shows what your agents are doing, asks before they do anything important, and stays out of the way otherwise.</p>
+        <p className="welcome-lead">It shows what your agents are doing, asks before they do anything important, and stays out of the way otherwise.</p>
       </header>
 
-      <div className="stack">
+      <div className="plate welcome-steps">
         <Step index={0}>
           <span className="stacked grow">
             <span className="label">Open it from anywhere</span>

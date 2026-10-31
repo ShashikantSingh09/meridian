@@ -7,7 +7,7 @@ import type { SettingsChange } from "../lib/types";
  * The switch for following Claude Code. It changes a file that belongs to the user, so the
  * exact change is shown first, and nothing is written until it is confirmed.
  */
-export function FollowSwitch({ explain }: { explain: string }) {
+export function FollowSwitch({ label = "Follow my Claude Code sessions", explain }: { label?: string; explain: string }) {
   const watching = useApp((s) => s.watching);
   const [pending, setPending] = useState<(SettingsChange & { on: boolean }) | null>(null);
   const [status, setStatus] = useState<string | null>(null);
@@ -35,7 +35,7 @@ export function FollowSwitch({ explain }: { explain: string }) {
     <>
       <label className="setting toggle grow">
         <span className="stacked grow">
-          <span className="label">Follow my Claude Code sessions</span>
+          <span className="label">{label}</span>
           <span className="meta">{explain}</span>
         </span>
         <input type="checkbox" role="switch" checked={pending?.on ?? watching} onChange={(e) => void ask(e.target.checked)} />

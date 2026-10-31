@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { bridge } from "../lib/bridge";
 import { Brand } from "../lib/brands";
+import { Icon } from "../lib/icons";
 import { isReady, openLink, refreshLocal, refreshProviders, signInAgent, signInProvider, updateSettings, useApp } from "../lib/store";
 import type { Capabilities, ProviderInfo } from "../lib/types";
 
@@ -103,9 +104,9 @@ function ProviderCard({ provider }: { provider: ProviderInfo }) {
 
 /** The ways in that need no key. Each ends on the company's own sign-in page. */
 const SIGN_INS = [
-  { id: "claude-code", name: "Claude", cta: "Sign in with Claude", explain: "Uses Claude Code and your own Claude account. Your password goes only to Anthropic.", install: "https://code.claude.com/docs/en/quickstart" },
-  { id: "codex", name: "ChatGPT", cta: "Sign in with ChatGPT", explain: "Uses Codex and your own ChatGPT plan. Your password goes only to OpenAI.", install: "https://github.com/openai/codex" },
-  { id: "openrouter", name: "OpenRouter", cta: "Sign in with OpenRouter", explain: "Hundreds of models from one account. There is no key to copy: it comes back by itself.", install: null },
+  { id: "claude-code", name: "Claude", note: "Sign in with Claude, through Claude Code", connected: "Connected through Claude Code", cta: "Sign in with Claude", explain: "Uses Claude Code and your own Claude account. Your password goes only to Anthropic.", install: "https://code.claude.com/docs/en/quickstart" },
+  { id: "codex", name: "ChatGPT", note: "Sign in with ChatGPT, through Codex", connected: "Connected through Codex", cta: "Sign in with ChatGPT", explain: "Uses Codex and your own ChatGPT plan. Your password goes only to OpenAI.", install: "https://github.com/openai/codex" },
+  { id: "openrouter", name: "OpenRouter", note: "Hundreds of models from one account", connected: "Connected", cta: "Sign in with OpenRouter", explain: "Hundreds of models from one account. There is no key to copy: it comes back by itself.", install: null },
 ] as const;
 
 function SignIn() {
@@ -115,26 +116,30 @@ function SignIn() {
   const [current, setCurrent] = useState<(typeof SIGN_INS)[number]["id"]>("claude-code");
   const waiting = useApp((s) => s.signingIn.includes(current));
 
+  const signedIn = (id: (typeof SIGN_INS)[number]["id"]) => (id === "openrouter" ? providers.some((p) => p.id === "openrouter" && p.hasKey) : auth[id]?.signedIn === true);
   const choice = SIGN_INS.find((s) => s.id === current)!;
   const isAgent = current !== "openrouter";
   const agent = agents.find((a) => a.id === current);
   const missing = isAgent && !agent?.installed;
-  const done = current === "openrouter" ? providers.some((p) => p.id === "openrouter" && p.hasKey) : auth[current]?.signedIn === true;
+  const done = signedIn(current);
 
   const go = () => (current === "openrouter" ? signInProvider(current, choice.name) : signInAgent(current, choice.name));
 
   return (
-    <section className="stack">
-      <div className="pick-grid">
+    <>
+      <div className="stack voice-tiles" role="group" aria-label="Sign in">
         {SIGN_INS.map((s) => (
-          <button key={s.id} className="sign-tile" aria-pressed={s.id === current} onClick={() => setCurrent(s.id)}>
-            <Brand id={s.id} name={s.name} size={44} />
-            {s.name}
+          <button key={s.id} className="voice-tile" aria-pressed={s.id === current} onClick={() => setCurrent(s.id)}>
+            <Brand id={s.id} name={s.name} size={26} />
+            <span className="stacked grow">
+              <span className="label truncate">{s.name}</span>
+              <span className="meta truncate">{signedIn(s.id) ? s.connected : s.note}</span>
+            </span>
+            {signedIn(s.id) && <Icon name="check" size={15} />}
           </button>
         ))}
       </div>
       <p className="meta">{choice.explain}</p>
-      {done && <p className="meta ok" role="status">{choice.name} is connected.</p>}
       {waiting && <p className="label" role="status">Finish in your browser</p>}
       {!done && !waiting && (
         <div className="row">
@@ -145,7 +150,28 @@ function SignIn() {
           )}
         </div>
       )}
-    </section>
+    </>
+  );
+}
+
+/** A server on this PC, which answers or does not. */
+function LocalRow({ provider }: { provider: ProviderInfo }) {
+  const running = useApp((s) => s.localOnline.includes(provider.id));
+  const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(null);
+  const test = () =>
+    bridge.testProvider(provider.id).then(
+      (text) => setStatus({ ok: true, text }),
+      (err) => setStatus({ ok: false, text: String(err) }),
+    );
+  return (
+    <div className="setting">
+      <Brand id={provider.id} name={provider.name} size={28} />
+      <span className="stacked grow">
+        <span className="label">{provider.name}</span>
+        <span className={status ? (status.ok ? "meta ok truncate" : "meta bad truncate") : "meta"} role="status" title={status?.text}>{status?.text ?? (running ? "Running" : "Not running")}</span>
+      </span>
+      <button className="ghost" onClick={() => void test()}>Test</button>
+    </div>
   );
 }
 
@@ -179,7 +205,13 @@ export function Providers() {
       </header>
       {scan && <p className="meta" role="status">{scan}</p>}
       <SignIn />
-      <button className="quiet" aria-expanded={keys} onClick={() => setKeys(!keys)}>{keys ? "Hide API keys" : "Use an API key instead"}</button>
+      <h2>On this PC</h2>
+      <div className="stack">
+        {providers.filter((p) => p.kind === "local").map((p) => (
+          <LocalRow key={p.id} provider={p} />
+        ))}
+      </div>
+      <button className="ghost api-keys" aria-expanded={keys} onClick={() => setKeys(!keys)}>{keys ? "Hide API keys" : "Use an API key instead"}</button>
       {keys && (
         <div className="cards">
           {providers.map((p) => (

@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     "./tokens.css": "./src/tokens.css",
+    "./themes.css": "./src/themes.css",
     "./motion": "./src/motion.ts"
   }
 }

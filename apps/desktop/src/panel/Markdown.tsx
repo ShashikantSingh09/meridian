@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { hostOf } from "../island/views";
-import { Icon } from "../lib/icons";
 import { blocks, spans } from "../lib/markdown";
 import { openLink } from "../lib/store";
 
@@ -34,13 +33,11 @@ function Code({ lang, text }: { lang: string; text: string }) {
   };
   return (
     <div className="md-code">
-      <div className="md-code-bar">
-        <span className="grow">{lang || "code"}</span>
-        <button aria-label="Copy code" onClick={() => void copy()}>
-          <Icon name={copied ? "check" : "copy"} size={13} /> {copied ? "Copied" : "Copy"}
-        </button>
-      </div>
       <pre>{text}</pre>
+      <div className="md-code-bar">
+        {lang && <span>{lang}</span>}
+        <button aria-label="Copy code" onClick={() => void copy()}>{copied ? "Copied" : "Copy"}</button>
+      </div>
     </div>
   );
 }

@@ -1,7 +1,9 @@
 import "@fontsource-variable/inter/opsz.css";
 import "@meridian/design-system/tokens.css";
+import "@meridian/design-system/themes.css";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
+import "./glass.css";
 import { Island } from "./island/Island";
 import { mock } from "./lib/mock";
 import {
@@ -28,11 +30,13 @@ import {
   updateSettings,
 } from "./lib/store";
 import { bridge } from "./lib/bridge";
+import { watchTheme } from "./lib/theme";
 import { endConversation, say, startVoice, wireVoice } from "./lib/voice";
 
 createRoot(document.getElementById("root")!).render(<Island />);
 
 wireVoice();
+watchTheme(() => getState().settings);
 
 void boot();
 

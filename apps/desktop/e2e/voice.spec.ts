@@ -63,7 +63,8 @@ test.beforeEach(async ({ page }) => {
 test("a spoken question goes to the AI, and the answer is read out", async ({ page }) => {
   await island(page).click();
   await page.getByRole("button", { name: "Chat", exact: true }).click();
-  await page.getByRole("radio", { name: "Anthropic" }).click();
+  await page.getByRole("button", { name: "AI engine" }).click();
+  await page.getByRole("menuitemradio", { name: "Anthropic" }).click();
   await page.keyboard.press("Escape");
   await mock(page)((m) => m.setHeard("what time is my flight"));
 

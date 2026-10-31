@@ -1,14 +1,19 @@
+import { AssistantSection } from "./Assistant";
+import { showDevices } from "./Devices";
 import { FollowSwitch } from "./Follow";
 import { Markdown } from "./Markdown";
 import { ScreenSection } from "./Screen";
+import { ThemesSection } from "./Themes";
 import { VoiceSection } from "./Voice";
+import "./settings.css";
 import { spring } from "@meridian/design-system/motion";
 import { motion } from "motion/react";
 import { useState, useEffect } from "react";
 import { Face, FACES, type Mood } from "../island/faces";
 import { bridge } from "../lib/bridge";
+import { Brand } from "../lib/brands";
 import { checkForUpdates, clearHistory, feel, installUpdate, PREVIEWS, refreshAuth, setSettingsSection, showPreview, testWake, updateSettings, useApp, type SettingsSection } from "../lib/store";
-import { Icon } from "../lib/icons";
+import { Icon, type IconName } from "../lib/icons";
 import type { AgentInfo, Settings, WakeWord } from "../lib/types";
 import { Integrations } from "./Integrations";
 import { Providers } from "./Providers";
@@ -48,11 +53,14 @@ function Toggle({ name, label, hint }: { name: Flag; label: string; hint: string
   );
 }
 
+const Fact = ({ text }: { text: string }) => <p className="fact"><Icon name="check" size={14} />{text}</p>;
+
 function General() {
   const systemPrompt = useApp((s) => s.settings.systemPrompt);
   return (
     <section className="stack-lg">
       <h1>General</h1>
+      <h2>Startup and sound</h2>
       <div className="stack">
         <Toggle name="autostart" label="Start with Windows" hint="Off by default." />
         <Toggle name="sounds" label="Sounds" hint="A soft chime when an agent finishes or needs you." />
@@ -88,12 +96,12 @@ function FacePicker() {
   const chosen = useApp((s) => s.settings.face);
   const feeling = useApp((s) => s.feeling);
   return (
-    <div className="stack">
+    <>
       <h2>Face</h2>
-      <div className="pick-grid">
+      <div className="pick-grid face-grid">
         {FACES.map((f) => (
           <button key={f.id} className="pick" aria-pressed={f.id === chosen} title={f.note} onClick={() => void updateSettings({ face: f.id })}>
-            <span className="pick-stage"><Face id={f.id} mood={feeling ?? "rest"} scale={0.8} /></span>
+            <span className="pick-stage"><Face id={f.id} mood={feeling ?? "rest"} scale={0.62} /></span>
             <span className="pick-name">{f.name}</span>
           </button>
         ))}
@@ -103,7 +111,7 @@ function FacePicker() {
           <button key={mood} className="chip" aria-pressed={feeling === mood} onClick={() => feel(mood, 2600)}>{label}</button>
         ))}
       </div>
-    </div>
+    </>
   );
 }
 
@@ -145,20 +153,18 @@ function IslandSection() {
       </div>
       <div className="stack">
         <Toggle name="showClock" label="Show the time" hint="Beside the line while idle." />
-        <Toggle name="showNextMeeting" label="Show the next meeting" hint="On the island when you point at it." />
         <Toggle name="mediaEnabled" label="Show what is playing" hint="Any player that publishes to Windows media controls." />
-        <Toggle name="islandAutoHide" label="Hide when idle" hint="Shrinks to a sliver at the top of the screen, and returns on hover or activity." />
+        <Toggle name="showNextMeeting" label="Show the next meeting" hint="On the island when you point at it." />
+        <Toggle name="islandAutoHide" label="Hide when idle" hint="Shrinks to a sliver, and returns on hover or activity." />
         <Toggle name="ambient" label="Ambient breathing" hint="The face breathes for a few seconds after activity, then rests." />
-        <p className="meta">Hide it completely from the tray icon. The shortcut brings it back.</p>
       </div>
-      <div className="stack">
-        <h2>Preview island states</h2>
-        <p className="meta">Shows each state with sample data for a few seconds, so you can judge the design.</p>
-        <div className="chips">
-          {PREVIEWS.map((p) => (
-            <button key={p.name} className="chip" aria-pressed={preview === p.name} onClick={() => showPreview(p.name)}>{p.name}</button>
-          ))}
-        </div>
+      <p className="meta">Hide it completely from the tray icon. The shortcut brings it back.</p>
+      <h2>Preview island states</h2>
+      <p className="meta">Shows each state with sample data for a few seconds, so you can judge the design.</p>
+      <div className="chips">
+        {PREVIEWS.map((p) => (
+          <button key={p.name} className="chip" aria-pressed={preview === p.name} onClick={() => showPreview(p.name)}>{p.name}</button>
+        ))}
       </div>
     </section>
   );
@@ -167,14 +173,14 @@ function IslandSection() {
 function AgentRow({ agent }: { agent: AgentInfo }) {
   const auth = useApp((s) => s.auth[agent.id]);
   const signedIn = auth?.signedIn;
-  const state = !agent.installed ? "Not installed" : signedIn === true ? `Signed in${auth?.plan ? `, ${auth.plan}` : ""}` : signedIn === false ? "Not signed in" : "Sign-in unknown";
+  const state = signedIn === true ? `signed in${auth?.plan ? `, ${auth.plan}` : ""}` : signedIn === false ? "not signed in" : "sign-in unknown";
   return (
     <div className="setting">
+      <Brand id={agent.id} name={agent.name} size={30} />
       <span className="stacked grow">
         <span className="label">{agent.name}</span>
-        <span className="meta truncate" title={agent.path ?? undefined}>{agent.version ?? "Not found on PATH"}</span>
+        <span className="meta truncate" title={agent.path ?? undefined}>{agent.installed ? `${agent.version}, ${state}` : "Not installed. Not found on PATH"}</span>
       </span>
-      <span className="meta">{state}</span>
       {agent.installed && <button className="ghost" onClick={() => void refreshAuth(agent.id)}>Check</button>}
       {agent.installed && signedIn !== true && <button className="solid" onClick={() => void bridge.agentLogin(agent.id)}>Sign in</button>}
     </div>
@@ -197,12 +203,14 @@ function AgentsSection() {
     <section className="stack-lg">
       <h1>Coding agents</h1>
       <div className="stack">
-        <FollowSwitch explain="Shows sessions started in any terminal, and lets you answer permission requests, questions and plans from the island. Adds hooks to your Claude Code settings file and keeps a backup. Turning this off removes them. Nothing leaves this PC." />
+        <FollowSwitch label="Follow Claude Code in any terminal" explain="Answer permission requests, questions and plans from the island. Adds hooks to your Claude Code settings and keeps a backup. Turning this off removes them. Nothing leaves this PC." />
       </div>
       <div className="stack">
         {agents.map((a) => (
           <AgentRow key={a.id} agent={a} />
         ))}
+      </div>
+      <div className="stack">
         <div className="setting">
           <span className="stacked grow">
             <span className="label">Default project folder</span>
@@ -219,19 +227,26 @@ function Privacy() {
   return (
     <section className="stack-lg">
       <h1>Privacy</h1>
-      <Toggle name="monitoringPaused" label="Pause all monitoring" hint="Stops contextual awareness and background fetching at once. Also in the tray menu." />
-      <p className="meta">
-        Your screen is read only as set under Screen, always on this PC, and shared only from a preview you approve.
-        No keystrokes or clipboard are read. The microphone opens only while the listening view is on screen, or for wake
-        words if you turn them on. The island shows a dot for those, and nothing is recorded. Chat text goes only to the engine you pick. Providers are read with read-only
-        tools, and what they return stays on this PC. No telemetry.
-      </p>
-      <div className="setting">
-        <span className="stacked grow">
-          <span className="label">Chat and session history</span>
-          <span className="meta">Kept on this PC so it survives a restart. Shared images are not kept.</span>
-        </span>
-        <button className="ghost" onClick={clearHistory}>Clear history</button>
+      <div className="stack">
+        <Toggle name="monitoringPaused" label="Pause all monitoring" hint="Stops contextual awareness and background fetching at once. Also in the tray menu." />
+      </div>
+      <h2>What stays true</h2>
+      <div className="stack">
+        <Fact text="Your screen is read only as set under Screen, always on this PC, and shared only from a preview you approve." />
+        <Fact text="Keystrokes and the clipboard are never read." />
+        <Fact text="The microphone opens only while the listening view is on screen, for wake words if you turn them on, or while Microphone and headphones is open under Voice. Nothing is recorded." />
+        <Fact text="The island shows a dot for as long as it is listening for wake words." />
+        <Fact text="Chat goes only to the engine you pick. Providers are read with read-only tools, and what they return stays on this PC." />
+        <Fact text="No telemetry." />
+      </div>
+      <div className="stack">
+        <div className="setting">
+          <span className="stacked grow">
+            <span className="label">Chat and session history</span>
+            <span className="meta">Kept on this PC so it survives a restart. Shared images are not kept.</span>
+          </span>
+          <button className="ghost" onClick={clearHistory}>Clear history</button>
+        </div>
       </div>
     </section>
   );
@@ -302,10 +317,10 @@ function WakeSection() {
 
   return (
     <section className="stack-lg">
-      <div>
+      <header className="settings-head">
         <h1>Wake words</h1>
         <p className="meta">Say its name and it starts listening, with no keys to press.</p>
-      </div>
+      </header>
       <div className="stack">
         <Toggle name="wakeEnabled" label="Listen for wake words" hint="Keeps the microphone on. Off until you turn it on. The island shows a dot for as long as it is listening." />
         {status.why && <p className="meta" role="status">{status.why}</p>}
@@ -328,12 +343,23 @@ function WakeSection() {
         </form>
         {phrase && !usable && <p className="meta">Use English letters, even for a Hindi word, such as Suno Mira.</p>}
       </div>
-      <div className="setting wake-word">
-        <span className="stacked grow">
-          <span className="label">Try it</span>
-          <span className="meta" role="status">{trying}</span>
-        </span>
-        <button className="ghost" disabled={!first || test.phase === "waiting"} onClick={testWake}>Test</button>
+      <div className="stack">
+        <div className="setting wake-word">
+          <span className="stacked grow">
+            <span className="label">Try it</span>
+            <span className="meta" role="status">{trying}</span>
+          </span>
+          <button className="ghost" disabled={!first || test.phase === "waiting"} onClick={testWake}>Test</button>
+        </div>
+      </div>
+      <div className="stack">
+        <button className="setting link-row" onClick={showDevices}>
+          <span className="stacked grow">
+            <span className="label">Microphone and headphones</span>
+            <span className="meta">Wake words always listen through your Windows default microphone.</span>
+          </span>
+          <Icon name="chevron" size={12} />
+        </button>
       </div>
       <div className="stack">
         <Choice name="wakeSensitivity" label="How easily it wakes" options={[{ value: "sure", label: "Only when sure" }, { value: "balanced", label: "Balanced" }, { value: "easily", label: "Easily" }]} />
@@ -342,10 +368,11 @@ function WakeSection() {
         <Toggle name="wakePauseCalls" label="Pause during calls" hint="While another app is using the microphone." />
         <Toggle name="wakePauseLocked" label="Pause when the screen is locked" hint="Listening starts again when you unlock." />
       </div>
-      <p className="meta">
-        Listening for its name happens on this PC, with the speech recognizer built into Windows, so there is nothing to download.
-        Nothing is saved or sent until it hears its name. After that, your words go to the hearing you chose under Voice.
-      </p>
+      <div className="stack">
+        <Fact text="Listening for the name happens on this PC." />
+        <Fact text="Nothing is saved, and nothing is sent, until it hears its name. After that, your words go to the hearing you chose under Voice." />
+        <Fact text="Uses the speech recognizer built into Windows, so there is nothing to download." />
+      </div>
     </section>
   );
 }
@@ -363,37 +390,93 @@ function About() {
           <button className="ghost" onClick={() => void bridge.openLogs()}>Open logs</button>
         </div>
       </div>
-      <p className="meta">Set in Inter, used under the SIL Open Font License. Keyboard shortcut: Ctrl Alt Space opens the island from anywhere.</p>
+      <h2>Keyboard shortcuts</h2>
+      <div className="stack">
+        {SHORTCUTS.map(([name, key]) => (
+          <div className="setting shortcut" key={name}>
+            <span className="label">{name}</span>
+            <span className="keys"><kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>{key}</kbd></span>
+          </div>
+        ))}
+      </div>
+      <p className="meta">Set in Inter, used under the SIL Open Font License.</p>
     </section>
   );
 }
 
-const SECTIONS: { id: SettingsSection; label: string; page: () => React.JSX.Element }[] = [
-  { id: "general", label: "General", page: General },
-  { id: "island", label: "Island", page: IslandSection },
-  { id: "voice", label: "Voice", page: VoiceSection },
-  { id: "wake", label: "Wake words", page: WakeSection },
-  { id: "screen", label: "Screen", page: ScreenSection },
-  { id: "models", label: "AI models", page: Providers },
-  { id: "providers", label: "Providers", page: Integrations },
-  { id: "agents", label: "Coding agents", page: AgentsSection },
-  { id: "privacy", label: "Privacy", page: Privacy },
-  { id: "updates", label: "Updates", page: UpdatesSection },
-  { id: "about", label: "About", page: About },
+const SHORTCUTS = [["Open the island", "Space"], ["Look at the screen", "S"], ["Talk", "V"]] as const;
+
+interface Section {
+  id: SettingsSection;
+  label: string;
+  icon: IconName;
+  tone: string;
+  /** What else is on the page, for the search box. */
+  terms: string;
+  page: () => React.JSX.Element;
+}
+
+const SECTIONS: Section[][] = [
+  [
+    { id: "general", label: "General", icon: "settings", tone: "#8e8e93", page: General, terms: "start with windows startup sounds chime local-only offline custom instructions system prompt" },
+    { id: "themes", label: "Themes", icon: "bulb", tone: "#ff6b35", page: ThemesSection, terms: "appearance colour color dark light midnight daylight graphite ocean rose solid glass transparency accent time of day follow windows" },
+    { id: "island", label: "Island", icon: "window", tone: "#ff9f0a", page: IslandSection, terms: "face eyes mood position display monitor animation speed motion clock time music meeting hide idle ambient breathing preview" },
+  ],
+  [
+    { id: "assistant", label: "Assistant", icon: "chat", tone: "#34b7a7", page: AssistantSection, terms: "name calls you personality calm cheerful direct playful own words manner" },
+    { id: "voice", label: "Voice", icon: "mic", tone: "#ff375f", page: VoiceSection, terms: "speak hearing interrupt elevenlabs openai cartesia deepgram kokoro piper key microphone headphones speakers output headset device" },
+    { id: "wake", label: "Wake words", icon: "bell", tone: "#d6336c", page: WakeSection, terms: "hey name listen sensitivity pause calls locked microphone charger" },
+  ],
+  [
+    { id: "screen", label: "Screen", icon: "screen", tone: "#5e5ce6", page: ScreenSection, terms: "look capture awareness errors exclusions never capture password" },
+    { id: "privacy", label: "Privacy", icon: "lock", tone: "#0a84ff", page: Privacy, terms: "monitoring pause telemetry history clear microphone data" },
+  ],
+  [
+    { id: "models", label: "AI models", icon: "bulb", tone: "#bf5af2", page: Providers, terms: "claude chatgpt openrouter ollama lm studio api key sign in local server" },
+    { id: "providers", label: "Providers", icon: "providers", tone: "#30b0c7", page: Integrations, terms: "gmail calendar outlook github linear notion slack connect accounts" },
+    { id: "agents", label: "Coding agents", icon: "agents", tone: "#636366", page: AgentsSection, terms: "claude code codex follow terminal hooks project folder sign in" },
+  ],
+  [
+    { id: "updates", label: "Updates", icon: "retry", tone: "#30b35a", page: UpdatesSection, terms: "version install check new" },
+    { id: "about", label: "About", icon: "lines", tone: "#8e8e93", page: About, terms: "version logs keyboard shortcuts font license" },
+  ],
 ];
 
 export function SettingsPage() {
   const current = useApp((s) => s.settingsSection);
-  const Section = SECTIONS.find((s) => s.id === current)!.page;
+  const [search, setSearch] = useState("");
+  const words = search.toLowerCase().split(/\s+/).filter(Boolean);
+  const groups = SECTIONS.map((group) => group.filter((s) => words.every((word) => `${s.label} ${s.terms}`.toLowerCase().includes(word)))).filter((group) => group.length > 0);
+  const Section = SECTIONS.flat().find((s) => s.id === current)!.page;
+
+  const onSearchKey = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" && groups[0]) setSettingsSection(groups[0][0]!.id);
+    if (e.key === "Escape" && search) {
+      // Clears the box, and leaves the panel open.
+      e.stopPropagation();
+      setSearch("");
+    }
+  };
+
   return (
     <div className="settings">
       <nav className="settings-nav" aria-label="Settings sections">
-        {SECTIONS.map((s) => (
-          <button key={s.id} className="settings-tab" aria-current={current === s.id ? "page" : undefined} onClick={() => setSettingsSection(s.id)}>
-            {current === s.id && <motion.span layoutId="settings-pill" className="topnav-pill" transition={spring.hover} />}
-            <span className="settings-tab-label">{s.label}</span>
-          </button>
+        <label className="settings-search">
+          <Icon name="search" size={14} />
+          <input aria-label="Search settings" placeholder="Search settings" value={search} onChange={(e) => setSearch(e.target.value)} onKeyDown={onSearchKey} />
+        </label>
+        {groups.map((group) => (
+          <div className="settings-group" key={group[0]!.id}>
+            {group.map((s) => (
+              <button key={s.id} className="settings-tab" aria-current={current === s.id ? "page" : undefined} onClick={() => setSettingsSection(s.id)}>
+                {current === s.id && <motion.span layoutId="settings-pill" className="settings-pill" transition={spring.hover} />}
+                <span className="settings-icon" style={{ background: s.tone }}><Icon name={s.icon} size={13} /></span>
+                <span className="settings-tab-label">{s.label}</span>
+              </button>
+            ))}
+          </div>
         ))}
+        {groups.length === 0 && <p className="meta settings-none" role="status">Nothing matches.</p>}
       </nav>
       <motion.div key={current} className={current === "providers" ? "settings-body flush" : "settings-body"} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.14 }}>
         <Section />

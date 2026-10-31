@@ -1,0 +1,1533 @@
+/* The content pages, as the Liquid boards draw them. Content is thin fills on the lit sheet. Only
+   what floats above it is glass: the message box, the media keys and the New chat button, and
+   never one on another. The accent is for the one main action on a page.
+
+   Everything here is a theme variable, because these pages have to read in Daylight too. */
+
+.panel {
+  --inset: color-mix(in srgb, var(--sheet-low) 55%, transparent);
+  --bubble: color-mix(in srgb, var(--accent) 42%, transparent);
+}
+
+:root[data-theme="daylight"] .panel {
+  --bubble: color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+/* A slab of content. */
+.plate {
+  border-radius: 16px;
+  background: var(--well);
+}
+
+.board .ghost {
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 16px;
+  background: var(--well-hover);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--ink-1);
+  white-space: nowrap;
+}
+
+.board .ghost:hover:not(:disabled) {
+  background: var(--well-active);
+}
+
+.board .solid:not(.round) {
+  height: 32px;
+  padding: 0 14px;
+  border-radius: 16px;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.board .flag {
+  flex: none;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 7px;
+  border-radius: 6px;
+  background: var(--well-hover);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--tint-amber);
+}
+
+.board .toggle input {
+  width: 42px;
+  height: 26px;
+  background: var(--track);
+}
+
+.board .toggle input::after {
+  top: 2px;
+  left: 2px;
+  width: 22px;
+  height: 22px;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+}
+
+.board .toggle input:checked {
+  background: var(--state-success);
+}
+
+.board .toggle input:checked::after {
+  translate: 16px 0;
+}
+
+.board .tile-title {
+  display: block;
+  font-size: var(--text-lg);
+  font-weight: 600;
+  letter-spacing: -0.012em;
+}
+
+/* The bar you type in floats. */
+.board .composer {
+  flex: none;
+  height: 48px;
+  gap: 6px;
+  padding: 0 7px 0 9px;
+  border: 0;
+  border-radius: 24px;
+  background: var(--float);
+  box-shadow: var(--float-edge);
+  backdrop-filter: var(--frost);
+}
+
+.board .composer input:not([type="checkbox"], [type="radio"]) {
+  height: 100%;
+  min-width: 0;
+  padding: 0 6px;
+  font-size: var(--text-md);
+}
+
+.board .composer input::placeholder {
+  color: var(--ink-2);
+}
+
+.board .composer .round:not(.solid) {
+  width: 34px;
+  height: 34px;
+  flex: none;
+  background: none;
+  color: var(--ink-2);
+}
+
+.board .composer .round:hover:not(:disabled, .solid) {
+  background: var(--well);
+}
+
+.board .composer .round.stop {
+  background: var(--well-hover);
+  color: var(--ink-1);
+}
+
+.board .composer .round.solid {
+  width: 34px;
+  height: 34px;
+  flex: none;
+  opacity: 1;
+}
+
+.board .composer .ghost {
+  flex: none;
+}
+
+/* Marks on rows sit bare, in the ink of the page, as logos with no colour of their own need to. */
+.home-agent .brand,
+.conv .brand,
+.pill-button .brand,
+.menu-row .brand {
+  border-radius: 0;
+  background: none;
+  color: var(--ink-1);
+}
+
+.home-agent .brand svg,
+.conv .brand svg,
+.pill-button .brand svg,
+.menu-row .brand svg {
+  width: 100%;
+  height: 100%;
+  fill: currentColor;
+}
+
+.live-dot {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--tint-blue);
+  animation: live-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes live-pulse {
+  50% { opacity: 0.45; }
+}
+
+html[data-motion="reduced"] .live-dot {
+  animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-motion="system"] .live-dot {
+    animation: none;
+  }
+}
+
+/* An empty list says so in the middle of its space. */
+.page-rest {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 16px;
+  color: var(--ink-2);
+  text-align: center;
+}
+
+.page-rest-title {
+  margin-top: 4px;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.016em;
+  color: var(--ink-1);
+}
+
+.board .page-rest .solid {
+  height: 36px;
+  margin-top: 10px;
+  border-radius: 18px;
+}
+
+/* ── Home ───────────────────────────────────────────────────────────── */
+
+.home {
+  gap: 8px;
+  padding: 4px 16px 0;
+}
+
+.bento {
+  grid-template-rows: 124px 124px minmax(0, 1fr);
+}
+
+.home-agents {
+  grid-column: span 2;
+  grid-row: span 2;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 14px;
+}
+
+.home-agents[data-busy="true"] {
+  gap: 8px;
+}
+
+.home-agents .big-clock {
+  font-size: 52px;
+  line-height: 1.1;
+  letter-spacing: -0.03em;
+  white-space: nowrap;
+}
+
+.home-agents .meta {
+  font-size: var(--text-md);
+}
+
+.home-agents .ghost {
+  font-weight: 500;
+}
+
+.home-agents-head {
+  align-items: center;
+  min-height: 22px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.home-agent {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 9px 12px 10px;
+  border-radius: 12px;
+  background: var(--inset);
+  text-align: left;
+}
+
+.home-agent:hover {
+  background: var(--well);
+}
+
+.home-agent .meta {
+  font-size: var(--text-sm);
+  font-weight: 500;
+}
+
+.home-agent .doing {
+  font-size: var(--text-sm);
+  color: var(--tint-blue);
+}
+
+.home-agent[data-agent="codex"] .doing {
+  color: var(--tint-violet);
+}
+
+.home-next,
+.home-music {
+  grid-column: span 2;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 16px;
+}
+
+.home-music {
+  padding-left: 14px;
+}
+
+.home-music[data-tinted="true"] {
+  background: linear-gradient(104deg, color-mix(in srgb, var(--art) 30%, transparent), color-mix(in srgb, var(--art) 12%, transparent) 60%, var(--well));
+}
+
+.home-music .artwork {
+  border-radius: 14px;
+}
+
+.home-music .no-art {
+  background: var(--inset);
+  color: var(--ink-2);
+}
+
+.home-music .no-art svg {
+  width: 22px;
+  height: 22px;
+}
+
+.home-music .tile-title {
+  max-width: 100%;
+}
+
+.next-ring {
+  position: relative;
+  width: 58px;
+  height: 58px;
+  flex: none;
+  display: grid;
+  place-items: center;
+}
+
+.next-ring svg {
+  position: absolute;
+  inset: 0;
+  rotate: -90deg;
+}
+
+.next-ring circle {
+  fill: none;
+  stroke: var(--track);
+  stroke-width: 5;
+}
+
+.next-ring circle[data-arc="true"] {
+  stroke: var(--tint-amber);
+  stroke-linecap: round;
+}
+
+.next-ring b {
+  display: grid;
+  font-size: var(--text-lg);
+  font-weight: 700;
+  color: var(--ink-1);
+}
+
+.next-ring b > svg {
+  position: static;
+  rotate: none;
+  color: var(--tint-amber);
+}
+
+.home-next .tile-kicker {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--tint-amber);
+}
+
+.home-feed {
+  grid-column: span 3;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 12px 8px 14px;
+}
+
+.home-feed > .list {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-around;
+}
+
+.feed-row {
+  height: 32px;
+  gap: 10px;
+  padding: 0 2px;
+}
+
+.feed-idea {
+  background: var(--well-active);
+  color: var(--tint-amber);
+}
+
+.home-connect {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.home-logos {
+  flex: none;
+  display: flex;
+  gap: 6px;
+}
+
+.home-connect .meta {
+  font-size: var(--text-md);
+  line-height: 1.45;
+}
+
+.home-today {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 14px 16px;
+  text-align: left;
+}
+
+.home-today:hover {
+  background: var(--well-hover);
+}
+
+.home-number {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  font-size: 44px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  color: var(--ink-1);
+}
+
+/* ── Media ──────────────────────────────────────────────────────────── */
+
+/* The player takes whatever room the lists leave, and sits in the middle of it. */
+.media-page {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 16px 0;
+  overflow: hidden;
+}
+
+.media-stage {
+  position: relative;
+  isolation: isolate;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 22px;
+  padding: 0 8px;
+}
+
+.media-glow {
+  position: absolute;
+  z-index: -1;
+  top: 50%;
+  left: -70px;
+  width: 500px;
+  height: 420px;
+  translate: 0 -50%;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--art) 46%, transparent), transparent);
+}
+
+.media-art {
+  width: 216px;
+  height: 216px;
+  flex: none;
+  border-radius: 18px;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.3);
+}
+
+.media-art.no-art {
+  background: var(--well);
+  box-shadow: none;
+  color: var(--ink-2);
+}
+
+.media-art[data-rest="true"] {
+  width: 196px;
+  height: 196px;
+}
+
+.media-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.media-info > .meta {
+  font-size: var(--text-md);
+}
+
+.media-title {
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+  color: var(--ink-1);
+}
+
+.media-rest {
+  max-width: 320px;
+}
+
+.media-rest .media-title {
+  font-size: 26px;
+}
+
+.media-rest .meta {
+  margin-top: 8px;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.board .bars i {
+  background: var(--ink-1);
+}
+
+.media-page .progress-row {
+  margin-top: 20px;
+  gap: 10px;
+  font-size: var(--text-sm);
+  font-weight: 500;
+}
+
+.media-page .progress-track {
+  height: 5px;
+  background: var(--track);
+}
+
+.media-page .progress-fill {
+  background: var(--ink-1);
+}
+
+/* With no track length there is no bar, so the keys keep the distance it would have left. */
+.media-page .transport {
+  margin-top: 20px;
+  gap: 8px;
+  padding: 5px 12px;
+  border: 0;
+  background: var(--float);
+  box-shadow: var(--float-edge);
+  backdrop-filter: var(--frost);
+}
+
+.media-page .progress-row + .transport {
+  margin-top: 14px;
+}
+
+.media-page .transport-key {
+  width: 46px;
+  height: 46px;
+  color: var(--ink-1);
+}
+
+.media-page .transport-key:hover:not(:disabled) {
+  background: var(--well);
+}
+
+.media-lists {
+  flex: none;
+  display: flex;
+  gap: 10px;
+}
+
+.media-list {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 0 6px;
+}
+
+.media-list h2 {
+  padding: 0 14px 4px;
+}
+
+/* Three rows at most, so the player keeps its room. The rest scroll inside the card. */
+.media-list .list {
+  max-height: 114px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--well-active) transparent;
+}
+
+.media-list .list-row {
+  gap: 10px;
+  padding: 3px 14px;
+  border-radius: 0;
+}
+
+.media-list .list-row:hover {
+  background: var(--well);
+}
+
+.media-list .list-row[data-active="true"]:not(:hover) {
+  background: none;
+}
+
+.media-list .label {
+  flex: none;
+  max-width: 60%;
+}
+
+.media-list .status-dot[data-status="running"] {
+  background: var(--tint-green);
+}
+
+/* ── Chat ───────────────────────────────────────────────────────────── */
+
+/* The list runs to the edge of the sheet, so the page gives up the room it keeps for the dock. */
+.panel .page:has(> .chat-page) {
+  padding-bottom: 0;
+}
+
+.chat-page {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.chat-side {
+  width: 204px;
+  flex: none;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 6px 10px 12px;
+  background: color-mix(in srgb, var(--well) 60%, transparent);
+  border-right: 1px solid var(--hairline);
+}
+
+.chat-new {
+  flex: none;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border-radius: 17px;
+  background: var(--float);
+  box-shadow: var(--float-edge);
+  backdrop-filter: var(--frost);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink-1);
+}
+
+.chat-search {
+  flex: none;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 8px;
+  padding: 0 9px;
+  border-radius: 10px;
+  background: var(--well);
+  color: var(--ink-2);
+}
+
+.board .chat-search input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  background: none;
+  font-size: 12.5px;
+}
+
+.chat-convs {
+  flex: 1;
+  min-height: 0;
+  margin-top: 2px;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.conv-head {
+  padding: 10px 8px 3px;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--ink-3);
+}
+
+.conv-none {
+  padding: 10px 8px;
+}
+
+.conv {
+  width: 100%;
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  border-radius: 10px;
+  font-size: 12.5px;
+  color: var(--ink-1);
+  text-align: left;
+}
+
+.conv:hover {
+  background: var(--well);
+}
+
+.conv[aria-current="true"] {
+  background: var(--well-active);
+}
+
+/* Room for the dock is kept here, under the message box. */
+.chat-page .chat {
+  min-width: 0;
+  padding-bottom: 66px;
+}
+
+.chat .chat-bar {
+  flex: none;
+  min-height: 44px;
+  gap: 8px;
+  padding: 2px 16px 6px;
+}
+
+.chat-title {
+  flex: 1;
+  min-width: 0;
+  font-size: var(--text-lg);
+  letter-spacing: -0.012em;
+  color: var(--ink-1);
+}
+
+.chat-page .pill-button {
+  max-width: 170px;
+  height: 34px;
+  gap: 7px;
+  padding: 0 11px;
+  border-radius: 17px;
+  background: var(--float);
+  box-shadow: var(--float-edge);
+  backdrop-filter: var(--frost);
+  font-size: var(--text-sm);
+  color: var(--ink-1);
+}
+
+.chat-page .pill-button:hover:not(:disabled) {
+  background: var(--float);
+  filter: brightness(1.1);
+}
+
+.chat .engine-connect {
+  margin: 0;
+  height: 34px;
+  border-radius: 17px;
+  background: var(--accent-shine);
+  color: var(--accent-ink);
+}
+
+.chat .segmented {
+  flex: none;
+  margin-left: 0;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 16px;
+  background: var(--well);
+}
+
+.chat .segmented button {
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 13px;
+  font-size: var(--text-sm);
+  font-weight: 500;
+}
+
+.chat .segmented button[aria-pressed="true"] {
+  background: var(--well-active);
+  box-shadow: none;
+  color: var(--ink-1);
+}
+
+.chat .segmented button:disabled {
+  opacity: 1;
+}
+
+.chat .chat-folder {
+  flex: none;
+  min-height: 28px;
+  gap: 7px;
+  padding: 0 22px 6px;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--ink-2);
+}
+
+.chat .chat-folder .ghost {
+  height: 26px;
+  padding: 0 10px;
+}
+
+.chat .auth-banner {
+  margin: 0 16px 8px;
+  padding: 8px 8px 8px 12px;
+  border: 0;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--tint-amber) 16%, transparent);
+}
+
+/* Text fades as it reaches the message box, in place of a hard edge. */
+.chat .log,
+.chat .messages {
+  flex: 1 1 0;
+  gap: 12px;
+  padding: 6px 22px 26px;
+  font-size: 13.5px;
+  line-height: 1.55;
+  scrollbar-width: none;
+  mask-image: linear-gradient(#000 calc(100% - 26px), transparent);
+}
+
+.chat-start {
+  color: var(--ink-1);
+}
+
+.chat .chat-hello {
+  font-size: 23px;
+  letter-spacing: -0.02em;
+}
+
+.chat-page .message[data-role="user"],
+.chat-page .log-user {
+  max-width: 78%;
+  padding: 9px 14px;
+  border-radius: 18px 18px 6px 18px;
+  background: var(--bubble);
+  font-weight: 400;
+  color: var(--ink-1);
+  text-align: left;
+}
+
+.chat .message {
+  max-width: 100%;
+}
+
+.chat-steps {
+  flex: none;
+  padding: 10px 14px;
+}
+
+.chat-step {
+  min-height: 24px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 12.5px;
+  color: var(--tint-green);
+}
+
+.chat-step[data-now="true"] {
+  color: var(--tint-blue);
+}
+
+.chat-step span {
+  flex: none;
+  color: var(--ink-1);
+}
+
+.chat-step code {
+  flex: 1;
+  min-width: 0;
+  font: 400 var(--text-sm) / 1.4 var(--font-mono);
+  color: var(--ink-2);
+}
+
+.chat-steps-closed {
+  flex: none;
+  align-self: flex-start;
+  width: 100%;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 9px;
+  border-radius: 8px;
+  background: var(--well);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--ink-2);
+  text-align: left;
+}
+
+.chat-steps-closed:hover {
+  background: var(--well-hover);
+}
+
+.reply-actions {
+  flex: none;
+  display: flex;
+  gap: 2px;
+  margin-top: -6px;
+}
+
+.board .reply-actions .round {
+  width: 28px;
+  height: 28px;
+  background: none;
+  color: var(--ink-2);
+}
+
+.board .reply-actions .round:hover:not(:disabled) {
+  background: var(--well);
+}
+
+.chat .approval {
+  flex: none;
+  padding: 12px 14px;
+  border: 0;
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--tint-amber) 16%, transparent);
+}
+
+.approval-title {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--tint-amber);
+}
+
+.chat .approval .command {
+  padding: 0;
+  background: none;
+  font-size: 12.5px;
+}
+
+.chat .approval .allow {
+  height: 32px;
+  padding: 0 14px;
+  border-radius: 16px;
+  background: var(--accent-shine);
+  color: var(--accent-ink);
+}
+
+.chat .code-card {
+  flex: none;
+  background: var(--inset);
+}
+
+.chat .code-line[data-change="removed"] { color: var(--tint-red); }
+.chat .code-line[data-change="added"],
+.chat .code-line[data-change="plain"] { color: var(--tint-green); }
+
+.chat .attachments {
+  flex: none;
+  padding: 0 16px 8px;
+}
+
+.chat .usage-line {
+  flex: none;
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 0 18px 8px;
+}
+
+.chat-page .chat > .composer {
+  margin: 0 16px;
+}
+
+.look-pill {
+  flex: none;
+  max-width: 170px;
+  height: 30px;
+  gap: 6px;
+  padding: 0 10px;
+  border-radius: 15px;
+  background: var(--well-active);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--ink-1);
+}
+
+/* What would be shared takes the room it needs, and only then scrolls. */
+.chat .look {
+  flex: 0 1 auto;
+  min-height: 0;
+  gap: 10px;
+  padding: 2px 22px 8px;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.chat .look-sheet {
+  flex: none;
+  display: flex;
+  gap: 14px;
+  max-height: none;
+  padding: 12px;
+  border-radius: 16px;
+  background: var(--well);
+  overflow: visible;
+}
+
+.chat .look-sheet .preview {
+  flex: none;
+  max-width: 300px;
+  margin: 0;
+  align-self: flex-start;
+}
+
+.chat .look-sheet .preview img {
+  max-height: 186px;
+}
+
+.look-side {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.look-more {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--ink-1);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.look-details {
+  flex: none;
+  padding: 10px 12px;
+}
+
+.look-details .ocr {
+  background: var(--inset);
+}
+
+.look-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.look-actions .chat-chips {
+  display: contents;
+}
+
+.board .chat-chip {
+  height: 38px;
+  gap: 8px;
+  padding: 0 14px;
+  border-radius: 19px;
+  background: var(--well);
+  font-size: var(--text-md);
+  font-weight: 500;
+  color: var(--ink-1);
+}
+
+.board .chat-chip svg {
+  color: currentColor;
+}
+
+.board .chat-chip:hover:not(:disabled) {
+  background: var(--well-hover);
+}
+
+.look-actions .chat-chip,
+.look-actions .ghost {
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 15px;
+  font-size: var(--text-sm);
+}
+
+/* Code in an answer, here and on the island. */
+.md-code {
+  position: relative;
+}
+
+.md-code pre {
+  padding: 11px 13px;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: var(--ink-2);
+}
+
+.md-code-bar {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  gap: 8px;
+  padding: 0;
+}
+
+.md-code-bar button {
+  height: 24px;
+  padding: 0 9px;
+  border-radius: 12px;
+  background: var(--well-hover);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--ink-1);
+}
+
+.md-code-bar button:hover {
+  background: var(--well-active);
+}
+
+/* The island stays black in every theme, so only the panel takes the theme's fills. */
+.page .md-code {
+  background: var(--inset);
+}
+
+.page .md-inline {
+  background: var(--well-hover);
+}
+
+.page .md blockquote {
+  border-left-color: var(--hairline);
+}
+
+.page .md-link {
+  color: var(--tint-blue);
+}
+
+/* The list opens over the page, so it has the sheet behind it, not the page's fills. */
+.menu {
+  background: var(--sheet-low);
+  box-shadow: var(--float-edge), 0 12px 32px rgba(0, 0, 0, 0.3);
+}
+
+.menu input {
+  background: var(--well);
+}
+
+.menu-row:hover,
+.menu-row:focus-visible {
+  background: var(--well-hover);
+}
+
+/* ── My day ─────────────────────────────────────────────────────────── */
+
+.day-page {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 16px 0;
+}
+
+.day-page .chips {
+  flex: none;
+  flex-wrap: nowrap;
+  gap: 6px;
+}
+
+.day-page .chip {
+  flex: none;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 15px;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--ink-2);
+  text-transform: none;
+}
+
+.day-page .chip[aria-pressed="true"] {
+  color: var(--ink-1);
+}
+
+/* Cards fade as they reach the reminder bar, in place of a hard edge. */
+.day-list {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-bottom: 14px;
+  overflow-y: auto;
+  scrollbar-width: none;
+  mask-image: linear-gradient(#000 calc(100% - 14px), transparent);
+}
+
+.day-row {
+  flex: none;
+  display: flex;
+  gap: 10px;
+}
+
+.day-time {
+  width: 64px;
+  flex: none;
+  padding-top: 13px;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--tone);
+  text-align: right;
+}
+
+.day-node {
+  position: relative;
+  width: 14px;
+  flex: none;
+}
+
+.day-node::before {
+  content: "";
+  position: absolute;
+  top: 16px;
+  left: 3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--tone);
+}
+
+.day-node:not([data-last="true"])::after {
+  content: "";
+  position: absolute;
+  top: 30px;
+  bottom: -12px;
+  left: 6.5px;
+  width: 1px;
+  background: var(--hairline);
+}
+
+.day-page .event {
+  flex: 1;
+  min-width: 0;
+  gap: 9px;
+  padding: 11px 14px;
+  border-radius: 16px;
+}
+
+.event-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.event-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.event-text .row {
+  gap: 8px;
+}
+
+.event-text input {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  background: var(--well);
+}
+
+.event[data-status="cancelled"] .tile-title {
+  text-decoration: line-through;
+  color: var(--ink-3);
+}
+
+.day-page .event-actions {
+  flex: none;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+}
+
+.day-page .event-actions button {
+  height: 32px;
+  padding: 0 12px;
+  font-size: var(--text-sm);
+}
+
+/* A short card shows Correct and Delete only for the card being pointed at. */
+.event:not([data-long="true"]) .event-extra {
+  order: -1;
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.event:hover .event-extra,
+.event:focus-within .event-extra {
+  opacity: 1;
+}
+
+.event[data-long="true"] .event-actions .solid {
+  order: -1;
+}
+
+.day-route {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 14px;
+}
+
+.day-route b {
+  font-weight: 700;
+  color: var(--ink-1);
+}
+
+.day-route-line {
+  position: relative;
+  flex: 1;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--track);
+}
+
+.day-route-line i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 1px;
+  background: var(--tint-blue);
+}
+
+.day-route-line i::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  right: -5px;
+  width: 10px;
+  height: 10px;
+  margin-top: -5px;
+  border-radius: 50%;
+  background: var(--tint-blue);
+}
+
+.day-note {
+  flex: none;
+  padding-left: 98px;
+}
+
+.day-paste {
+  flex: none;
+  padding: 12px;
+}
+
+.day-paste input,
+.day-paste textarea {
+  background: var(--well);
+}
+
+.day-paste input {
+  min-width: 0;
+}
+
+.day-paste textarea {
+  resize: none;
+}
+
+/* The whole pill opens the system's date picker. */
+.board .day-pick {
+  position: relative;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 11px;
+  overflow: hidden;
+}
+
+.day-pick input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  padding: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.day-pick input::-webkit-calendar-picker-indicator {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  cursor: pointer;
+}
+
+/* ── Notifications ──────────────────────────────────────────────────── */
+
+.inbox-page {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 11fr) minmax(0, 13fr);
+  gap: 10px;
+  padding: 4px 16px 0;
+}
+
+.inbox-rules,
+.inbox-history {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.inbox-rules {
+  padding: 10px 14px 6px;
+}
+
+.inbox-rules h2,
+.inbox-history h2 {
+  flex: none;
+  padding: 2px 0 4px;
+}
+
+.inbox-rules .setting {
+  flex: none;
+  min-height: 54px;
+}
+
+.inbox-rules .setting + .setting {
+  border-top: 1px solid var(--hairline);
+}
+
+.inbox-rules .inbox-quiet {
+  margin-top: auto;
+  padding: 7px 0;
+}
+
+.inbox-history {
+  padding: 10px 0 6px;
+}
+
+.inbox-history h2 {
+  padding-inline: 14px;
+}
+
+.inbox-history .list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--well-active) transparent;
+}
+
+.inbox-entry {
+  position: relative;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px 0 35px;
+}
+
+.inbox-entry::before {
+  content: "";
+  position: absolute;
+  top: 12px;
+  left: 15px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--tone);
+}
+
+.inbox-entry:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  top: 24px;
+  bottom: -9px;
+  left: 18.5px;
+  width: 1px;
+  background: var(--hairline);
+}
+
+.inbox-history .page-rest .meta {
+  max-width: 240px;
+  font-size: var(--text-md);
+  line-height: 1.5;
+}
+
+.inbox-page .flag {
+  color: var(--ink-2);
+}
+
+/* ── Welcome ────────────────────────────────────────────────────────── */
+
+.welcome-page {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  max-width: 640px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0 auto;
+  padding: 8px 0 0;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.welcome-lead {
+  font-size: var(--text-md);
+  line-height: 1.45;
+  color: var(--ink-2);
+}
+
+.welcome-steps {
+  flex: none;
+}
+
+.welcome-page .welcome-step {
+  min-height: 44px;
+  gap: 11px;
+  padding: 7px 14px;
+  border-radius: 0;
+  background: none;
+}
+
+.welcome-page .welcome-step + .welcome-step {
+  border-top: 1px solid var(--hairline);
+}
+
+.board.welcome-page .solid {
+  height: 36px;
+  padding: 0 22px;
+  border-radius: 18px;
+}

@@ -24,6 +24,7 @@ import type {
   Settings,
   SettingsChange,
   Level,
+  Track,
   WakeStatus,
 } from "./types";
 import { defaultSettings } from "./types";
@@ -47,7 +48,7 @@ const voiceKeys = new Set<string>();
 let heardWords = "";
 const spokenWords: string[] = [];
 let wakeState: ((status: WakeStatus) => void) | null = null;
-let wakeHeard: ((heard: { word: string; test: boolean }) => void) | null = null;
+let wakeHeard: ((heard: { word: string; test: boolean; spokenMs: number }) => void) | null = null;
 let updateStatus = { current: "0.3.0", latest: "v0.3.0", available: false, notes: "", published: null as string | null, message: "You are on the latest version." };
 let updateInstalled = false;
 let failInstalling: (why: Error) => void = () => {};
@@ -93,7 +94,7 @@ const inCategory = (e: ContextEvent, category: Category | null) => {
   return (category === "travel" && e.kind === "flight") || (category === "deliveries" && e.kind === "delivery");
 };
 let pushMedia: (s: MediaSnapshot) => void = () => {};
-const sampleTrack = {
+const sampleTrack: Track = {
   session: "Spotify.exe",
   app: "Spotify",
   title: "Northern Lights",
@@ -167,9 +168,9 @@ export const mock = {
     pushMedia = handler;
     return () => {};
   },
-  publishMedia: (present: boolean) => {
-    track = { ...sampleTrack };
-    pushMedia(present ? { current: track, sessions: [track] } : { current: null, sessions: [] });
+  publishMedia: (present: boolean, over: Partial<Track> = {}, others: Partial<Track>[] = []) => {
+    track = { ...sampleTrack, ...over };
+    pushMedia(present ? { current: track, sessions: [track, ...others.map((o) => ({ ...sampleTrack, ...o }))] } : { current: null, sessions: [] });
   },
 
   activityList: async (category: Category | null) => events.filter((e) => inCategory(e, category)),
@@ -236,9 +237,9 @@ export const mock = {
   voiceSpeak: async (text: string) => void spokenWords.push(text),
   voiceHeard: async () => heardWords,
   onWakeState: (handler: (status: WakeStatus) => void) => void (wakeState = handler),
-  onWakeHeard: (handler: (heard: { word: string; test: boolean }) => void) => void (wakeHeard = handler),
+  onWakeHeard: (handler: (heard: { word: string; test: boolean; spokenMs: number }) => void) => void (wakeHeard = handler),
   setWakeState: (status: WakeStatus) => wakeState?.(status),
-  hearWake: (word: string, test = false) => wakeHeard?.({ word, test }),
+  hearWake: (word: string, test = false, spokenMs = 700) => wakeHeard?.({ word, test, spokenMs }),
   setPacks: (ids: string[]) => {
     voicePacks.clear();
     ids.forEach((id) => voicePacks.add(id));
@@ -290,6 +291,7 @@ export const mock = {
     emit({ sessionId, event: { type: "watched", agent: "Claude Code", cwd: "C:\\Projects\\shop", title: "Fix the checkout" } });
     emit({ sessionId, event: { type: "activity", label: "Editing cart.ts" } });
   },
+  publishEvent: (sessionId: string, event: AgentEvent) => emit({ sessionId, event }),
   publishText: (sessionId: string, text: string) => emit({ sessionId, event: { type: "text", text } }),
   publishFailure: (sessionId: string, message: string) => emit({ sessionId, event: { type: "status", status: "failed", message } }),
   publishWatchedApproval: (sessionId: string) =>

@@ -157,6 +157,7 @@ export const bridge = {
       : mock.checkUpdate(),
   installUpdate: () => (native ? invoke<void>("update_install") : mock.installUpdate()),
   openLogs: () => (native ? invoke<void>("open_logs") : Promise.resolve()),
+  openSoundSettings: () => (native ? invoke<void>("open_sound_settings") : Promise.resolve()),
 
   screenCapture: (target: "window" | "screen") =>
     native ? invoke<Capture>("screen_capture", { target }) : mock.screenCapture(),
@@ -258,6 +259,14 @@ export const bridge = {
   voiceHearStart: () => (native ? invoke<void>("voice_hear_start") : Promise.resolve()),
   voiceHear: (pcm: Uint8Array) => (native ? invoke<string>("voice_hear", pcm) : mock.voiceHeard()),
   voiceHearEnd: () => (native ? invoke<string>("voice_hear_end") : mock.voiceHeard()),
+  onAssistantOpen(handler: (tab: string) => void) {
+    if (!native) return Promise.resolve();
+    return listen<string>("assistant-open", (e) => handler(e.payload)).then(() => {});
+  },
+  onAssistantAgent(handler: (start: { task: string; folder: string }) => void) {
+    if (!native) return Promise.resolve();
+    return listen<{ task: string; folder: string }>("assistant-start-agent", (e) => handler(e.payload)).then(() => {});
+  },
   wakeStatus: () => (native ? invoke<WakeStatus>("wake_status") : Promise.resolve<WakeStatus>({ state: "off", why: "" })),
   wakeTalking: (on: boolean) => (native ? invoke<void>("wake_talking", { on }) : Promise.resolve()),
   wakeTest: () => (native ? invoke<void>("wake_test") : Promise.resolve()),
@@ -265,9 +274,9 @@ export const bridge = {
     if (!native) return Promise.resolve(mock.onWakeState(handler));
     return listen<WakeStatus>("wake-state", (e) => handler(e.payload)).then(() => {});
   },
-  onWakeHeard(handler: (heard: { word: string; test: boolean }) => void) {
+  onWakeHeard(handler: (heard: { word: string; test: boolean; spokenMs: number }) => void) {
     if (!native) return Promise.resolve(mock.onWakeHeard(handler));
-    return listen<{ word: string; test: boolean }>("wake-heard", (e) => handler(e.payload)).then(() => {});
+    return listen<{ word: string; test: boolean; spokenMs: number }>("wake-heard", (e) => handler(e.payload)).then(() => {});
   },
   onVoiceKey(handler: (down: boolean) => void) {
     if (!native) return Promise.resolve(() => {});

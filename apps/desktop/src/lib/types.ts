@@ -104,7 +104,17 @@ export type SessionStatus =
 export interface Question {
   text: string;
   options: string[];
+  /** What each option means, in the same order. Empty where the agent gave nothing. */
+  details?: string[];
   multi: boolean;
+}
+
+/** One line of an agent's own to-do list. */
+export interface Todo {
+  id: string;
+  text: string;
+  /** "pending", "in_progress" or "completed", as the agent says it. */
+  status: string;
 }
 
 export interface Approval {
@@ -124,6 +134,13 @@ export interface SettingsChange {
   lines: { kind: "added" | "removed" | "plain" | "gap"; text: string }[];
 }
 
+export interface LimitWindow {
+  window: string;
+  usedPercent: number;
+  /** Seconds since 1970. */
+  resetsAt: number | null;
+}
+
 export type AgentEvent =
   | { type: "watched"; agent: string; cwd: string; title: string | null }
   | { type: "started"; nativeId: string | null; model: string | null }
@@ -133,12 +150,24 @@ export type AgentEvent =
   | { type: "approval"; approval: Approval }
   | { type: "approvalResolved"; id: string }
   | { type: "usage"; input: number; output: number; costUsd: number | null }
-  | { type: "diff"; path: string; removed: string[]; added: string[] }
-  | { type: "output"; command: string; lines: string[]; failed: boolean };
+  | { type: "limits"; windows: LimitWindow[] }
+  | { type: "context"; used: number | null; size: number | null }
+  | { type: "diff"; path: string; removed: string[]; added: string[]; linesRemoved: number; linesAdded: number }
+  | { type: "output"; command: string; lines: string[]; failed: boolean }
+  | { type: "todos"; items: Todo[] }
+  | { type: "todoChanged"; id: string; text?: string | null; status?: string | null };
 
 export interface AgentEnvelope {
   sessionId: string;
   event: AgentEvent;
+}
+
+export interface CustomTheme {
+  id: string;
+  name: string;
+  light: boolean;
+  accent: string;
+  window: string;
 }
 
 export interface WakeWord {
@@ -171,6 +200,21 @@ export interface Settings {
   voiceId: string | null;
   voiceHearing: string;
   voiceInterrupt: boolean;
+  assistantName: string;
+  assistantPersonality: string;
+  /** The microphone and output chosen for conversations, or null to follow Windows. */
+  voiceMicrophone: string | null;
+  voiceOutput: string | null;
+  theme: string;
+  themeUse: "theme" | "windows" | "time";
+  themeDark: string;
+  themeLight: string;
+  /** From clear to tinted, 0 to 100. */
+  glass: number;
+  customThemes: CustomTheme[];
+  /** What the assistant calls the user. Empty uses no name. */
+  assistantCallsYou: string;
+  assistantStyle: string;
   wakeEnabled: boolean;
   wakeWords: WakeWord[];
   wakeSensitivity: "sure" | "balanced" | "easily";
@@ -371,6 +415,18 @@ export const defaultSettings: Settings = {
   voiceId: null,
   voiceHearing: "local",
   voiceInterrupt: true,
+  assistantName: "Meridian",
+  assistantPersonality: "",
+  voiceMicrophone: null,
+  voiceOutput: null,
+  theme: "midnight",
+  themeUse: "theme",
+  themeDark: "midnight",
+  themeLight: "daylight",
+  glass: 58,
+  customThemes: [],
+  assistantCallsYou: "",
+  assistantStyle: "calm",
   wakeEnabled: false,
   wakeWords: [{ text: "Hey Meridian", on: true }, { text: "Okay Meridian", on: false }],
   wakeSensitivity: "balanced",

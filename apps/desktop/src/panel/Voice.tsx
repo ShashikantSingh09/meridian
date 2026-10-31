@@ -8,6 +8,7 @@ import { Icon } from "../lib/icons";
 import { updateSettings, useApp } from "../lib/store";
 import type { VoiceInfo } from "../lib/types";
 import { say } from "../lib/voice";
+import { DevicesSection } from "./Devices";
 
 interface Provider {
   id: string;
@@ -19,7 +20,7 @@ interface Provider {
   pack?: string;
 }
 
-const SPEAKERS: Provider[] = [
+export const SPEAKERS: Provider[] = [
   { id: "elevenlabs", name: "ElevenLabs", note: "The most lifelike", key: true },
   { id: "openai", name: "OpenAI", note: "Clear and quick", key: true },
   { id: "cartesia", name: "Cartesia", note: "Built for fast replies", key: true },
@@ -113,78 +114,83 @@ export function VoiceSection() {
 
   return (
     <div className="stack-lg voice-page">
-      <header className="stack-sm">
+      <header className="settings-head">
         <h1>Voice</h1>
-        <p className="meta">Hold <kbd>Ctrl</kbd> <kbd>Alt</kbd> <kbd>V</kbd> and talk. Tap it for one question, or tap twice to keep talking.</p>
+        <p className="meta">Hold Ctrl Alt V and talk. Tap it for one question, or tap twice to keep talking.</p>
       </header>
 
-      <section className="voice-columns">
-        <div className="stack-sm">
-          <h2>The voice it speaks with</h2>
-          <div className="voice-tiles" role="group" aria-label="Voice">
-            {SPEAKERS.map((s) => (
-              <button key={s.id} className="voice-tile" aria-pressed={s.id === provider} onClick={() => pick(s.id)}>
-                <Brand id={s.id} name={s.name} size={28} />
-                <span className="stacked grow">
-                  <span className="label truncate">{s.name}</span>
-                  <span className="meta truncate">{s.note}</span>
-                </span>
-              </button>
-            ))}
-          </div>
-        </div>
+      <h2>The voice it speaks with</h2>
+      <div className="stack voice-tiles" role="group" aria-label="Voice">
+        {SPEAKERS.map((s) => (
+          <button key={s.id} className="voice-tile" aria-pressed={s.id === provider} onClick={() => pick(s.id)}>
+            <Brand id={s.id} name={s.name} size={26} />
+            <span className="stacked grow">
+              <span className="label truncate">{s.name}</span>
+              <span className="meta truncate">{s.note}{s.key && status.keys.includes(s.id) ? ". Key saved" : ""}</span>
+            </span>
+            {s.id === provider && <Icon name="check" size={15} />}
+          </button>
+        ))}
+      </div>
 
-        <div className="stack-sm voice-detail">
-          <h2>{current.name}</h2>
+      {(current.key || (current.pack && pack) || problem || (ready && voices.length > 0)) && (
+        <div className="stack">
           {current.key && (
-            <>
-              <div className="row">
-                <input type="password" aria-label={`${current.name} API key`} placeholder={status.keys.includes(current.id) ? "Key saved" : "Paste your API key"} value={key} onChange={(e) => setKey(e.target.value)} />
-                {key ? <button className="solid" onClick={() => void saveKey()}>Save</button> : status.keys.includes(current.id) && <button className="ghost" onClick={() => void bridge.voiceKeyClear(current.id).then(refresh)}>Remove</button>}
-              </div>
-              <p className="meta">Kept in Windows Credential Manager, and sent only to {current.name}. What it says goes to them to be spoken.</p>
-            </>
+            <div className="setting">
+              <span className="stacked grow">
+                <span className="label">{current.name} key</span>
+                <span className="meta">Kept in Windows Credential Manager, and sent only to {current.name}. What it says goes to them to be spoken.</span>
+              </span>
+              <input className="setting-input" type="password" aria-label={`${current.name} API key`} placeholder={status.keys.includes(current.id) ? "Key saved" : "Paste your API key"} value={key} onChange={(e) => setKey(e.target.value)} />
+              {key ? <button className="solid" onClick={() => void saveKey()}>Save</button> : status.keys.includes(current.id) && <button className="ghost" onClick={() => void bridge.voiceKeyClear(current.id).then(refresh)}>Remove</button>}
+            </div>
           )}
           {current.pack && pack && (
-            usable(pack) ? (
-              <div className="row">
-                <p className="meta grow">Runs on this PC. What it says never leaves your machine.</p>
+            <div className="setting">
+              <span className="stacked grow">
+                <span className="label">{current.name}</span>
+                <span className="meta">Runs on this PC. What it says never leaves your machine.</span>
+              </span>
+              {usable(pack) ? (
                 <button className="ghost" onClick={() => void remove(pack.id)}>Remove</button>
-              </div>
-            ) : downloading(pack.id) ? (
-              <Progress done={fetched!.bytes} total={fetched!.total} />
-            ) : (
-              <div className="stack-sm">
-                <button className="solid voice-get" disabled={fetched !== null} onClick={() => void download(pack.id)}>Download, {size(toFetch(pack))}</button>
-                <p className="meta">Runs on this PC. What it says never leaves your machine.</p>
-              </div>
-            )
+              ) : downloading(pack.id) ? (
+                <Progress done={fetched!.bytes} total={fetched!.total} />
+              ) : (
+                <button className="solid" disabled={fetched !== null} onClick={() => void download(pack.id)}>Download, {size(toFetch(pack))}</button>
+              )}
+            </div>
           )}
           {problem && <p className="meta bad" role="alert">{problem}</p>}
           {ready && voices.length > 0 && (
             <ul className="list voice-list">
-              {voices.map((v) => (
-                <li key={v.id}>
-                  <div className="voice-row" data-chosen={(chosen ?? voices[0]!.id) === v.id}>
-                    <button className="grow text-button stacked" onClick={() => void updateSettings({ voiceId: v.id })}>
-                      <span className="label truncate">{v.name}</span>
-                      {v.note && <span className="meta truncate">{v.note}</span>}
-                    </button>
-                    <button className="round" aria-label={`Hear ${v.name}`} title={`Hear ${v.name}`} onClick={() => tryVoice(v.id)}><Icon name="play" size={13} /></button>
-                  </div>
-                </li>
-              ))}
+              {voices.map((v) => {
+                const on = (chosen ?? voices[0]!.id) === v.id;
+                return (
+                  <li key={v.id}>
+                    <div className="voice-row" data-chosen={on}>
+                      <button className="grow text-button stacked" onClick={() => void updateSettings({ voiceId: v.id })}>
+                        <span className="label truncate">{v.name}</span>
+                        {v.note && <span className="meta truncate">{v.note}</span>}
+                      </button>
+                      {on && <Icon name="check" size={15} />}
+                      <button className="round" aria-label={`Hear ${v.name}`} title={`Hear ${v.name}`} onClick={() => tryVoice(v.id)}><Icon name="play" size={13} /></button>
+                    </div>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>
-      </section>
+      )}
 
-      <section className="stack-sm">
-        <h2>How it hears you</h2>
-        <div className="segmented" role="group" aria-label="How it hears you">
-          {HEARING.map((h) => (
-            <button key={h.id} aria-pressed={h.id === hearing} onClick={() => void updateSettings({ voiceHearing: h.id })}>{h.name}</button>
-          ))}
+      <div className="stack">
+        <div className="setting">
+          <span className="label">How it hears you</span>
+          <div className="segmented" role="group" aria-label="How it hears you">
+            {HEARING.map((h) => (
+              <button key={h.id} aria-pressed={h.id === hearing} onClick={() => void updateSettings({ voiceHearing: h.id })}>{h.name}</button>
+            ))}
+          </div>
         </div>
         <p className="meta">{HEARING.find((h) => h.id === hearing)?.note}</p>
         {hearing === "local" && ears && !usable(ears) && (
@@ -192,16 +198,17 @@ export function VoiceSection() {
             <button className="solid voice-get" disabled={fetched !== null} onClick={() => void download("hearing")}>Download, {size(toFetch(ears))}</button>
           )
         )}
-        {hearing !== "local" && !status.keys.includes(hearing) && <p className="meta bad">Add a {hearing} key above first, by choosing it as the voice.</p>}
-      </section>
+        {hearing !== "local" && !status.keys.includes(hearing) && <p className="meta bad">Add a key for {HEARING.find((h) => h.id === hearing)?.name} first, by choosing it as the voice above.</p>}
+        <label className="setting toggle">
+          <span className="stacked grow">
+            <span className="label">Talk over it to interrupt</span>
+            <span className="meta">Start talking and it stops at once, like a person would. The microphone stays open while it answers.</span>
+          </span>
+          <input type="checkbox" role="switch" checked={interrupt} onChange={(e) => void updateSettings({ voiceInterrupt: e.target.checked })} />
+        </label>
+      </div>
 
-      <label className="setting toggle">
-        <span className="stacked grow">
-          <span className="label">Let me interrupt it</span>
-          <span className="meta">Start talking and it stops at once, like a person would. The microphone stays open while it answers.</span>
-        </span>
-        <input type="checkbox" role="switch" checked={interrupt} onChange={(e) => void updateSettings({ voiceInterrupt: e.target.checked })} />
-      </label>
+      <DevicesSection />
     </div>
   );
 }
@@ -209,8 +216,8 @@ export function VoiceSection() {
 function Progress({ done, total }: { done: number; total: number }) {
   const percent = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
   return (
-    <div className="stack-sm" role="status">
-      <span className="level-track voice-progress"><i style={{ width: `${percent}%`, background: "#fff" }} /></span>
+    <div className="stack-sm voice-progress-row" role="status">
+      <span className="level-track voice-progress"><i style={{ width: `${percent}%`, background: "var(--accent)" }} /></span>
       <span className="meta tabular">Downloading, {size(done)} of {size(total)}</span>
     </div>
   );

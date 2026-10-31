@@ -30,20 +30,27 @@ import type {
   Track,
   Level,
   WakeStatus,
+  LimitWindow,
 } from "./types";
 import type { Mood } from "../island/faces";
 import type { VoiceState } from "./voice";
+import { lastMessage, mergeTodo, resetLabel } from "./sessions";
+import { applyTheme } from "./theme";
 import { defaultSettings } from "./types";
 
 export type Tab = "home" | "chat" | "agents" | "media" | "day" | "inbox" | "settings";
-export type SettingsSection = "general" | "island" | "voice" | "wake" | "screen" | "updates" | "models" | "providers" | "agents" | "privacy" | "about";
+export type SettingsSection = "general" | "themes" | "island" | "assistant" | "voice" | "wake" | "screen" | "updates" | "models" | "providers" | "agents" | "privacy" | "about";
 
 export interface LogEntry {
   kind: "user" | "text" | "activity" | "system" | "diff" | "output";
   text: string;
-  /** For a diff: the lines taken out and put in. */
+  /** When it happened. History saved before this was kept has none. */
+  at?: number;
+  /** For a diff: the lines taken out and put in, which are cut short, and how many there really were. */
   removed?: string[];
   added?: string[];
+  linesRemoved?: number;
+  linesAdded?: number;
   /** For a command: the end of what it printed. */
   lines?: string[];
   failed?: boolean;
@@ -60,7 +67,11 @@ export interface SessionDetail extends SessionSummary {
   model: string | null;
   endedAt: number | null;
   usage: { input: number; output: number; costUsd: number | null } | null;
+  /** How full the conversation is, in tokens. */
+  context?: { used: number | null; size: number | null };
   log: LogEntry[];
+  /** When the latest turn began, once there has been more than one. */
+  turnAt?: number;
   /** Approvals behind the one on screen. */
   queued: Approval[];
   /** Runs in the user's own terminal: it can be followed and answered, not steered. */
@@ -128,7 +139,15 @@ export interface AppState {
   hovered: boolean;
   chatPending: boolean;
   sessions: SessionDetail[];
+  /** What each agent last said about the user's plan, kept across restarts. */
+  limits: Partial<Record<AgentId, { windows: LimitWindow[]; at: number }>>;
   notices: Notice[];
+  /** Finished cards that have left the island, newest first, for Notifications. In memory only. */
+  pastNotices: Notice[];
+  /** The stage card was clicked open. */
+  stagesOpen: boolean;
+  /** The session and view to land on when Agents next opens. */
+  agentFocus: { id: string; view: "activity" | "changes" } | null;
   suggestions: Suggestion[];
   errors: IslandError[];
   settings: Settings;
@@ -182,6 +201,8 @@ export interface AppState {
 
 const LOG_LIMIT = 500;
 const NOTICE_MS = 6000;
+const FINISHED_MS = 12_000;
+const PAST_NOTICES = 40;
 const GREETING_MS = 2600;
 /** A little longer than the core listens, so a late match still lands. */
 const WAKE_TEST_MS = 11_000;
@@ -206,7 +227,11 @@ let state: AppState = {
   hovered: false,
   chatPending: false,
   sessions: [],
+  limits: {},
   notices: [],
+  pastNotices: [],
+  stagesOpen: false,
+  agentFocus: null,
   suggestions: [],
   errors: [],
   settings: defaultSettings,
@@ -273,7 +298,7 @@ function saveHistory() {
       // A terminal session's labels can quote a command, which stays out of any file.
       .filter((s) => ENDED.includes(s.status) && !s.watched)
       .slice(0, HISTORY_SESSIONS)
-      .map((s) => ({ ...s, log: s.log.slice(-HISTORY_LOG), approval: null, queued: [] }));
+      .map((s) => ({ ...s, log: s.log.slice(-HISTORY_LOG), approval: null, queued: [], todos: undefined }));
     const messages = state.chat.messages.slice(-HISTORY_MESSAGES).map(({ role, content }) => ({ role, content }));
     try {
       localStorage.setItem(HISTORY_KEY, JSON.stringify({ sessions, messages }));
@@ -295,7 +320,7 @@ function restoreHistory() {
   try {
     const saved = JSON.parse(localStorage.getItem(HISTORY_KEY) ?? "{}");
     const sessions: SessionDetail[] = (saved.sessions ?? []).map((s: SessionDetail) => ({ ...s, restored: true }));
-    set({ sessions, chat: { ...state.chat, messages: saved.messages ?? [] } });
+    set({ sessions, limits: loadLimits(), chat: { ...state.chat, messages: saved.messages ?? [] } });
   } catch {
     forgetHistory();
   }
@@ -341,7 +366,7 @@ export function openPanel(tab?: Tab) {
   showPreview(null);
   if (!state.panelOpen && state.settings.sounds) chime("open");
   // A reminder that needs an answer is still waiting when the panel closes.
-  set({ panelOpen: true, tab: tab ?? state.tab, notices: state.notices.filter((n) => n.sticky), mediaOpen: false });
+  set({ panelOpen: true, tab: tab ?? state.tab, notices: state.notices.filter((n) => n.sticky), pastNotices: keptNotices(state.notices.filter((n) => !n.sticky)), mediaOpen: false });
   void bridge.setInteractive(true);
   void refreshLocal();
 }
@@ -382,11 +407,20 @@ let hoverTimer: ReturnType<typeof setTimeout> | undefined;
 export function setHovered(hovered: boolean) {
   clearTimeout(hoverTimer);
   if (hovered !== state.hovered) {
-    hoverTimer = setTimeout(() => set(hovered ? { hovered } : { hovered, mediaOpen: false }), hovered ? HOVER_IN_MS : HOVER_OUT_MS);
+    hoverTimer = setTimeout(() => set(hovered ? { hovered } : { hovered, mediaOpen: false, stagesOpen: false }), hovered ? HOVER_IN_MS : HOVER_OUT_MS);
   }
 }
 
 export const setMediaOpen = (mediaOpen: boolean) => set({ mediaOpen });
+export const openStages = () => set({ stagesOpen: true });
+export const clearAgentFocus = () => set({ agentFocus: null });
+
+/** Opens one session where it lives, on the view asked for. */
+export function openSession(id: string, view: "activity" | "changes" = "activity") {
+  const chat = state.sessions.find((s) => s.id === id)?.surface === "chat";
+  if (!chat) set({ agentFocus: { id, view } });
+  openPanel(chat ? "chat" : "agents");
+}
 
 /** Other parts of the island ask what is on show. Only a change is news. */
 export function reportView(islandView: IslandView) {
@@ -400,7 +434,10 @@ export function setListening(listening: boolean) {
 
 // ── Notices and errors ──────────────────────────────────────────────────────
 
-export function pushNotice(notice: Omit<Notice, "id">) {
+/** What is kept when notices leave the island. Sample ones never reach the real list. */
+const keptNotices = (gone: Notice[]) => (state.preview ? state.pastNotices : [...gone.filter((n) => n.finished), ...state.pastNotices].slice(0, PAST_NOTICES));
+
+export function pushNotice(notice: Omit<Notice, "id">, ms = NOTICE_MS) {
   const id = newId();
   set({ notices: [...state.notices, { ...notice, id }] });
   const expire = () => {
@@ -408,10 +445,10 @@ export function pushNotice(notice: Omit<Notice, "id">) {
     if (getState().hovered) setTimeout(expire, 1500);
     else dismissNotice(id);
   };
-  setTimeout(expire, NOTICE_MS);
+  setTimeout(expire, ms);
 }
 
-export const dismissNotice = (id: string) => set({ notices: state.notices.filter((n) => n.id !== id) });
+export const dismissNotice = (id: string) => set({ notices: state.notices.filter((n) => n.id !== id), pastNotices: keptNotices(state.notices.filter((n) => n.id === id)) });
 
 export function pushError(error: Omit<IslandError, "id">) {
   set({ errors: [...state.errors, { ...error, id: newId() }] });
@@ -427,6 +464,7 @@ const describe = (err: unknown) => (err instanceof Error ? err.message : String(
 
 function applyAppearance(s: Settings) {
   document.documentElement.dataset.motion = s.motion;
+  applyTheme(s);
   document.documentElement.dataset.ambient = String(s.ambient);
   document.documentElement.dataset.align = s.islandAlign;
 }
@@ -554,7 +592,7 @@ export async function sendChat(text: string, images: string[] = [], spoken = fal
   }
 }
 
-function retryLast() {
+export function retryLast() {
   const messages = state.chat.messages.slice();
   if (messages[messages.length - 1]?.role === "assistant") messages.pop();
   const user = messages.pop();
@@ -591,19 +629,69 @@ export function selectEngine(id: string) {
   void selectProvider(id);
 }
 
+/** What to move to, if anything. A provider that has gone, such as a closed local server, is no choice at all. */
+export function nextEngine(chosen: string | null, usable: string | undefined, agent: string | undefined) {
+  return usable ? (usable === chosen ? null : usable) : (agent ?? null);
+}
+
 /** Chat opens on an AI, so nobody meets an empty choice. Asking from anywhere else gets the same one. */
 export function pickEngine() {
-  if (state.chat.providerId || state.agentChat.agent) return;
-  const provider = usableProvider();
-  const agent = state.agents.find((a) => a.installed)?.id;
-  if (provider) void selectProvider(provider.id);
-  else if (agent) selectEngine(agent);
+  if (state.agentChat.agent) return;
+  const next = nextEngine(state.chat.providerId, usableProvider()?.id, state.agents.find((a) => a.installed)?.id);
+  if (next) selectEngine(next);
 }
 
 /** Asks whichever AI Chat is on. */
 export function sendToEngine(text: string, images: string[] = []) {
   pickEngine();
   return state.agentChat.agent ? sendAgentChat(text, images) : sendChat(text, images);
+}
+
+const LIMITS_KEY = "meridian.limits";
+const WARNED_KEY = "meridian.limits.warned";
+const LIMIT_WARNING = 80;
+
+function loadLimits() {
+  try {
+    return JSON.parse(localStorage.getItem(LIMITS_KEY) ?? "{}") as AppState["limits"];
+  } catch {
+    return {};
+  }
+}
+
+/** Once at 80% and once at the limit, for each time the window resets. */
+function warnedOnce(key: string) {
+  try {
+    const seen: string[] = JSON.parse(localStorage.getItem(WARNED_KEY) ?? "[]");
+    if (seen.includes(key)) return true;
+    localStorage.setItem(WARNED_KEY, JSON.stringify([...seen, key].slice(-20)));
+  } catch {
+    // Without storage it may warn again after a restart, which is better than not at all.
+  }
+  return false;
+}
+
+function noteLimits(agent: AgentId, name: string, windows: LimitWindow[]) {
+  // Each report can carry only the window that changed.
+  const kept = (state.limits[agent]?.windows ?? []).filter((old) => !windows.some((w) => w.window === old.window));
+  const merged = [...kept, ...windows].sort((a, b) => a.window.localeCompare(b.window));
+  set({ limits: { ...state.limits, [agent]: { windows: merged, at: Date.now() } } });
+  try {
+    localStorage.setItem(LIMITS_KEY, JSON.stringify(state.limits));
+  } catch {
+    // Shown for this run all the same.
+  }
+  for (const { window, usedPercent, resetsAt } of windows) {
+    const level = usedPercent >= 100 ? 100 : usedPercent >= LIMIT_WARNING ? LIMIT_WARNING : 0;
+    if (!level || warnedOnce(`${agent}:${window}:${resetsAt}:${level}`)) continue;
+    const short = name.replace(/ (Code|CLI)$/, "");
+    pushNotice({ tone: level === 100 ? "urgent" : "info", title: level === 100 ? `${short} limit reached` : `${short} at ${Math.round(usedPercent)}%`, body: resetLabel(resetsAt, Date.now()) });
+  }
+}
+
+/** Takes finished sessions out of the list. What they did stays in their own folders. */
+export function clearFinished() {
+  set({ sessions: state.sessions.filter((s) => s.surface === "chat" || !["completed", "failed", "cancelled"].includes(s.status)) });
 }
 
 export const setAgentMode = (mode: AgentMode) =>
@@ -639,12 +727,15 @@ function patchSession(id: string, fn: (s: SessionDetail) => SessionDetail) {
   set({ sessions: state.sessions.map((s) => (s.id === id ? fn(s) : s)) });
 }
 
+/** An ended session running again. A list it finished is over, and would otherwise read as where it is now. */
+const newTurn = (s: SessionDetail) => ({ turnAt: Date.now(), todos: s.todos?.every((t) => t.status === "completed") ? undefined : s.todos });
+
 function appendLog(s: SessionDetail, kind: LogEntry["kind"], text: string): LogEntry[] {
   const last = s.log[s.log.length - 1];
   const log =
-    kind === "text" && last?.kind === "text"
-      ? [...s.log.slice(0, -1), { kind, text: last.text + text }]
-      : [...s.log, { kind, text }];
+    kind === "text" && last?.kind === "text" && (last.at ?? 0) >= (s.turnAt ?? 0)
+      ? [...s.log.slice(0, -1), { ...last, text: last.text + text }]
+      : [...s.log, { kind, text, at: Date.now() }];
   return log.slice(-LOG_LIMIT);
 }
 
@@ -697,7 +788,9 @@ export function applyAgentEvent(envelope: AgentEnvelope) {
         const queued = s.queued.filter((a) => a.id !== event.id);
         if (s.approval?.id !== event.id) return { ...s, queued };
         const [next, ...rest] = queued;
-        return { ...s, approval: next ?? null, queued: rest, status: next ? "waiting" : "running" };
+        // Answered, it goes back to what it was doing, not to saying it is waiting.
+        const doing = next ? s.activity : s.log.filter((e) => e.kind === "activity").pop()?.text ?? "Working";
+        return { ...s, approval: next ?? null, queued: rest, status: next ? "waiting" : "running", activity: doing };
       });
       break;
     case "usage":
@@ -706,17 +799,36 @@ export function applyAgentEvent(envelope: AgentEnvelope) {
         usage: { input: event.input, output: event.output, costUsd: event.costUsd },
       }));
       break;
+    case "limits": {
+      const agent = state.sessions.find((s) => s.id === sessionId);
+      if (agent) noteLimits(agent.agentId, agent.agent, event.windows);
+      break;
+    }
+    case "context":
+      patchSession(sessionId, (s) => ({
+        ...s,
+        context: { used: event.used ?? s.context?.used ?? null, size: event.size ?? s.context?.size ?? null },
+      }));
+      break;
     case "diff":
-      patchSession(sessionId, (s) => ({ ...s, log: [...s.log, { kind: "diff" as const, text: event.path, removed: event.removed, added: event.added }].slice(-LOG_LIMIT) }));
+      patchSession(sessionId, (s) => ({ ...s, log: [...s.log, { kind: "diff" as const, text: event.path, at: Date.now(), removed: event.removed, added: event.added, linesRemoved: event.linesRemoved, linesAdded: event.linesAdded }].slice(-LOG_LIMIT) }));
       break;
     case "output":
-      patchSession(sessionId, (s) => ({ ...s, log: [...s.log, { kind: "output" as const, text: event.command, lines: event.lines, failed: event.failed }].slice(-LOG_LIMIT) }));
+      patchSession(sessionId, (s) => ({ ...s, log: [...s.log, { kind: "output" as const, text: event.command, at: Date.now(), lines: event.lines, failed: event.failed }].slice(-LOG_LIMIT) }));
+      break;
+    case "todos":
+      patchSession(sessionId, (s) => ({ ...s, todos: event.items }));
+      break;
+    case "todoChanged":
+      patchSession(sessionId, (s) => ({ ...s, todos: mergeTodo(s.todos ?? [], event) }));
       break;
     case "status": {
       const ended = ["completed", "failed", "cancelled"].includes(event.status);
+      if (ended) set({ stagesOpen: false });
       patchSession(sessionId, (s) => ({
         ...s,
         status: event.status,
+        ...(!ended && ENDED.includes(s.status) ? newTurn(s) : {}),
         endedAt: ended ? Date.now() : s.endedAt,
         approval: ended ? null : s.approval,
         queued: ended ? [] : s.queued,
@@ -725,12 +837,15 @@ export function applyAgentEvent(envelope: AgentEnvelope) {
       }));
       if (event.status === "completed") feel("done", 2400);
       if (event.status === "failed") feel("error", 3000);
-      if (event.status === "completed" && !state.panelOpen) {
-        pushNotice({ tone: "success", title: `${session.agent} finished`, body: session.title, sessionId });
-        if (state.settings.sounds) chime("done");
+      // A reply in Chat is already in front of the reader, or being spoken.
+      if (event.status === "completed" && !(state.panelOpen && session.surface === "chat")) {
+        // The only ending with a message is a terminal that went silent, which is not news of work done.
+        if (event.message) pushNotice({ tone: "info", title: `${session.project} went quiet`, body: event.message, sessionId });
+        else pushNotice({ tone: "success", title: `${session.project} is done`, body: lastMessage(session) ?? session.title, sessionId, finished: true }, FINISHED_MS);
+        if (state.settings.sounds && !state.panelOpen) chime("done");
       }
       if (event.status === "failed") {
-        pushError({ title: `${session.agent} failed`, body: event.message ?? session.project });
+        pushError({ title: `${session.agent} failed`, body: event.message ?? session.project, sessionId });
         // A lapsed sign-in is the usual cause, and it should show where you can fix it.
         void refreshAuth(session.agentId);
       }
@@ -742,7 +857,7 @@ export function applyAgentEvent(envelope: AgentEnvelope) {
 function addWatchedSession(id: string, agent: string, cwd: string, title: string | null) {
   // A session that went quiet and came back keeps its row.
   if (state.sessions.some((s) => s.id === id)) {
-    patchSession(id, (s) => ({ ...s, status: "running", endedAt: null, restored: false }));
+    patchSession(id, (s) => ({ ...s, ...newTurn(s), status: "running", endedAt: null, restored: false }));
     return;
   }
   const session: SessionDetail = {
@@ -824,7 +939,10 @@ export function answerApproval(sessionId: string, approvalId: string, allow: boo
 export async function sendToSession(id: string, text: string, images: string[] = []) {
   const session = state.sessions.find((s) => s.id === id);
   // Running from this moment, or a spoken follow-up reads the last turn's end as this one's.
-  patchSession(id, (s) => ({ ...s, status: ENDED.includes(s.status) ? "running" : s.status, log: appendLog(s, "user", text.replace(SPOKEN, "")) }));
+  patchSession(id, (s) => {
+    const next = ENDED.includes(s.status) ? { ...s, ...newTurn(s), status: "running" as const } : s;
+    return { ...next, log: appendLog(next, "user", text.replace(SPOKEN, "")) };
+  });
   try {
     // A conversation from before a restart exists only here until the app is told about it.
     if (session?.restored && session.nativeId) {
@@ -916,6 +1034,13 @@ function onReminders(reminders: Reminder[]) {
     set({ notices: [...state.notices.filter((n) => n.id !== notice.id), notice] });
     if (!notice.sticky) setTimeout(() => dismissNotice(notice.id), NOTICE_MS);
   }
+}
+
+/** The time of day alone for something today, which is how a day reads. Anything else, null. */
+export function timeToday(time: EventTime) {
+  const at = new Date(time.value);
+  if (time.kind === "date" || at.toDateString() !== new Date().toDateString()) return null;
+  return at.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
 }
 
 /** A time as stated: a date stays a date, and an unzoned time claims no zone. */
@@ -1298,6 +1423,22 @@ const previewSession = (id: string, agent: string, project: string, activity: st
   ...over,
 });
 
+/** A session a few steps in, for the previews of what an agent is doing. */
+function sampleWork(over: Partial<SessionDetail> = {}): SessionDetail {
+  const start = Date.now() - 42_000;
+  const step = (text: string, seconds: number): LogEntry => ({ kind: "activity", text, at: start + seconds * 1000 });
+  return previewSession("p1", "Claude Code", "dock-agent", "Editing src/island/views.tsx", {
+    title: "Fix the island flicker",
+    startedAt: start,
+    log: [
+      step("Reading src/island/machine.ts", 4), step("Reading src/lib/store.ts", 9), step("Reading src/lib/types.ts", 15), step("Reading src/island/Island.tsx", 31),
+      step("Editing src/island/machine.ts", 38), { kind: "diff", text: "machine.ts", linesAdded: 6, linesRemoved: 3 },
+      step("Editing src/island/views.tsx", 42), { kind: "diff", text: "views.tsx", linesAdded: 2, linesRemoved: 0 },
+    ],
+    ...over,
+  });
+}
+
 type Preview = { name: string; apply: () => Partial<AppState> };
 
 /** A sample event seen a set number of minutes after it starts. */
@@ -1375,7 +1516,48 @@ export const PREVIEWS: Preview[] = [
   { name: "voice speaking", apply: () => ({ ...clear, voice: { phase: "speaking", mode: "turn", words: "Your flight to Mumbai leaves Monday at 7:40 from gate 22.", ahead: " It is on time, and you should leave by 5." } }) },
   { name: "question", apply: () => ({ ...clear, sessions: [{ ...previewSession("p1", "Claude Code", "dock-agent", "Waiting"), approval: { id: "pq", tool: "AskUserQuestion", summary: "Which database should this use?", questions: [{ text: "Which database should this use?", options: ["SQLite", "Postgres", "Keep it in memory"], multi: false }] } }] }) },
   { name: "plan", apply: () => ({ ...clear, sessions: [{ ...previewSession("p1", "Claude Code", "dock-agent", "Waiting"), approval: { id: "pp", tool: "ExitPlanMode", summary: "Add a settings page", plan: "## Add a settings page\n\n1. Create `Settings.tsx`\n2. Save choices with **updateSettings**\n3. Add it to the dock\n\nThis touches three files and needs no new packages." } }] }) },
-  { name: "working", apply: () => ({ ...clear, sessions: [previewSession("p1", "Claude Code", "dock-agent", "Editing island/machine.ts")] }) },
+  { name: "working", apply: () => ({ ...clear, sessions: [sampleWork()] }) },
+  {
+    name: "to-do list",
+    apply: () => ({
+      ...clear,
+      sessions: [sampleWork({
+        todos: [
+          { id: "1", text: "Find what causes the flicker", status: "completed" },
+          { id: "2", text: "Fix the resize", status: "completed" },
+          { id: "3", text: "Add a test", status: "in_progress" },
+          { id: "4", text: "Run the tests", status: "pending" },
+          { id: "5", text: "Update the docs", status: "pending" },
+        ],
+      })],
+    }),
+  },
+  {
+    name: "finished",
+    apply: () => {
+      const session = sampleWork({
+        status: "completed",
+        activity: "",
+        endedAt: Date.now(),
+        startedAt: Date.now() - 252_000,
+        usage: { input: 118_000, output: 2_400, costUsd: 0.18 },
+      });
+      const log: LogEntry[] = [
+        ...session.log,
+        { kind: "diff", text: "Island.tsx", linesAdded: 4, linesRemoved: 1 },
+        { kind: "output", text: "npm test", lines: ["Tests  148 passed (148)", "Duration  1.20s"], failed: false },
+        { kind: "text", text: "The flicker came from the panel resizing twice. It now resizes once, and the test covers it." },
+      ];
+      return { ...clear, sessions: [{ ...session, log }], notices: [{ id: "pf", tone: "success" as const, title: "dock-agent is done", body: session.title, sessionId: session.id, finished: true }] };
+    },
+  },
+  {
+    name: "stopped",
+    apply: () => {
+      const session = sampleWork({ status: "failed", activity: "", endedAt: Date.now(), startedAt: Date.now() - 123_000 });
+      return { ...clear, sessions: [session], errors: [{ id: "px", title: "Claude Code failed", body: "2 tests failed in machine.test.ts", sessionId: session.id }] };
+    },
+  },
   {
     name: "approval",
     apply: () => ({
@@ -1395,9 +1577,9 @@ export const PREVIEWS: Preview[] = [
     apply: () => ({
       ...clear,
       sessions: [
-        previewSession("p1", "Claude Code", "backend", "Running migrations"),
-        previewSession("p2", "Codex", "frontend", "Reviewing Island.tsx"),
-        previewSession("p3", "Ollama", "docs", "Summarising architecture", { status: "waiting" }),
+        previewSession("p1", "Claude Code", "billing-api", "$ npm test"),
+        previewSession("p2", "Codex", "website", "Editing index.html"),
+        previewSession("p3", "Claude Code", "dock-agent", "Waiting", { status: "waiting" }),
       ],
     }),
   },

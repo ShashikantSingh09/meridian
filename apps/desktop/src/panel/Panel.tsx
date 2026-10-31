@@ -13,6 +13,7 @@ import { Media } from "./Media";
 import { MyDay } from "./MyDay";
 import { SettingsPage } from "./Settings";
 import { Welcome } from "./Welcome";
+import "./pages.css";
 
 const NAV: { tab: Tab; icon: IconName; label: string }[] = [
   { tab: "home", icon: "home", label: "Home" },
