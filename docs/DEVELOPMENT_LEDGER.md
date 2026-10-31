@@ -1,5 +1,44 @@
 # Development ledger
 
+## 2026-10-31: A real assistant, and every board built
+
+The owner's verdict was that the app was a show-off: it told them to ask Meridian, could not open an app, and the designs were not in it.
+
+- **The assistant acts.** See `docs/DECISIONS.md`, D56. Through the real app it opened Calculator from English and from Hindi, changed the volume,
+  set and read a reminder, opened a tab, found a file, and said who it was. Screen reading, starting an agent and a command each stopped to ask.
+- **Wake words catch a name inside speech**, take a command in one breath, and were tightened after they fired on people talking nearby. See D57.
+- **Every board is built:** glass and six themes with custom themes, Settings with search, Assistant, Microphone and headphones, Home, Chat, Agents with
+  stages, Changes and All at once, Media, My day, Notifications, Welcome, and the finished, failed and to-do cards on the island.
+- **Found by running it for real, not by the mock tests:** the wake word answering room talk, raw tool names on the island, a note from the CLI in command
+  output, and Chat stuck on a provider that had gone away.
+- **All tabs are one size now**, 820 by 600, so moving between them never resizes the window.
+
+### Proved on the real app
+
+Every live mode: local chat, approvals allowed and denied, cancel, resume, images, the assistant asking first, reminders, screen capture, and a Codex
+failure. Every island state and tab with no exceptions. 583 Rust tests, 168 unit tests and 128 interface tests.
+
+### Not proved
+
+- How often the wake word catches the owner's own voice after tightening. It needs them, and the Test button shows it in seconds.
+- A to-do list from a real run. The live test agent used a memory plugin's list instead, so `TodoWrite` and `TaskCreate` are proved by tests on real transcript shapes only.
+- Codex limits, because its sign-in here has expired.
+
+## 2026-10-31: Agents as the boards drew them, and real plan usage
+
+The owner reported sessions piling up, no sign of how much of their plan was used, and media controls sitting too high.
+
+- **The Agents list** now reads Needs you, Running and Finished, with what each is doing and when. Conversations stay in Chat, where they
+  belong, which was most of the noise. Finished work folds into Earlier after a day or past four, and Clear empties it.
+- **Plan usage was never wired up.** `rate_limit_event` was being ignored. It now reaches a card under the list and a Limits and models page,
+  with a notice once at 80% and once at the limit. One real report carried only the seven-day window, so reports are merged, not replaced.
+- **Sessions in the user's own terminal do not report plan usage**, because hooks do not carry it. Codex limits are parsed but untested, because
+  its sign-in here has expired.
+- **Each session** shows its model, how full its memory is, tokens and cost in the header.
+- **The media controls** sat above the middle of the room left under the progress bar. They are centred now, with a test, in one raised
+  capsule as on the board, with times beside the progress bar.
+- **Wake words were proved by the owner.** They turned them on, added Meridian, and talked to it.
+
 ## 2026-10-31: Wake words
 
 Built from the owner's approved board, with a switch for the always-on microphone. See `docs/DECISIONS.md`, D55.
@@ -17,7 +56,7 @@ Built from the owner's approved board, with a switch for the always-on microphon
 | It hears speech and refuses what is not on the list | Two rejected results in 28 s, no false wake |
 | The app opens it and shows the dot | Listening within 2 s of Test |
 | Rules for each pause, sensitivity and word | 7 tests |
-| A person saying the phrase | Not recorded yet |
+| A person saying the phrase | Yes. The owner added Meridian as a word and talked to it, on 2026-10-31 |
 | Cost while listening | 1.2% of a core and 52 MB |
 
 ## 2026-10-31: Voice failed until Chat had been opened

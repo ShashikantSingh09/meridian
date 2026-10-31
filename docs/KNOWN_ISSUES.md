@@ -105,7 +105,6 @@ What stands between this build and a stranger installing it. Only the owner can 
 | Ollama, LM Studio, llama.cpp | Not installed here. Tested through the real app against a stand-in server. | Run a real server |
 | Local voices and hearing | The owner downloaded the engine and hearing through the app on 2026-10-31, and no crash was recorded. The engine is now v1.13.8, so it needs downloading again, at about 8 MB. Nobody has confirmed it works, because loading the downloaded DLL during development was refused by a safety check. Kokoro's speaker names are from memory | Press Ctrl Alt V and talk, or run `cargo test -p voice --test live_local -- --ignored` with `MERIDIAN_SPEECH_DIR` set |
 | Cloud voices and hearing | ElevenLabs speaking and hearing are proved in the real app, in English and Hindi. OpenAI, Cartesia and Deepgram are written from their docs and tested on pure parts only | Add a key and talk |
-| Wake words | The recognizer opens from the app, the dot shows, and it refused other speech, on the real microphone. A person saying the phrase has not been recorded as a match. The Windows recognizer cannot read a file, so this cannot be automated | Settings, Wake words, press Test and say the phrase |
 | Talking with a real microphone | Worked for about 30 s in a dev build on 2026-10-31, including talking over a reply, but that was unplanned, and it is not confirmed who was speaking. The global key was held by the app, but only its event was sent in tests | Hold Ctrl Alt V and talk |
 | Brightness and battery | Only a desktop was available, so neither has fired for real. Volume keys were proved on the installed app | Try on a laptop |
 | Real media players | Tested with a silent session of its own. Spotify, browsers and VLC not tried, so artwork in particular is unproven. | Play something |
@@ -165,6 +164,10 @@ What stands between this build and a stranger installing it. Only the owner can 
 - **Gemini CLI, Aider and Continue adapters.**
 
 ## Behaviour to be aware of
+
+- The assistant's actions work with Claude Code as the AI. API models and Codex can chat but have no tool loop yet, so they cannot act.
+- Wake words listen through the Windows default microphone whatever is chosen under Voice, because Windows gives no way to point its recognizer elsewhere.
+- Wake words cannot be written in Devanagari. A Hindi name works in English letters.
 
 - Talking needs something to hear with. Hearing defaults to this PC, which needs a download of about 65 MB, or an ElevenLabs or Deepgram
   key. Until one is set, the microphone button opens Settings, Voice and says why. Speaking needs neither, because the Windows voice is

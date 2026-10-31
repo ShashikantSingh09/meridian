@@ -514,3 +514,39 @@ board's Paused pill was left out too, because a pill that stays for a whole call
 says why. The board's Hey Mira needs the assistant's name, which is not built, so the first wake word is Hey Meridian.
 
 Listening costs about 1.2% of one core and 52 MB, in Windows' own SpeechRuntime process.
+
+## D56. The assistant acts on this PC through the app's own tools
+
+The owner said an assistant that only talks is no use: it told them to ask Meridian, and could not open an app. So the assistant now knows it is
+Meridian and can do what Meridian can do. This reverses D33's general mode, which had no shell and no edits.
+
+General runs of Claude Code connect to a small MCP server inside the app, on a loopback port with a random token in the path, and get a system
+prompt that says who they are. Only this app's own runs get the address, and `--strict-mcp-config` keeps the user's other connectors out.
+
+Tools that are easy to undo and send nothing anywhere run without asking: opening apps, websites, documents, folders and Windows Settings pages,
+finding files, media controls, volume, reminders, reading the day, opening Meridian's tabs. Anything else stops on the island for a yes, by
+click or by voice, through the permission hook every run already has. That covers reading the screen, because the text goes to the AI, and
+starting an agent, and any command or file edit. A file that would run a program cannot be opened by the open tool at all, so it has to go
+through a command and that question.
+
+Other chat engines do not get these tools yet, because they have no tool loop. Claude Code is the owner's engine.
+
+## D58. Glass is a lit sheet, not a hole in the window
+
+The boards drew frosted glass over the wallpaper. A webview can only blur its own content, and Windows' own backdrop fell back to flat grey when
+tested, so the panel is an opaque sheet carrying its own light, with frosted layers floating on it. Each theme sets that sheet and the accent. The
+island stays black in every theme. It looks the same over any app, and it is always readable.
+
+## D57. Wake words need more proof the longer the speech
+
+The first wake grammar matched exact phrases, so a command in the same breath was refused, and it missed quiet names. A grammar that finds the
+name inside speech fixed that, and accepting Low confidence fixed the misses, but together they fired on people talking near the microphone,
+sent that to the AI and answered out loud. That was caught in testing on 2026-10-31, from two sentences nobody had aimed at it.
+
+So a name on its own may be faint, but inside longer speech it has to be High confidence. Then, before anything goes to the AI, the words the
+hearing wrote down have to contain the name, allowing for spelling and for Hindi script. If they do not, it is dropped silently. One utterance
+can still reach the hearing service before that check, which is the price of a command in one breath.
+
+While listening, the last 12 seconds of microphone audio stay in memory, are never saved, and are replaced as they age. That is what makes one
+breath possible without a gap to reopen the microphone.
+
