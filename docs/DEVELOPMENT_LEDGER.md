@@ -1,5 +1,25 @@
 # Development ledger
 
+## 2026-10-31: Wake words
+
+Built from the owner's approved board, with a switch for the always-on microphone. See `docs/DECISIONS.md`, D55.
+
+- **Settings, Wake words.** The switch, the word list, Test, how easily it wakes, what happens after, when it listens, and the pauses.
+- **The island** shows a still dot while listening, and answers Yes? when woken. From there it is the same as pressing the key.
+- **`crates/voice/src/wake.rs`** holds the listener and the rules, and `src-tauri/src/wake.rs` keeps it open only when it should be.
+
+### Proved
+
+| Check | Result |
+|---|---|
+| The recognizer runs from an ordinary app, in Indian English | Yes, on the real microphone |
+| It keeps running | 15 s and 120 s with no audio problem |
+| It hears speech and refuses what is not on the list | Two rejected results in 28 s, no false wake |
+| The app opens it and shows the dot | Listening within 2 s of Test |
+| Rules for each pause, sensitivity and word | 7 tests |
+| A person saying the phrase | Not recorded yet |
+| Cost while listening | 1.2% of a core and 52 MB |
+
 ## 2026-10-31: Voice failed until Chat had been opened
 
 The owner reported that voice did not work. Each layer was tested in the installed app, with their own recordings standing in for the microphone.

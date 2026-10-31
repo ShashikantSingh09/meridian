@@ -489,3 +489,28 @@ side by side in the real window before it counts as done.
 
 Apple-style glass, themes, limits and models, the assistant's name and personality, and wake words are on the canvas and held for review.
 Wake words would reverse the part of D51 that left them out, and only because the owner asked for them.
+
+## D55. Wake words are heard by the recognizer in Windows, and only on this PC
+
+The owner asked for wake words on 2026-10-31 and accepted a microphone that stays open, as a switch that is off until they turn it on. This
+reverses the part of D51 that left them out, which is the only reason the microphone may open with no click or key.
+
+The recognizer built into Windows does the listening, held to a fixed list of phrases. It needs no download, it runs on this PC, and it has
+an Indian English model on the reference machine, which it picks from the user's own language list. D51 ruled it out for writing down speech.
+A short list is a much smaller job. sherpa-onnx has a keyword spotter too, but it needs the downloaded engine, which cannot be loaded during
+development, so it could never have been tested here.
+
+No cloud service hears the wake word, because that would mean streaming the room. Nothing leaves this PC until the name is heard, and from
+then on it is the same as pressing the key, so words go to the hearing chosen under Voice.
+
+The microphone closes for a conversation, for Pause all monitoring, and if the user keeps those options on, while the screen is locked,
+while another app is using the microphone, and on battery. Windows records which apps are using the microphone, so that is read from there.
+
+Phrases are English letters only, because the recognizer works out how a word sounds from its spelling. A Hindi name works when written that
+way, such as Suno Mira, and it cannot be written in Devanagari.
+
+The board's dot pulsed, and the built one is still. Anything that moves redraws the whole window, and this dot can stay for hours. The
+board's Paused pill was left out too, because a pill that stays for a whole call is louder than what it reports. The dot goes, and Settings
+says why. The board's Hey Mira needs the assistant's name, which is not built, so the first wake word is Hey Meridian.
+
+Listening costs about 1.2% of one core and 52 MB, in Windows' own SpeechRuntime process.

@@ -105,6 +105,7 @@ What stands between this build and a stranger installing it. Only the owner can 
 | Ollama, LM Studio, llama.cpp | Not installed here. Tested through the real app against a stand-in server. | Run a real server |
 | Local voices and hearing | The owner downloaded the engine and hearing through the app on 2026-10-31, and no crash was recorded. The engine is now v1.13.8, so it needs downloading again, at about 8 MB. Nobody has confirmed it works, because loading the downloaded DLL during development was refused by a safety check. Kokoro's speaker names are from memory | Press Ctrl Alt V and talk, or run `cargo test -p voice --test live_local -- --ignored` with `MERIDIAN_SPEECH_DIR` set |
 | Cloud voices and hearing | ElevenLabs speaking and hearing are proved in the real app, in English and Hindi. OpenAI, Cartesia and Deepgram are written from their docs and tested on pure parts only | Add a key and talk |
+| Wake words | The recognizer opens from the app, the dot shows, and it refused other speech, on the real microphone. A person saying the phrase has not been recorded as a match. The Windows recognizer cannot read a file, so this cannot be automated | Settings, Wake words, press Test and say the phrase |
 | Talking with a real microphone | Worked for about 30 s in a dev build on 2026-10-31, including talking over a reply, but that was unplanned, and it is not confirmed who was speaking. The global key was held by the app, but only its event was sent in tests | Hold Ctrl Alt V and talk |
 | Brightness and battery | Only a desktop was available, so neither has fired for real. Volume keys were proved on the installed app | Try on a laptop |
 | Real media players | Tested with a silent session of its own. Spotify, browsers and VLC not tried, so artwork in particular is unproven. | Play something |
@@ -143,7 +144,7 @@ What stands between this build and a stranger installing it. Only the owner can 
 
 ## Not built yet
 
-- **Wake by name and the Windows speech recognizer.** Left out of voice on purpose. See `docs/DECISIONS.md`, D51.
+- **Writing down speech with the Windows recognizer.** Left out on purpose. See `docs/DECISIONS.md`, D51. Wake words do use it, see D55.
 - **Restored sessions are read-only.** Chat and finished sessions survive a restart, but a session's process does not, so it
   cannot be continued. Quitting ends every agent the app started. Agents in your own terminal carry on.
 - **Following Codex.** Claude Code only.
