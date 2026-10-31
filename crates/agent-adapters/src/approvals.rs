@@ -46,8 +46,14 @@ impl ApprovalServer {
         let state: Arc<Mutex<State>> = Arc::default();
         let shared = state.clone();
         tokio::spawn(async move {
-            while let Ok((socket, _)) = listener.accept().await {
-                tokio::spawn(handle(socket, shared.clone()));
+            loop {
+                match listener.accept().await {
+                    Ok((socket, _)) => {
+                        tokio::spawn(handle(socket, shared.clone()));
+                    }
+                    // Out of sockets, most likely. Waiting beats spinning.
+                    Err(_) => tokio::time::sleep(Duration::from_millis(100)).await,
+                }
             }
         });
         Ok(Self { state, port })

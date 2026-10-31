@@ -3,7 +3,7 @@
 // audio goes no further than the hearing the user chose. Nothing is ever recorded to disk.
 
 import { bridge } from "./bridge";
-import { answerApproval, feel, getState, openSettings, pushError, sendAgentChat, sendChat, setVoice } from "./store";
+import { answerApproval, feel, getState, openPanel, openSettings, pushError, sendAgentChat, sendChat, setVoice } from "./store";
 import { filler, isGoodbye, sentences, silenceFor, speakable, yesOrNo } from "./turns";
 
 export type VoiceMode = "hold" | "turn" | "conversation";
@@ -39,9 +39,13 @@ let session: {
   waitedMs: number;
   loudMs: number;
   turn: number;
-  /** A request waiting for a spoken yes or no. */
-  deciding: { sessionId: string; approvalId: string } | null;
+  /** A request waiting for a spoken yes or no, and how many sentences came before it. */
+  deciding: { sessionId: string; approvalId: string; spoken: number } | null;
+  /** What the chat held when the user last spoke, so an earlier reply is not taken for this one. */
+  before: unknown;
 } | null = null;
+/** The microphone is on its way. There is no `session` until it arrives. */
+let opening = false;
 
 // Speech out.
 let output: AudioContext | null = null;
@@ -108,30 +112,68 @@ function silence() {
   playUntil = 0;
 }
 
+function closeMicrophone(stream: MediaStream, context?: AudioContext) {
+  stream.getTracks().forEach((track) => track.stop());
+  void context?.close();
+}
+
 async function openMicrophone(mode: VoiceMode) {
   const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
-  const context = new AudioContext({ sampleRate: 16000 });
-  await context.audioWorklet.addModule("/pcm-worklet.js");
-  const node = new AudioWorkletNode(context, "pcm-chunks");
-  node.port.onmessage = (event: MessageEvent<Int16Array>) => onAudio(event.data);
-  context.createMediaStreamSource(stream).connect(node);
-  session = { mode, stream, context, sent: Promise.resolve(), floor: 0.01, heardSpeech: false, quietMs: 0, waitedMs: 0, loudMs: 0, turn: 0, deciding: null };
+  let context: AudioContext | undefined;
+  try {
+    context = new AudioContext({ sampleRate: 16000 });
+    await context.audioWorklet.addModule("/pcm-worklet.js");
+    const node = new AudioWorkletNode(context, "pcm-chunks");
+    node.port.onmessage = (event: MessageEvent<Int16Array>) => onAudio(event.data);
+    context.createMediaStreamSource(stream).connect(node);
+    session = { mode, stream, context, sent: Promise.resolve(), floor: 0.01, heardSpeech: false, quietMs: 0, waitedMs: 0, loudMs: 0, turn: 0, deciding: null, before: null };
+  } catch (err) {
+    // Nothing holds these yet, so nothing else would ever close the microphone.
+    closeMicrophone(stream, context);
+    throw err;
+  }
 }
 
 export function endConversation() {
   silence();
-  session?.stream.getTracks().forEach((track) => track.stop());
-  void session?.context.close();
+  if (session) closeMicrophone(session.stream, session.context);
   session = null;
   micLevel = 0;
   setVoice(null);
 }
 
+/** Ends the conversation and says why, and goes to the page that fixes it if there is one. */
+function failed(title: string, err: unknown) {
+  endConversation();
+  const text = String(err).replace(/^Error: /, "");
+  pushError({ title, body: text });
+  if (/download|key/i.test(text)) {
+    openSettings("voice");
+    openPanel();
+  }
+}
+
+/** Says something in a conversation. If it cannot be said the conversation is over, and says why. */
+async function speak(text: string) {
+  const mine = speaking;
+  try {
+    await say(text);
+  } catch (err) {
+    // Speech that was cut off has nothing left to report.
+    if (mine === speaking) failed("Could not speak", err);
+  }
+}
+
 async function listen(mode: VoiceMode) {
   if (!session) return;
   Object.assign(session, { mode, heardSpeech: false, quietMs: 0, waitedMs: 0, loudMs: 0 });
-  await bridge.voiceHearStart();
-  setVoice({ phase: "listening", mode, words: "", ahead: "" });
+  try {
+    await bridge.voiceHearStart();
+  } catch (err) {
+    return failed("Voice is not set up yet", err);
+  }
+  // It may have been stopped in the meantime, and then nothing is listening.
+  if (session) setVoice({ phase: "listening", mode, words: "", ahead: "" });
 }
 
 function onAudio(chunk: Int16Array) {
@@ -161,7 +203,8 @@ function onAudio(chunk: Int16Array) {
     if (words !== getState().voice?.words) now.quietMs = 0;
     now.heardSpeech = true;
     update({ words });
-  });
+    // One lost chunk must not stop the rest, and the end of the turn reports a real fault.
+  }).catch(() => {});
   if (speech) {
     now.heardSpeech = true;
     now.quietMs = 0;
@@ -200,33 +243,41 @@ async function finishTurn() {
   } catch (err) {
     pushError({ title: "Could not hear that", body: String(err) });
   }
-  if (!session) return;
+  if (session !== now) return;
   const said = words || getState().voice?.words || "";
   if (!said.trim() || (now.mode === "conversation" && isGoodbye(said))) return endConversation();
 
   if (now.deciding) {
     const answer = yesOrNo(said);
     if (answer === null) {
-      await say("Please say yes or no, or use the buttons.");
+      await speak("Please say yes or no, or use the buttons.");
       return void listen(now.mode);
     }
-    answerApproval(now.deciding.sessionId, now.deciding.approvalId, answer);
+    const { sessionId, approvalId, spoken } = now.deciding;
+    answerApproval(sessionId, approvalId, answer);
     now.deciding = null;
-    return void followReply(++now.turn);
+    return void followReply(++now.turn, spoken, approvalId);
   }
   update({ words: said, ahead: "" });
   void ask(said);
 }
 
+/** What holds the current chat. Asking something replaces it, so it tells a new reply from an old one. */
+function chatNow() {
+  const app = getState();
+  return app.agentChat.agent ? app.sessions.find((s) => s.id === app.agentChat.sessionId)?.log : app.chat.messages;
+}
+
 /** Everything the AI has written since the last thing the user said. */
 function replySoFar(): { text: string; done: boolean; waiting: { sessionId: string; approvalId: string; summary: string; agent: string } | null } {
   const app = getState();
+  const unchanged = chatNow() === session?.before;
   if (!app.agentChat.agent) {
     const last = app.chat.messages[app.chat.messages.length - 1];
-    return { text: last?.role === "assistant" ? last.content : "", done: !app.chatPending, waiting: null };
+    return { text: !unchanged && last?.role === "assistant" ? last.content : "", done: !app.chatPending, waiting: null };
   }
   const chat = app.sessions.find((s) => s.id === app.agentChat.sessionId);
-  if (!chat) return { text: "", done: false, waiting: null };
+  if (!chat || unchanged) return { text: "", done: false, waiting: null };
   const start = chat.log.map((entry) => entry.kind).lastIndexOf("user");
   const text = chat.log.slice(start + 1).filter((entry) => entry.kind === "text").map((entry) => entry.text).join("\n");
   const asking = chat.approval;
@@ -239,41 +290,49 @@ function replySoFar(): { text: string; done: boolean; waiting: { sessionId: stri
 
 function ask(words: string) {
   const app = getState();
-  if (app.agentChat.agent) void sendAgentChat(words, [], true);
-  else void sendChat(words, [], true);
-  void followReply(++session!.turn);
+  const now = session!;
+  const turn = ++now.turn;
+  now.before = chatNow();
+  if (!app.agentChat.agent) void sendChat(words, [], true);
+  else {
+    void sendAgentChat(words, [], true)
+      .catch((err) => pushError({ title: "Could not reach the agent", body: String(err) }))
+      .then(() => {
+        // Nothing started, so nothing will arrive. The reason is already on screen.
+        if (session === now && now.turn === turn && chatNow() === now.before) endConversation();
+      });
+  }
+  void followReply(turn);
 }
 
-/** Speaks a reply sentence by sentence, as it arrives. */
-async function followReply(turn: number) {
-  const current = () => session?.turn === turn;
+/**
+ * Speaks a reply sentence by sentence, as it arrives. `spoken` counts sentences, not characters,
+ * because what is said is the reply with its markdown taken out. `answered` is a request that
+ * stays on the session until the agent reports it has moved on.
+ */
+async function followReply(turn: number, spoken = 0, answered: string | null = null) {
+  // Turn numbers start again with each conversation, so the number alone could wake an old one.
+  const mine = session;
+  const current = () => session === mine && session?.turn === turn;
   const started = Date.now();
-  let spoken = 0;
   let saidAnything = false;
 
   while (current()) {
     const reply = replySoFar();
-    if (reply.waiting) {
-      session!.deciding = reply.waiting;
+    if (reply.waiting && reply.waiting.approvalId !== answered) {
+      session!.deciding = { ...reply.waiting, spoken };
       update({ phase: "speaking", words: `${reply.waiting.agent} wants to: ${reply.waiting.summary}. Should it?`, ahead: "" });
-      await say(`${reply.waiting.agent} wants to ${speakable(reply.waiting.summary)}. Should it?`);
+      await speak(`${reply.waiting.agent} wants to ${speakable(reply.waiting.summary)}. Should it?`);
       if (current()) await listen(session!.mode);
       return;
     }
-    const fresh = speakable(reply.text.slice(spoken));
-    const { ready } = sentences(fresh, reply.done);
-    if (ready.length > 0) {
-      const sentence = ready[0]!;
-      const consumed = reply.text.indexOf(sentence.slice(0, 12), spoken);
-      spoken = consumed >= 0 ? Math.min(reply.text.length, consumed + sentence.length) : reply.text.length;
+    const { ready } = sentences(speakable(reply.text), reply.done);
+    const sentence = ready[spoken];
+    if (sentence) {
+      spoken++;
       saidAnything = true;
-      update({ phase: "speaking", words: sentence, ahead: ready[1] ? ` ${ready[1]}` : "" });
-      try {
-        await say(sentence);
-      } catch (err) {
-        pushError({ title: "Could not speak", body: String(err) });
-        return endConversation();
-      }
+      update({ phase: "speaking", words: sentence, ahead: ready[spoken] ? ` ${ready[spoken]}` : "" });
+      await speak(sentence);
       continue;
     }
     if (reply.done) break;
@@ -281,7 +340,7 @@ async function followReply(turn: number) {
       saidAnything = true;
       const short = filler(turn);
       update({ phase: "speaking", words: short });
-      await say(short);
+      await speak(short);
       if (current()) update({ phase: "thinking" });
     }
     await sleep(120);
@@ -293,41 +352,52 @@ async function followReply(turn: number) {
 
 /** Starts a conversation by hand, as the hotkey does. */
 export async function startVoice(mode: VoiceMode) {
+  if (opening) return;
   if (session) {
     if (getState().voice?.phase === "speaking") await interrupted();
     return;
   }
+  opening = true;
   try {
     await openMicrophone(mode);
     await listen(mode);
   } catch (err) {
-    endConversation();
-    const text = String(err);
-    pushError({ title: /permission|notallowed|notfound/i.test(text) ? "No microphone" : "Voice is not set up yet", body: text.replace(/^Error: /, "") });
-    if (/download|key/i.test(text)) openSettings("voice");
+    failed(/permission|notallowed|notfound/i.test(String(err)) ? "No microphone" : "Voice is not set up yet", err);
+  } finally {
+    opening = false;
   }
 }
 
 let keyDownAt = 0;
 let lastTapAt = 0;
+/** What the last release of the key asked for, until the conversation is ready to take it. */
+let released: VoiceMode | null = null;
+
+/** The microphone takes longer to open than a tap lasts, so this runs when it has opened too. */
+function applyRelease() {
+  const voice = getState().voice;
+  if (!released || !session || !voice || voice.phase === "speaking") return;
+  const mode = released;
+  released = null;
+  if (mode !== "hold") {
+    session.mode = mode;
+    update({ mode });
+  } else if (session.mode === "hold") void finishTurn();
+}
 
 async function onKey(down: boolean) {
   const now = Date.now();
   if (down) {
     keyDownAt = now;
+    released = null;
     await startVoice("hold");
-    return;
+  } else {
+    // A tap is hands free: one question, or with two taps a whole conversation.
+    const tap = now - keyDownAt < TAP_MS;
+    released = !tap ? "hold" : now - lastTapAt < DOUBLE_TAP_MS ? "conversation" : "turn";
+    if (tap) lastTapAt = now;
   }
-  const held = now - keyDownAt;
-  if (held >= TAP_MS) {
-    if (session?.mode === "hold") void finishTurn();
-    return;
-  }
-  // A tap is hands free: one question, or with two taps a whole conversation.
-  const double = now - lastTapAt < DOUBLE_TAP_MS;
-  lastTapAt = now;
-  if (session) session.mode = double ? "conversation" : "turn";
-  update({ mode: double ? "conversation" : "turn" });
+  applyRelease();
 }
 
 export function wireVoice() {

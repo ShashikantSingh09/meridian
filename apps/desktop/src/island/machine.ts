@@ -163,8 +163,8 @@ const BATTERY: Geometry = { w: 340, ...BAR };
 const BATTERY_OPEN: Geometry = { w: 408, h: 104, r: 28 };
 const APPROVAL: Geometry = { w: 430, h: 132, r: 26 };
 const PLAN: Geometry = { w: 470, h: 320, r: 28 };
-/** Room for a question, plus this much per option. */
-const QUESTION_BASE = 112;
+/** Room for two lines of a question, plus this much per option. */
+const QUESTION_BASE = 134;
 const QUESTION_ROW = 40;
 const MULTITASK_ROW = 34;
 const MULTITASK_PAD = 18;

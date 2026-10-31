@@ -19,11 +19,14 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::commands::Core;
 use crate::island;
+use crate::links::refuse_if_local;
 
 pub const SERVICE: &str = "dev.meridian.companion";
 const TICK: Duration = Duration::from_secs(60);
 /// In ticks: mail and calendars every 15 minutes.
 const SYNC_EVERY: u32 = 15;
+/// How long finished events and the reminder log stay.
+const KEEP: TimeDelta = TimeDelta::days(90);
 const SIGN_IN_TIMEOUT: Duration = Duration::from_secs(300);
 /// Set when a release is built, so customers need no registration of their own.
 /// Google's desktop client secret is not confidential in this flow.
@@ -179,6 +182,7 @@ pub fn built_in_clients() -> (bool, bool) {
 }
 
 async fn sync_account(core: &Core, life: &Life, account: &ConnectedAccount) -> Result<SyncSummary, String> {
+    refuse_if_local(core)?;
     let config = oauth_config(core, account.provider, None)?;
     let session = |base: &str| {
         Session::new(base, config.clone(), account.id.clone(), life.tokens.clone()).map_err(stringify)
@@ -191,9 +195,10 @@ async fn sync_account(core: &Core, life: &Life, account: &ConnectedAccount) -> R
         }
         Provider::Microsoft => sync_microsoft(&Graph::new(session(graph::BASE_URL)?), &life.store, &options, now).await,
     };
-    let mut saved = account.clone();
-    saved.last_sync_at = Some(now);
-    life.store.save_account(&saved).map_err(stringify)?;
+    // Disconnected while this ran, so what it wrote after that has to go too.
+    if !life.store.accounts().map_err(stringify)?.iter().any(|a| a.id == account.id) {
+        life.store.delete_account(&account.id).map_err(stringify)?;
+    }
     Ok(summary)
 }
 
@@ -224,6 +229,10 @@ pub fn spawn(app: AppHandle) {
                     if let Err(err) = sync_account(&core, &life, &account).await {
                         eprintln!("sync of one account failed: {err}");
                     }
+                }
+                let now = Utc::now();
+                if let Err(err) = life.store.purge(now - KEEP, now) {
+                    eprintln!("purge: {err}");
                 }
                 let _ = app.emit_to(island::LABEL, "activity-changed", ());
             }
@@ -329,6 +338,7 @@ pub async fn account_connect(
     provider: Provider,
     secret: Option<String>,
 ) -> Result<ConnectedAccount, String> {
+    refuse_if_local(&core)?;
     if let Some(secret) = secret.as_deref().filter(|s| !s.is_empty()) {
         save_client_secret(provider, secret)?;
     }

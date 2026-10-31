@@ -455,6 +455,11 @@ The call that speaks ends before its audio arrives, because audio crosses over a
 believe it had finished, and reopened the microphone over its own voice. An empty last message on the channel now means all the audio is
 in. Only a run on the real app showed this. The browser stand-in has no such gap.
 
+The engine stays at sherpa-onnx v1.13.8. Version 2.0.0 removed espeak-ng and now ignores `data_dir`, so on v2.0.1 Kokoro and Piper could
+never speak: every sentence came back empty. A review of the code found this, because nothing here has run the engine. Going past 1.13.8
+needs a lexicon or a phonemizer of our own. A pack now counts as installed only if its pinned build is there, and an older engine folder is
+removed at startup, so a change of version cannot leave structs and DLL out of step.
+
 ## D52. Updates come from the private repository through the GitHub CLI
 
 The owner chose to keep everything private. Release files in a private repository need a login, so `tauri-plugin-updater`, which fetches a
@@ -466,3 +471,21 @@ GitHub's TLS from a repository only the owner can write to.
 
 This cannot reach customers. For them, restore the plugin and its signature check on a public host. The removed code is in the git history
 before this decision.
+
+## D53. Every window in view has to pass the capture exclusions
+
+A capture copies the screen, so checking only the window asked for let a password manager beside it, or on top of it, into the picture. The
+exclusions now run over every visible window in the captured area, just before the pixels are read. A window capture stops at the target,
+because only what is in front of it can show. A whole-screen capture lists the whole display, so a password manager behind other windows
+also blocks it. That is strict on purpose, and subtracting covered windows is the way to loosen it if it gets in the way.
+
+## D54. No change without an approved design
+
+The owner asked for this on 2026-10-31: every change to the app needs a design they have approved first. They also said the boards looked
+nothing like what was built. Two causes: boards drew full screens while real tabs are mostly empty, and each tab had its own size.
+
+So boards now cover empty states, use the real words and controls, and show one size. After building, each tab is compared with its board
+side by side in the real window before it counts as done.
+
+Apple-style glass, themes, limits and models, the assistant's name and personality, and wake words are on the canvas and held for review.
+Wake words would reverse the part of D51 that left them out, and only because the owner asked for them.

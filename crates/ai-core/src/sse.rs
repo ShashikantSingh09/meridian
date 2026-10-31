@@ -12,6 +12,9 @@ use crate::{ErrorKind, ProviderError};
 /// A stream silent for this long is treated as dead, so a stalled provider can
 /// never leave the island thinking forever.
 const IDLE_TIMEOUT: Duration = Duration::from_secs(120);
+/// Bytes that may arrive with no event finished. Silence has the timeout above;
+/// a server that keeps talking and never finishes one has only this.
+const MAX_UNFINISHED_BYTES: usize = 8 * 1024 * 1024;
 
 #[derive(Default)]
 pub struct SseParser {
@@ -22,10 +25,13 @@ pub struct SseParser {
 impl SseParser {
     /// Feeds one network chunk and returns the `data` payloads it completed.
     pub fn push(&mut self, chunk: &[u8]) -> Vec<String> {
+        // What is already buffered has no newline, so a long line costs one pass.
+        let mut from = self.buffer.len();
         self.buffer.extend_from_slice(chunk);
         let mut events = Vec::new();
-        while let Some(end) = self.buffer.iter().position(|b| *b == b'\n') {
-            let line: Vec<u8> = self.buffer.drain(..=end).collect();
+        while let Some(found) = self.buffer[from..].iter().position(|b| *b == b'\n') {
+            let line: Vec<u8> = self.buffer.drain(..=from + found).collect();
+            from = 0;
             let line = String::from_utf8_lossy(&line);
             let line = line.trim_end_matches(['\r', '\n']);
             if line.is_empty() {
@@ -52,6 +58,7 @@ pub async fn read_events(
 ) -> Result<(), ProviderError> {
     let mut parser = SseParser::default();
     let mut body = response.bytes_stream();
+    let mut unfinished = 0;
     loop {
         let next = tokio::select! {
             _ = cancel.cancelled() => return Err(ProviderError::cancelled()),
@@ -63,7 +70,12 @@ pub async fn read_events(
             Ok(Some(Err(err))) => return Err(ProviderError::from_reqwest(err)),
             Ok(Some(Ok(chunk))) => chunk,
         };
-        for event in parser.push(&chunk) {
+        let events = parser.push(&chunk);
+        unfinished = if events.is_empty() { unfinished + chunk.len() } else { 0 };
+        if unfinished > MAX_UNFINISHED_BYTES {
+            return Err(ProviderError::new(ErrorKind::Other, "The provider sent too much data."));
+        }
+        for event in events {
             if !handle(&event)? {
                 return Ok(());
             }

@@ -13,7 +13,7 @@ Scope is M3. Anything that reads more of the desktop must extend this before it 
 | Voice keys | Windows Credential Manager, like API keys. No command returns one to the webview. |
 | Spoken replies | With a cloud voice, the reply text goes to that service. Local only blocks every cloud voice and cloud hearing. |
 | Screen | Read only on request or in opt-in contextual mode, on this PC. Shared only from a preview the user approves. Frames are held in memory and dropped on send, discard or at once in contextual mode. |
-| Excluded windows | Password managers, private browsing and sign-in windows can never be captured, whatever the user's own list says. Refused before any pixel is read. |
+| Excluded windows | Password managers, private browsing and sign-in windows can never be captured, whatever the user's own list says. Every visible window in the captured area is checked, and the capture is refused before any pixel is read. |
 | Clipboard, keystrokes | Not read. |
 | Mail and calendars | Read-only OAuth with minimum scopes. Read on this PC. Extracted events stay in a local SQLite file. Nothing here is sent to an AI provider. |
 | OAuth tokens | Windows Credential Manager, never in SQLite. Disconnect removes the tokens and the events owned by that account. A booking seen in two accounts is one row, see `KNOWN_ISSUES.md`. |
@@ -40,7 +40,7 @@ process of the same user can read. Same-user processes are outside this model, a
 on its own: a request waits for a click, and if nobody answers within 30 minutes the agent's own rule applies. Project
 hooks load without a trust prompt in print mode, so the new-session form warns about this.
 
-**Local-only mode** is enforced in Rust on the resolved address, including custom endpoints. A hostname merely containing
+**Local-only mode** also stops mail and calendar sync, and it is enforced in Rust on the resolved address, including custom endpoints. A hostname merely containing
 "localhost" does not pass.
 
 **The OAuth loopback listener** binds 127.0.0.1 on a random port for one sign-in, and checks `state` and PKCE.
@@ -73,6 +73,8 @@ unpacked DLL, which is outside this model. Packs are unpacked with Windows' own 
 must match the release's `SHA256SUMS.txt`. Both come from the same place, so the checksum proves the download is whole and not who made
 it. Anyone able to publish to the repository can therefore reach every PC that updates. This is acceptable for one owner. Customers need
 a signed update, see `docs/DECISIONS.md`, D52.
+
+**The hook token stays out of the webview.** The preview of what following changes in the Claude Code settings file reads only the `hooks` section, with every header value hidden, in both directions.
 
 ## Credentials of other tools
 

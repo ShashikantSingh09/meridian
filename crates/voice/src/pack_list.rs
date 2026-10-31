@@ -1,11 +1,13 @@
 // The engine version here and the structs in `local.rs` must change together.
+// Kokoro and Piper need espeak-ng to read plain text, which v2.0.0 removed, so 1.13.8 is the last
+// engine that can speak with these packs. Going past it needs a lexicon or a phonemizer as well.
 pub const PACKS: [Pack; 5] = [
     Pack {
         id: "engine",
         name: "Speech engine",
-        bytes: 7_899_712,
-        path: "v2.0.1/sherpa-onnx-v2.0.1-win-x64-shared-MT-Release-lib.tar.bz2",
-        sha256: "afa4de3ca4ab0afd53bb4aab40d28ee15608364b549ffc0fe0caf6489bfc39a5",
+        bytes: 8_032_957,
+        path: "v1.13.8/sherpa-onnx-v1.13.8-win-x64-shared-MT-Release-lib.tar.bz2",
+        sha256: "b8eedf41bd6d3779218887b48367bb7a3ece5aaa7667f01f69ee823a12b0a9e7",
     },
     Pack {
         id: "hearing",

@@ -242,6 +242,7 @@ async fn drive_with(
                     let failed = parsed.events.iter().any(|e| {
                         matches!(e, AgentEvent::Status { status: SessionStatus::Failed, .. })
                     });
+                    let opened = parsed.events.iter().any(|e| matches!(e, AgentEvent::Started { .. }));
                     parsed.events.into_iter().for_each(|e| emit(e));
                     if failed {
                         return agent.kill_tree().await;
@@ -249,6 +250,10 @@ async fn drive_with(
                     if parsed.finished {
                         interrupt_by = None;
                         idle_until = Some(Instant::now() + idle_keep);
+                    } else if opened {
+                        // A message sent during a turn runs after it, and every turn opens with
+                        // its own init. Anything less would keep an idle process for good.
+                        idle_until = None;
                     }
                 }
                 // Out of output with no result: a crash, or a CLI killed from outside.
@@ -466,6 +471,18 @@ mod tests {
         let (_tx, rx) = mpsc::unbounded_channel();
         tokio::time::timeout(Duration::from_secs(10), drive_with(launch, args, emit, rx, Duration::from_millis(100))).await.unwrap();
         assert_eq!(last_status(&events.lock().unwrap()), Some(SessionStatus::Completed));
+    }
+
+    #[tokio::test]
+    async fn a_queued_turn_outlasting_the_idle_window_is_not_ended() {
+        // The first result, then a turn that was already queued and takes longer than the window.
+        let script = format!("console.log(String.raw`{RESULT}`); console.log(String.raw`{INIT}`); setTimeout(() => console.log(String.raw`{RESULT}`), 700); setInterval(() => {{}}, 1000)");
+        let (launch, args) = launch(&script);
+        let (emit, events) = recorder();
+        let (_tx, rx) = mpsc::unbounded_channel();
+        tokio::time::timeout(Duration::from_secs(10), drive_with(launch, args, emit, rx, Duration::from_millis(300))).await.unwrap();
+        let events = events.lock().unwrap();
+        assert_eq!(events.iter().filter(|e| **e == AgentEvent::status(SessionStatus::Completed)).count(), 2);
     }
 
     #[tokio::test]

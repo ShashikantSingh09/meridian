@@ -47,6 +47,9 @@ let heardWords = "";
 const spokenWords: string[] = [];
 let updateStatus = { current: "0.3.0", latest: "v0.3.0", available: false, notes: "", published: null as string | null, message: "You are on the latest version." };
 let updateInstalled = false;
+let failInstalling: (why: Error) => void = () => {};
+let signInGate: Promise<void> | null = null;
+let failSigningIn: (why: Error) => void = () => {};
 let pushLevel: (level: Level) => void = () => {};
 let watching = false;
 let lastAnswers: Record<string, string | string[]> | null = null;
@@ -186,9 +189,12 @@ export const mock = {
   accountDisconnect: async (id: string) => void (accounts = accounts.filter((a) => a.id !== id)),
 
   integrationsList: async () => integrations.map((i) => ({ ...i })),
+  /** The next sign-in waits in the browser until `failConnect`. */
+  holdConnect: () => void (signInGate = new Promise((_, reject) => (failSigningIn = reject))),
+  failConnect: (why: string) => failSigningIn(new Error(why)),
   integrationConnect: async (id: string) => {
-    await sleep(40);
-    integrations = integrations.map((i) => (i.id === id ? { ...i, connected: true, account: "Connected, read-only" } : i));
+    await (signInGate ?? sleep(40));
+    integrations =integrations.map((i) => (i.id === id ? { ...i, connected: true, account: "Connected, read-only" } : i));
   },
   integrationDisconnect: async (id: string) =>
     void (integrations = integrations.map((i) => (i.id === id ? { ...i, connected: false, account: null } : i))),
@@ -226,11 +232,20 @@ export const mock = {
   voiceRemove: async (id: string) => void voicePacks.delete(id),
   voiceSpeak: async (text: string) => void spokenWords.push(text),
   voiceHeard: async () => heardWords,
+  setPacks: (ids: string[]) => {
+    voicePacks.clear();
+    ids.forEach((id) => voicePacks.add(id));
+  },
   setHeard: (words: string) => void (heardWords = words),
   spoken: () => spokenWords,
   checkUpdate: async () => updateStatus,
-  installUpdate: async () => void (updateInstalled = true),
-  setUpdate: (status: Partial<typeof updateStatus>) => void (updateStatus = { ...updateStatus, ...status }),
+  installUpdate: () => {
+    updateInstalled = true;
+    // Succeeding ends the real app, so this only ever answers with a failure.
+    return new Promise<void>((_, reject) => (failInstalling = reject));
+  },
+  failInstall: (why: string) => failInstalling(new Error(why)),
+  setUpdate:(status: Partial<typeof updateStatus>) => void (updateStatus = { ...updateStatus, ...status }),
   updateInstalled: () => updateInstalled,
   watching: () => watching,
   watchPreview: async (on: boolean): Promise<SettingsChange> => ({
@@ -249,7 +264,7 @@ export const mock = {
   publishReminder: (reminder: Reminder) => pushReminders([reminder]),
 
   screenCapture: async (): Promise<Capture> => ({
-    image: "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7",
+    image: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='1280' height='720'/%3E",
     text: "terraform plan\nError: Invalid reference\n  on main.tf line 12",
     window: { title: "main.tf - infra", process: "Code.exe" },
     signals: [{ kind: "terraform", title: "Looks like a Terraform configuration issue", evidence: "Error: Invalid reference" }],
@@ -268,6 +283,8 @@ export const mock = {
     emit({ sessionId, event: { type: "watched", agent: "Claude Code", cwd: "C:\\Projects\\shop", title: "Fix the checkout" } });
     emit({ sessionId, event: { type: "activity", label: "Editing cart.ts" } });
   },
+  publishText: (sessionId: string, text: string) => emit({ sessionId, event: { type: "text", text } }),
+  publishFailure: (sessionId: string, message: string) => emit({ sessionId, event: { type: "status", status: "failed", message } }),
   publishWatchedApproval: (sessionId: string) =>
     emit({ sessionId, event: { type: "approval", approval: { id: "w1", tool: "Bash", summary: "npm install stripe" } } }),
   publishWatchedQuestion: (sessionId: string, multi = false) =>

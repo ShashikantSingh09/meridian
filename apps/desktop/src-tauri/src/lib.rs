@@ -50,6 +50,17 @@ fn toggle_monitoring(app: &AppHandle) {
     let _ = app.emit_to(island::LABEL, "settings-changed", settings);
 }
 
+/// The only way out, so no agent outlives the app.
+fn quit(app: &AppHandle) {
+    app.state::<Core>().sessions.shutdown();
+    // Give adapters a moment to end their process trees.
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(400));
+        app.exit(0);
+    });
+}
+
 fn toggle_visibility(app: &AppHandle) {
     if let Some(win) = app.get_webview_window(island::LABEL) {
         let gate = &app.state::<Core>().gate;
@@ -77,15 +88,7 @@ fn build_tray(app: &App) -> tauri::Result<()> {
             }
             "visibility" => toggle_visibility(app),
             "pause" => toggle_monitoring(app),
-            "quit" => {
-                app.state::<Core>().sessions.shutdown();
-                // Give adapters a moment to end their process trees.
-                let app = app.clone();
-                std::thread::spawn(move || {
-                    std::thread::sleep(std::time::Duration::from_millis(400));
-                    app.exit(0);
-                });
-            }
+            "quit" => crate::quit(app),
             _ => {}
         })
         .on_tray_icon_event(|tray, event| {

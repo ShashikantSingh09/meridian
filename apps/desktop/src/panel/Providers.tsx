@@ -113,8 +113,7 @@ function SignIn() {
   const auth = useApp((s) => s.auth);
   const providers = useApp((s) => s.providers);
   const [current, setCurrent] = useState<(typeof SIGN_INS)[number]["id"]>("claude-code");
-  const [waiting, setWaiting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const waiting = useApp((s) => s.signingIn.includes(current));
 
   const choice = SIGN_INS.find((s) => s.id === current)!;
   const isAgent = current !== "openrouter";
@@ -122,18 +121,7 @@ function SignIn() {
   const missing = isAgent && !agent?.installed;
   const done = current === "openrouter" ? providers.some((p) => p.id === "openrouter" && p.hasKey) : auth[current]?.signedIn === true;
 
-  const go = async () => {
-    setWaiting(true);
-    setError(null);
-    try {
-      if (current === "openrouter") await signInProvider(current);
-      else if (!(await signInAgent(current))) setError("Sign-in did not finish. Try again when you are ready.");
-    } catch (err) {
-      setError(String(err));
-    } finally {
-      setWaiting(false);
-    }
-  };
+  const go = () => (current === "openrouter" ? signInProvider(current, choice.name) : signInAgent(current, choice.name));
 
   return (
     <section className="stack">
@@ -148,7 +136,6 @@ function SignIn() {
       <p className="meta">{choice.explain}</p>
       {done && <p className="meta ok" role="status">{choice.name} is connected.</p>}
       {waiting && <p className="label" role="status">Finish in your browser</p>}
-      {error && <p className="meta bad" role="status">{error}</p>}
       {!done && !waiting && (
         <div className="row">
           {missing ? (

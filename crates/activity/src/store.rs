@@ -464,19 +464,44 @@ fn write(tx: &Transaction, event: &ContextEvent, user_fields: &[String]) -> Resu
     Ok(())
 }
 
-fn upsert_in(tx: &Transaction, incoming: ContextEvent) -> Result<UpsertOutcome, Error> {
+fn upsert_in(tx: &Transaction, mut incoming: ContextEvent) -> Result<UpsertOutcome, Error> {
+    // Not an error: the same mail comes back until its page is done, so that
+    // would stop the sync here on every run.
+    if ![incoming.starts_at, incoming.ends_at].iter().flatten().all(EventTime::sensible) {
+        return Ok(UpsertOutcome::Unchanged);
+    }
+    let legs = if incoming.status == EventStatus::Cancelled { cancel_each_leg(tx, &incoming)? } else { None };
     let Some((stored, user_fields)) = load_by_key(tx, &incoming.dedupe_key)? else {
-        if incoming.status == EventStatus::Cancelled {
-            if let Some(outcome) = cancel_each_leg(tx, &incoming)? {
-                return Ok(outcome);
-            }
+        if let Some(outcome) = legs {
+            return Ok(outcome);
+        }
+        if incoming.status == EventStatus::Active && parent_cancelled_it(tx, &incoming)? {
+            incoming.status = EventStatus::Cancelled;
         }
         write(tx, &incoming, &[])?;
         return Ok(UpsertOutcome::Inserted);
     };
-    let Some((merged, changed)) = merge(&stored, incoming, &user_fields)? else { return Ok(UpsertOutcome::Unchanged) };
+    let Some((merged, changed)) = merge(&stored, incoming, &user_fields)? else {
+        return Ok(legs.unwrap_or(UpsertOutcome::Unchanged));
+    };
     write(tx, &merged, &user_fields)?;
     Ok(UpsertOutcome::Updated { changed })
+}
+
+/// The other half of [`cancel_each_leg`]: mail lists newest first, so a
+/// cancellation naming only the booking can land before the legs it covers.
+fn parent_cancelled_it(tx: &Transaction, incoming: &ContextEvent) -> Result<bool, Error> {
+    let mut query = tx.prepare(
+        "SELECT doc, user_fields FROM events
+         WHERE status = 'cancelled' AND substr(?1, 1, length(dedupe_key) + 1) = dedupe_key || ':'",
+    )?;
+    let rows = query.query_map(params![incoming.dedupe_key], |row| Ok((row.get(0)?, row.get(1)?)))?;
+    for row in rows.collect::<Result<Vec<(String, String)>, _>>()? {
+        if is_older(incoming, &decode(row)?.0) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// "Booking ABC123 was cancelled" names no leg, and an iCal CANCEL with no
@@ -726,6 +751,41 @@ mod tests {
         assert_eq!(store.all(None).unwrap().len(), 2, "no third row for the bare booking");
         assert_eq!(store.get(&out.id).unwrap().unwrap().status, EventStatus::Cancelled);
         assert_eq!(store.get(&back.id).unwrap().unwrap().status, EventStatus::Cancelled);
+    }
+
+    #[test]
+    fn a_cancellation_listed_before_the_booking_still_covers_its_legs() {
+        let store = store();
+        // Newest first, so the cancellation meets no legs yet.
+        store.upsert(cancelled("flight:ABC123", day(3))).unwrap();
+        let leg = event("flight:ABC123:JFK-LHR", day(1));
+        store.upsert(leg.clone()).unwrap();
+        assert_eq!(store.get(&leg.id).unwrap().unwrap().status, EventStatus::Cancelled);
+
+        let rebooked = event("flight:ABC123:LHR-JFK", day(4));
+        store.upsert(rebooked.clone()).unwrap();
+        assert_eq!(store.get(&rebooked.id).unwrap().unwrap().status, EventStatus::Active, "newer than the cancellation");
+    }
+
+    #[test]
+    fn a_later_cancellation_reaches_the_legs_past_an_earlier_bare_row() {
+        let store = store();
+        store.upsert(cancelled("flight:ABC123", day(1))).unwrap();
+        let leg = event("flight:ABC123:JFK-LHR", day(2));
+        store.upsert(leg.clone()).unwrap();
+        store.upsert(cancelled("flight:ABC123", day(3))).unwrap();
+        assert_eq!(store.get(&leg.id).unwrap().unwrap().status, EventStatus::Cancelled);
+    }
+
+    #[test]
+    fn a_time_at_the_edge_of_the_calendar_is_refused_and_cannot_panic() {
+        let store = store();
+        let edge = NaiveDate::from_ymd_opt(-262143, 1, 1).unwrap().and_hms_opt(0, 0, 0).unwrap();
+        let mut forged = event("forged", day(1));
+        forged.starts_at = Some(EventTime::Naive(edge));
+        assert_eq!(store.upsert(forged.clone()).unwrap(), UpsertOutcome::Unchanged, "an error would stop the sync here");
+        assert!(store.get(&forged.id).unwrap().is_none());
+        EventTime::Naive(edge).instant(FixedOffset::east_opt(19_800).unwrap());
     }
 
     #[test]

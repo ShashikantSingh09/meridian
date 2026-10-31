@@ -38,8 +38,24 @@ pub fn folder(root: &Path, pack: &Pack) -> PathBuf {
     root.join(pack.id)
 }
 
+/// The folder its archive unpacks to, named after the archive and so after its version.
+fn build(pack: &Pack) -> &str {
+    pack.path.rsplit('/').next().unwrap_or_default().trim_end_matches(".tar.bz2")
+}
+
+/// Whether the build pinned here is on this PC. An earlier version's does not count: the structs
+/// in `local.rs` fit only the pinned engine.
 pub fn installed(root: &Path, pack: &Pack) -> bool {
-    folder(root, pack).is_dir()
+    folder(root, pack).join(build(pack)).is_dir()
+}
+
+/// Takes away what an earlier version of a pack left behind.
+pub fn clear_old(root: &Path) {
+    for pack in &PACKS {
+        if folder(root, pack).is_dir() && !installed(root, pack) {
+            let _ = remove(root, pack);
+        }
+    }
 }
 
 /// Fetches, verifies and unpacks a pack. `progress` is told how many bytes have arrived.
@@ -87,6 +103,8 @@ async fn unpack(root: &Path, pack: &Pack, archive: &Path) -> Result<(), VoiceErr
             let _ = fs::remove_dir_all(&working);
             return Err(VoiceError::Engine("The download could not be unpacked.".into()));
         }
+        // An earlier version may still be here, if it could not be cleared at startup.
+        let _ = fs::remove_dir_all(&target);
         fs::rename(&working, &target)?;
         Ok(())
     })
@@ -112,8 +130,27 @@ mod tests {
             assert_eq!(pack.sha256.len(), 64, "{}", pack.id);
             assert!(pack.sha256.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()), "{}", pack.id);
             assert!(pack.bytes > 0);
+            assert!(pack.path.ends_with(".tar.bz2"), "{}", pack.id);
         }
         assert!(find("engine").is_some());
         assert!(find("nothing").is_none());
+    }
+
+    #[test]
+    fn an_old_engine_does_not_count_and_is_cleared() {
+        let root = std::env::temp_dir().join(format!("meridian-packs-{}", std::process::id()));
+        let (engine, hearing) = (find("engine").unwrap(), find("hearing").unwrap());
+        fs::create_dir_all(folder(&root, engine).join("sherpa-onnx-v2.0.1-win-x64-shared-MT-Release-lib")).unwrap();
+        fs::create_dir_all(folder(&root, hearing).join(build(hearing))).unwrap();
+        assert!(!installed(&root, engine));
+        assert!(installed(&root, hearing));
+
+        clear_old(&root);
+        assert!(!folder(&root, engine).exists());
+        assert!(installed(&root, hearing), "a pack that still fits stays");
+
+        fs::create_dir_all(folder(&root, engine).join(build(engine))).unwrap();
+        assert!(installed(&root, engine));
+        let _ = fs::remove_dir_all(&root);
     }
 }

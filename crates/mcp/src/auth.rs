@@ -19,6 +19,7 @@ use crate::{digest, Client, Error, Link, Service, SignedIn};
 /// Tokens this close to expiry are refreshed first, so a digest does not fail
 /// halfway through.
 const EXPIRY_MARGIN_SECONDS: i64 = 60;
+const LOCAL_SUFFIXES: [&str; 5] = [".localhost", ".local", ".internal", ".lan", ".home.arpa"];
 
 fn is_internal_v4(ip: Ipv4Addr) -> bool {
     ip.is_loopback()
@@ -26,16 +27,19 @@ fn is_internal_v4(ip: Ipv4Addr) -> bool {
         || ip.is_link_local()
         || ip.is_unspecified()
         // 0.0.0.0/8 reaches this host on some systems, and 100.64.0.0/10 is
-        // carrier NAT, where one cloud keeps its metadata service.
-        || matches!(ip.octets(), [0, ..] | [100, 64..=127, ..])
+        // carrier NAT, where one cloud keeps its metadata service. The rest are
+        // never public: protocol space, benchmark nets, and reserved addresses.
+        || matches!(ip.octets(), [0, ..] | [100, 64..=127, ..] | [192, 0, 0, _] | [198, 18..=19, ..] | [240..=255, ..])
 }
 
 /// `to_ipv4` also unwraps `::ffff:127.0.0.1`, the usual way past a v4-only check.
+/// fec0::/10 is retired but still routes, and 64:ff9b::/96 is any v4 address again.
 fn is_internal_v6(ip: Ipv6Addr) -> bool {
     ip.is_loopback()
         || ip.is_unspecified()
         || ip.is_unique_local()
         || ip.is_unicast_link_local()
+        || matches!(ip.segments(), [0xfec0..=0xfeff, ..] | [0x64, 0xff9b, ..])
         || ip.to_ipv4().is_some_and(is_internal_v4)
 }
 
@@ -52,7 +56,8 @@ pub(crate) fn check_url(raw: &str, allow_loopback: bool) -> Result<Url, Error> {
     let internal = match host.parse::<IpAddr>() {
         Ok(IpAddr::V4(ip)) => is_internal_v4(ip),
         Ok(IpAddr::V6(ip)) => is_internal_v6(ip),
-        Err(_) => host == "localhost" || host.ends_with(".localhost"),
+        // A bare name or one of these suffixes can only resolve on the local network.
+        Err(_) => !host.contains('.') || LOCAL_SUFFIXES.iter().any(|suffix| host.ends_with(suffix)),
     };
     let safe = if allow_loopback && is_loopback(raw) {
         matches!(url.scheme(), "http" | "https")
@@ -180,9 +185,14 @@ fn choose_scopes(service: &Service, challenge: &Challenge, resource: &Value) -> 
 
 /// The metadata has to describe the server it came from (RFC 9728, section 3.3).
 /// Otherwise a server could name another service's sign-in, and the token the user
-/// granted there would come straight back to it.
+/// granted there would come straight back to it. RFC 9728 requires the field, so
+/// leaving it out does not skip this. No metadata at all is fine: Atlassian has
+/// none, and sign-in then stays on the server's own origin.
 fn check_resource(server_url: &str, document: &Value) -> Result<(), Error> {
-    let Some(claimed) = document["resource"].as_str() else { return Ok(()) };
+    if document.is_null() {
+        return Ok(());
+    }
+    let claimed = document["resource"].as_str().ok_or(Error::ForeignResource)?;
     let (Ok(claimed), Ok(server)) = (Url::parse(claimed), Url::parse(server_url)) else {
         return Err(Error::ForeignResource);
     };
@@ -348,7 +358,13 @@ mod tests {
             assert!(check_resource("https://mcp.example.com/mcp", &json!({ "resource": resource })).is_ok(), "{resource}");
         }
         assert!(check_resource("https://mcp.example.com", &json!({ "resource": "https://mcp.example.com/" })).is_ok());
-        assert!(check_resource("https://mcp.example.com/mcp", &json!({})).is_ok());
+        assert!(check_resource("https://mcp.example.com/mcp", &Value::Null).is_ok(), "no metadata, so no foreign sign-in");
+    }
+
+    #[test]
+    fn metadata_that_leaves_out_its_resource_is_refused() {
+        let silent = json!({ "authorization_servers": ["https://accounts.example.com"] });
+        assert!(matches!(check_resource("https://mcp.example.com/mcp", &silent), Err(Error::ForeignResource)));
     }
 
     #[test]
@@ -399,6 +415,9 @@ mod tests {
             "https://0.0.0.0/",
             "https://0.1.2.3/",
             "https://100.100.100.200/",
+            "https://198.18.0.1/",
+            "https://192.0.0.1/",
+            "https://240.0.0.1/",
         ] {
             assert!(refused(url), "{url}");
         }
@@ -406,7 +425,7 @@ mod tests {
 
     #[test]
     fn internal_ipv6_literals_are_refused() {
-        for url in ["https://[::1]/", "https://[::]/", "https://[fc00::1]/", "https://[fd12::1]/", "https://[fe80::1]/"] {
+        for url in ["https://[::1]/", "https://[::]/", "https://[fc00::1]/", "https://[fd12::1]/", "https://[fe80::1]/", "https://[fec0::1]/", "https://[64:ff9b::a9fe:a9fe]/"] {
             assert!(refused(url), "{url}");
         }
     }
@@ -427,7 +446,7 @@ mod tests {
 
     #[test]
     fn local_names_are_refused() {
-        for url in ["https://localhost/", "https://LOCALHOST/", "https://localhost./", "https://x.localhost/"] {
+        for url in ["https://localhost/", "https://LOCALHOST/", "https://localhost./", "https://x.localhost/", "https://intranet/", "https://nas.local/", "https://NAS.LOCAL./", "https://db.internal/", "https://router.lan/", "https://hub.home.arpa/"] {
             assert!(refused(url), "{url}");
         }
     }

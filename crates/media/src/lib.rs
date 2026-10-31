@@ -290,12 +290,14 @@ fn snapshot(manager: &Manager, pick: Option<&str>, ears: &mut audio::Ears, art: 
     Snapshot { current, sessions: list }
 }
 
-fn perform(manager: &Manager, pick: &mut Option<String>, action: Action) {
+/// `shown` is the session on screen. Sound can put one there that `chosen` alone would rank
+/// below another, and a control has to reach the player it is shown for.
+fn perform(manager: &Manager, pick: &mut Option<String>, shown: Option<&str>, action: Action) {
     if let Action::Select { session } = &action {
         *pick = Some(session.clone());
         return;
     }
-    let Some(session) = chosen(manager, pick.as_deref()) else { return };
+    let Some(session) = chosen(manager, shown.or(pick.as_deref())) else { return };
     // Each call reports whether the player accepted it. A refusal changes nothing.
     let _ = match action {
         Action::Toggle => session.TryTogglePlayPauseAsync().map(|_| ()),
@@ -389,7 +391,7 @@ fn run(rx: Receiver<Wake>, tx: Sender<Wake>, on_change: impl Fn(Snapshot)) -> Re
         while let Some(event) = wake.take() {
             match event {
                 Wake::Do(Action::Refresh) => resend = true,
-                Wake::Do(action) => perform(&manager, &mut pick, action),
+                Wake::Do(action) => perform(&manager, &mut pick, last.current.as_ref().map(|t| t.session.as_str()), action),
                 Wake::Sessions => sessions_changed = true,
                 Wake::Changed => {}
             }
@@ -445,6 +447,8 @@ mod tests {
         assert!(rank(Some(Status::Paused), Some("saavn"), None, false, None) > idle, "a paused session beats one that never started");
         let silent = rank(Some(Status::Paused), Some("saavn"), None, false, None);
         assert!(rank(Some(Status::Paused), Some("saavn"), None, true, None) > silent, "of two paused sessions, the one that says what is on");
+        let on_screen = Some("saavn");
+        assert!(rank(Some(Status::Opened), on_screen, on_screen, true, None) > rank(Some(Status::Paused), Some("chrome"), on_screen, true, None), "a control reaches the session on screen, not a paused tab");
     }
 
     fn track(session: &str, title: &str, playing: bool) -> Track {

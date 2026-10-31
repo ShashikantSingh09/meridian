@@ -1,14 +1,15 @@
 import { spring } from "@meridian/design-system/motion";
 import { motion } from "motion/react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect } from "react";
 import { bridge } from "../lib/bridge";
 import { Brand } from "../lib/brands";
 import { Icon } from "../lib/icons";
 import {
-  answerApproval,
+  addDraftFile,
   cancelChat,
   cancelSession,
   clearChat,
+  clearDraft,
   isReady,
   newAgentConversation,
   refreshAuth,
@@ -19,14 +20,16 @@ import {
   sendChat,
   setAgentCwd,
   setAgentMode,
+  setDraft,
   shareCapture,
   openSettings,
   useApp,
 } from "../lib/store";
 import type { AgentId } from "../lib/types";
 import { Face } from "../island/faces";
+import { ApprovalCard } from "../island/views";
 import { startVoice } from "../lib/voice";
-import { LogLine } from "./LogLine";
+import { LogLine, useFollow } from "./LogLine";
 import { LookButton, LookChips, lookGreeting, LookPill, seenName } from "./Look";
 import { Markdown } from "./Markdown";
 import { Menu } from "./Menu";
@@ -102,29 +105,24 @@ function AgentChat({ agent }: { agent: AgentId }) {
   const conversations = sessions.filter((s) => s.surface === "chat" && s.agentId === agent);
   const session = conversations.find((s) => s.id === sessionId) ?? null;
   const live = session !== null && LIVE.includes(session.status);
-  const [text, setText] = useState("");
-  const [files, setFiles] = useState<string[]>([]);
-  const log = useRef<HTMLDivElement>(null);
+  const text = useApp((s) => s.draft);
+  const files = useApp((s) => s.draftFiles);
+  const follow = useFollow(session?.log, session?.id);
   const folder = cwd ?? defaultDir;
-
-  useEffect(() => {
-    log.current?.scrollTo({ top: log.current.scrollHeight });
-  }, [session?.log]);
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     const prompt = text.trim();
     if (!prompt) return;
     const references = files.map((f) => `- ${f}`).join("\n");
-    setText("");
-    setFiles([]);
+    clearDraft();
     if (capture) return shareCapture(prompt);
     void sendAgentChat(files.length > 0 ? `${prompt}\n\nReferenced files:\n${references}` : prompt);
   };
 
   const attach = async () => {
     const picked = await bridge.pickFile();
-    if (picked) setFiles((f) => [...f, picked]);
+    if (picked) addDraftFile(picked);
   };
 
   const browse = async () => {
@@ -165,15 +163,11 @@ function AgentChat({ agent }: { agent: AgentId }) {
       {session?.approval && (
         <div className="approval">
           <span className="label">{session.agent} wants to run {session.approval.tool}</span>
-          <code className="command" title={session.approval.summary}>{session.approval.summary}</code>
-          <div className="row end">
-            <button className="ghost" onClick={() => answerApproval(session.id, session.approval!.id, false)}>Deny</button>
-            <button className="allow" onClick={() => answerApproval(session.id, session.approval!.id, true)}>Allow</button>
-          </div>
+          <ApprovalCard sessionId={session.id} approval={session.approval} />
         </div>
       )}
 
-      <div className="log" ref={log} aria-live="polite">
+      <div className="log" {...follow} aria-live="polite">
         {session === null ? (
           <ChatStart
             hello={mode === "general" ? "What can I do for you?" : "What should we work on?"}
@@ -211,7 +205,7 @@ function AgentChat({ agent }: { agent: AgentId }) {
           aria-label="Message"
           placeholder={capture ? "Ask about what is here" : session ? "Ask on" : "Ask anything"}
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => setDraft(e.target.value)}
         />
         {live ? (
           <button type="button" className="round" aria-label="Stop" title="Stop this turn" onClick={() => cancelSession(session!.id)}>
@@ -235,8 +229,8 @@ function ApiChat() {
   const localOnline = useApp((s) => s.localOnline);
   const agents = useApp((s) => s.agents);
   const pending = useApp((s) => s.chatPending);
-  const [text, setText] = useState("");
-  const log = useRef<HTMLDivElement>(null);
+  const text = useApp((s) => s.draft);
+  const follow = useFollow(chat.messages, null);
   const ready = providers.filter((p) => isReady(p, localOnline));
   const first = ready[0]?.id;
   const firstAgent = agents.find((a) => a.installed)?.id;
@@ -249,15 +243,11 @@ function ApiChat() {
     else if (firstAgent) selectEngine(firstAgent);
   }, [chat.providerId, first, firstAgent]);
 
-  useEffect(() => {
-    log.current?.scrollTo({ top: log.current.scrollHeight });
-  }, [chat.messages]);
-
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     const prompt = text.trim();
     if (!prompt || pending) return;
-    setText("");
+    clearDraft();
     if (capture) return shareCapture(prompt);
     void sendChat(prompt);
   };
@@ -284,7 +274,7 @@ function ApiChat() {
       </header>
 
       <LookPill />
-      <div className="messages" ref={log} aria-live="polite">
+      <div className="messages" {...follow} aria-live="polite">
         {chat.messages.length === 0 &&
           (noEngine ? (
             <div className="chat-start">
@@ -309,7 +299,7 @@ function ApiChat() {
           <Icon name="mic" size={14} />
         </button>
         <LookButton />
-        <input aria-label="Message" placeholder={capture ? "Ask about what is here" : chat.messages.length ? "Ask on" : "Ask anything"} value={text} onChange={(e) => setText(e.target.value)} />
+        <input aria-label="Message" placeholder={capture ? "Ask about what is here" : chat.messages.length ? "Ask on" : "Ask anything"} value={text} onChange={(e) => setDraft(e.target.value)} />
         {pending ? (
           <button type="button" className="round" aria-label="Stop" onClick={cancelChat}>
             <Icon name="stop" size={14} />

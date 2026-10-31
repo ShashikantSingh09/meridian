@@ -38,6 +38,8 @@ const MEETING_LEAD = 10 * MINUTE;
 const MEETING_AFTER = 5 * MINUTE;
 const TICKET_LEAD = 3 * HOUR;
 const DELIVERED_FOR = HOUR;
+/** What one email said about a parcel stops being news, even if no later email comes. */
+const PARCEL_NEWS_FOR = 8 * HOUR;
 
 export function timeOf(time: EventTime | null): number | null {
   if (!time) return null;
@@ -75,6 +77,7 @@ function flight(e: ContextEvent, now: number): LiveActivity | null {
   const footArrive = arrives ? `Scheduled to land ${clock(arrives)}` : "";
 
   if (e.status === "cancelled") {
+    if (now >= departs) return null;
     return { ...base, tone: "--state-error", left: number, right: "Cancelled", short: "!", status: "Cancelled", big: "This flight was cancelled", detail: `${from} to ${to}`, foot: "From your airline's email", urgent: true };
   }
   if (now < departs) {
@@ -108,11 +111,11 @@ function delivery(e: ContextEvent, now: number): LiveActivity | null {
   const carrier = meta(e, "carrier") || "Parcel";
   const arrives = timeOf(e.endsAt);
   const base = { id: e.id, kind: "delivery" as const, who: carrier, action: link(e, "Track") };
+  if (now - new Date(e.occurredAt).getTime() > (status === "delivered" ? DELIVERED_FOR : PARCEL_NEWS_FOR)) return null;
   if (status === "delivery problem") {
     return { ...base, tone: "--state-error", left: carrier, right: "Problem", short: "!", status: "Delivery problem", big: "Your parcel needs attention", detail: e.title, foot: "Ordered, shipped, out for delivery, delivered", steps: { count: 4, at: 2 }, urgent: true };
   }
   if (status === "delivered") {
-    if (now - new Date(e.occurredAt).getTime() > DELIVERED_FOR) return null;
     return { ...base, tone: "--state-success", left: carrier, right: "Delivered", short: "ok", status: "Delivered", big: "Your parcel has arrived", detail: e.title, foot: "Ordered, shipped, out for delivery, delivered", steps: { count: 4, at: 3 }, urgent: false };
   }
   // A parcel in transit for days should not sit on the island for days.
@@ -172,7 +175,7 @@ export function focusActivity(endsAt: number, minutes: number, now: number): Liv
 }
 
 export function liveFrom(event: ContextEvent, now: number): LiveActivity | null {
-  if (event.status === "dismissed" || event.snoozedUntil) return null;
+  if (event.status === "dismissed" || (event.snoozedUntil && new Date(event.snoozedUntil).getTime() > now)) return null;
   switch (event.kind) {
     case "flight":
       return flight(event, now);

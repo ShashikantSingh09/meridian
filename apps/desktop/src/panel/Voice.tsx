@@ -53,7 +53,11 @@ export function VoiceSection() {
   const pack = status.packs.find((p) => p.id === current.pack);
   const engine = status.packs.find((p) => p.id === "engine");
   const ears = status.packs.find((p) => p.id === "hearing");
-  const ready = current.key ? status.keys.includes(current.id) : !current.pack || pack?.installed;
+  /** Whether this pack and the engine it runs on are both here. */
+  const usable = (wanted?: VoiceStatus["packs"][number]) => wanted?.installed && engine?.installed;
+  /** What is left to fetch for a pack, which may be only the engine. */
+  const toFetch = (wanted?: VoiceStatus["packs"][number]) => (wanted?.installed ? 0 : (wanted?.bytes ?? 0)) + (engine?.installed ? 0 : (engine?.bytes ?? 0));
+  const ready = current.key ? status.keys.includes(current.id) : !current.pack || usable(pack);
 
   const refresh = () => bridge.voiceStatus().then(setStatus);
   useEffect(() => {
@@ -63,7 +67,13 @@ export function VoiceSection() {
   useEffect(() => {
     setVoices([]);
     setProblem(null);
-    if (ready) bridge.voiceList(current.id).then(setVoices, (err) => setProblem(String(err)));
+    if (!ready) return;
+    // A slow list must not land on the next provider, or one service's voice goes to another.
+    let live = true;
+    bridge.voiceList(current.id).then((list) => live && setVoices(list), (err) => live && setProblem(String(err)));
+    return () => {
+      live = false;
+    };
     // Only what decides the list.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current.id, ready]);
@@ -76,8 +86,7 @@ export function VoiceSection() {
   };
 
   const download = async (id: string) => {
-    const wanted = status.packs.find((p) => p.id === id);
-    const total = (wanted?.bytes ?? 0) + (engine?.installed ? 0 : (engine?.bytes ?? 0));
+    const total = toFetch(status.packs.find((p) => p.id === id));
     setProblem(null);
     setFetched({ id, bytes: 0, total });
     try {
@@ -137,7 +146,7 @@ export function VoiceSection() {
             </>
           )}
           {current.pack && pack && (
-            pack.installed ? (
+            usable(pack) ? (
               <div className="row">
                 <p className="meta grow">Runs on this PC. What it says never leaves your machine.</p>
                 <button className="ghost" onClick={() => void remove(pack.id)}>Remove</button>
@@ -146,7 +155,7 @@ export function VoiceSection() {
               <Progress done={fetched!.bytes} total={fetched!.total} />
             ) : (
               <div className="stack-sm">
-                <button className="solid voice-get" disabled={fetched !== null} onClick={() => void download(pack.id)}>Download, {size(pack.bytes + (engine?.installed ? 0 : (engine?.bytes ?? 0)))}</button>
+                <button className="solid voice-get" disabled={fetched !== null} onClick={() => void download(pack.id)}>Download, {size(toFetch(pack))}</button>
                 <p className="meta">Runs on this PC. What it says never leaves your machine.</p>
               </div>
             )
@@ -178,9 +187,9 @@ export function VoiceSection() {
           ))}
         </div>
         <p className="meta">{HEARING.find((h) => h.id === hearing)?.note}</p>
-        {hearing === "local" && ears && !ears.installed && (
+        {hearing === "local" && ears && !usable(ears) && (
           downloading("hearing") ? <Progress done={fetched!.bytes} total={fetched!.total} /> : (
-            <button className="solid voice-get" disabled={fetched !== null} onClick={() => void download("hearing")}>Download, {size(ears.bytes + (engine?.installed ? 0 : (engine?.bytes ?? 0)))}</button>
+            <button className="solid voice-get" disabled={fetched !== null} onClick={() => void download("hearing")}>Download, {size(toFetch(ears))}</button>
           )
         )}
         {hearing !== "local" && !status.keys.includes(hearing) && <p className="meta bad">Add a {hearing} key above first, by choosing it as the voice.</p>}

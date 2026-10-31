@@ -4,11 +4,12 @@
 // inside re-renders per frame.
 
 import { contentEnter, contentEnterReduced, instant, scaled, spring } from "@meridian/design-system/motion";
-import { AnimatePresence, animate, motion, useMotionValue, useReducedMotion, useTransform } from "motion/react";
+import { AnimatePresence, animate, motion, useMotionValue, useTransform } from "motion/react";
 import { useEffect, useMemo, useRef } from "react";
 import { bridge } from "../lib/bridge";
 import { reportView, togglePanel, useApp } from "../lib/store";
 import { Panel } from "../panel/Panel";
+import { useReduced } from "./faces";
 import { activeSessions, deriveView, geometryFor, stateToken, waitingApproval, type IslandView, type Snapshot } from "./machine";
 import { notchPath } from "./notch";
 import {
@@ -34,12 +35,6 @@ const BIRTH = { w: 18, h: 4 };
 const VOICE_LINE = 52;
 /** Views with a light running round the edge, because something is under way. */
 const LIT: ReadonlySet<IslandView> = new Set(["listening", "thinking", "working", "multitask", "error", "notification"]);
-
-function useReduced() {
-  const system = useReducedMotion() ?? false;
-  const setting = useApp((s) => s.settings.motion);
-  return setting === "reduced" || (setting === "system" && system);
-}
 
 function useSnapshot(): Snapshot {
   const panelOpen = useApp((s) => s.panelOpen);
@@ -106,14 +101,15 @@ export function Island() {
   const battery = useApp((s) => s.level?.kind === "battery");
   const voiceLong = useApp((s) => ((s.voice?.words.length ?? 0) + (s.voice?.ahead.length ?? 0)) > VOICE_LINE);
   const view = deriveView(snapshot);
+  const waiting = waitingApproval(snapshot.sessions);
 
   useEffect(() => reportView(view), [view]);
 
   const target = geometryFor(view, {
     hovered,
     rows: activeSessions(snapshot.sessions).length,
-    approval: waitingApproval(snapshot.sessions) !== null,
-    asking: waitingApproval(snapshot.sessions)?.approval,
+    approval: waiting !== null,
+    asking: waiting?.approval,
     clock,
     sliver,
     actions: (snapshot.notices[0]?.actions?.length ?? 0) > 0 || snapshot.notices[0]?.eventId !== undefined,
@@ -165,7 +161,9 @@ export function Island() {
   const expanded = view === "expanded";
   const lit = LIT.has(view) && !reduced;
   const glow = view === "media" ? artTint ?? "#ff7a9c" : `var(${stateToken(view, snapshot)})`;
-  const contentKey = expanded ? "panel" : view + (hovered && (view === "idle" || view === "working" || view === "live") ? "-hover" : "") + (view === "media" && mediaOpen ? "-open" : "");
+  // A waiting request looks the same either way, and swapping it would lose the answers so far.
+  const opensOnHover = view === "idle" || view === "live" || (view === "working" && waiting === null);
+  const contentKey = expanded ? "panel" : view + (hovered && opensOnHover ? "-hover" : "") + (view === "media" && mediaOpen ? "-open" : "");
 
   return (
     <motion.div

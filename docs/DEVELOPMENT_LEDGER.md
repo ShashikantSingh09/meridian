@@ -1,4 +1,34 @@
-# Development ledger
+﻿# Development ledger
+
+## 2026-10-31: Bug review, v0.4.1
+
+Four separate reviews read the voice stack, the Rust app, the interface and the backend crates, and found about 70 problems. Each was checked
+against the code before it was fixed, and logic with any weight got a test.
+
+### The ones that mattered
+
+- **Kokoro and Piper could never speak** (D51). The pinned engine had removed what reads text aloud. Hand-written structs matched its header
+  perfectly, so only reading its changelog showed it.
+- **A bad calendar invite or a date in forged mail could stop reminders and sync on every launch**, through a panic in date arithmetic.
+- **Screen capture could include a password manager** beside the window asked for (D53).
+- **The Claude Code hook token could reach the webview** in the preview of the settings change.
+- **A queued instruction could be killed** by the idle timer while its turn was running.
+- **Pause could reach the wrong player** when the one shown was not the one Windows had chosen.
+- **Local-only mode did not stop mail sync.**
+- **A cancelled flight could still fire reminders** when the mail arrived newest first.
+- **Previews of island states could not be left** without a restart, and hid real sessions meanwhile.
+- **Voice:** a double tap left the microphone open, and several paths stuck on Speaking or Thinking.
+- **The greeting opened with a wink,** one eye shut, which looked wrong.
+
+### Tests
+
+| Suite | Result |
+|---|---|
+| Rust | 551 passed, 13 ignored |
+| Unit | 88 passed |
+| UI | 85 passed |
+
+The local engine has still never run. See `docs/KNOWN_ISSUES.md`.
 
 ## 2026-10-31: Voice, levels, and updating from inside the app
 

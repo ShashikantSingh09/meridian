@@ -237,6 +237,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn stops_on_cancel_before_the_server_sends_a_header() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move {
+            let _held_open = listener.accept().await;
+            std::future::pending::<()>().await;
+        });
+        let cancel = CancellationToken::new();
+        let trigger = cancel.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(80)).await;
+            trigger.cancel();
+        });
+        let events = tokio::time::timeout(std::time::Duration::from_secs(3), collect(url, cancel)).await.unwrap();
+        assert!(matches!(&events[..], [ChatEvent::Error { kind: ErrorKind::Cancelled, .. }]));
+    }
+
+    #[tokio::test]
+    async fn gives_up_on_a_stream_that_never_finishes_an_event() {
+        let (url, _) = serve(vec![Canned::hanging(&"x".repeat(9 * 1024 * 1024))]).await;
+        let events = tokio::time::timeout(std::time::Duration::from_secs(5), collect(url, CancellationToken::new())).await.unwrap();
+        assert!(matches!(&events[..], [ChatEvent::Error { message, .. }] if message.contains("too much")));
+    }
+
+    #[tokio::test]
     async fn lists_chat_models_only_and_sorted() {
         let (url, _) = serve(vec![Canned::json(r#"{"data":[{"id":"gpt-b"},{"id":"text-embedding-3"},{"id":"gpt-a"},{"id":"whisper-1"}]}"#)]).await;
         let provider = crate::client(Protocol::OpenAi, Endpoint { base_url: url, api_key: None }).unwrap();

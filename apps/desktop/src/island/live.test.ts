@@ -75,6 +75,10 @@ describe("a flight", () => {
     expect(moved?.status).toBe("Your flight time changed");
     expect(moved?.urgent).toBe(true);
   });
+
+  it("stops saying it was cancelled once it would have left", () => {
+    expect(liveFrom(event({ status: "cancelled" }), departs + MIN)).toBeNull();
+  });
 });
 
 describe("a parcel", () => {
@@ -92,6 +96,12 @@ describe("a parcel", () => {
     expect(liveFrom(parcel("Delivery problem"), now)?.urgent).toBe(true);
     expect(liveFrom(parcel("Delivered"), now)?.steps?.at).toBe(3);
     expect(liveFrom(parcel("Delivered"), now + 3 * 60 * MIN)).toBeNull();
+  });
+
+  it("does not sit on the island for days when no later email comes", () => {
+    const later = now + 24 * 60 * MIN;
+    expect(liveFrom(parcel("Out for delivery"), later)).toBeNull();
+    expect(liveFrom(parcel("Delivery problem"), later)).toBeNull();
   });
 });
 
@@ -116,6 +126,10 @@ describe("the rest", () => {
   it("skips anything dismissed or snoozed", () => {
     expect(liveFrom(event({ status: "dismissed" }), departs - 30 * MIN)).toBeNull();
     expect(liveFrom(event({ snoozedUntil: "2026-11-02T15:00:00Z" }), departs - 30 * MIN)).toBeNull();
+  });
+
+  it("comes back when a snooze ends", () => {
+    expect(liveFrom(event({ snoozedUntil: "2026-11-02T13:15:00Z" }), departs - 30 * MIN)?.status).toBe("Boarding soon");
   });
 
   it("puts urgent activities first", () => {

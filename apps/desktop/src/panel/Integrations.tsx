@@ -52,25 +52,12 @@ function Rows({ items }: { items: FetchedItem[] }) {
 }
 
 function Connect({ integration }: { integration: Integration }) {
-  const [state, setState] = useState<"idle" | "waiting">("idle");
-  const [error, setError] = useState<string | null>(null);
-
-  const connect = async () => {
-    setState("waiting");
-    setError(null);
-    try {
-      await connectIntegration(integration);
-    } catch (err) {
-      setError(String(err));
-    } finally {
-      setState("idle");
-    }
-  };
+  const waiting = useApp((s) => s.signingIn.includes(integration.id));
 
   if (!integration.ready) {
     return <p className="meta">Not available yet. {integration.name} accepts only registered apps, and this one has not been registered with them.</p>;
   }
-  if (state === "waiting") {
+  if (waiting) {
     return (
       <div className="stack-sm">
         <p className="label">Finish in your browser</p>
@@ -82,9 +69,8 @@ function Connect({ integration }: { integration: Integration }) {
     <div className="stack">
       <p className="meta">Sign in on {integration.name}'s own page. Meridian never sees your password, and only ever calls read-only tools.</p>
       <div className="row">
-        <button className="solid" onClick={() => void connect()}>Connect {integration.name}</button>
+        <button className="solid" onClick={() => void connectIntegration(integration)}>Connect {integration.name}</button>
       </div>
-      {error && <p className="meta bad" role="status">{error}</p>}
     </div>
   );
 }

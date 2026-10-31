@@ -124,6 +124,11 @@ impl Rpc {
         self.agent.write_line(&json!({ "method": method, "id": self.next, "params": params }).to_string()).await
     }
 
+    async fn steer(&mut self, thread: &str, turn: &str, text: &str) -> std::io::Result<()> {
+        let params = json!({ "threadId": thread, "expectedTurnId": turn, "input": turn_input(text) });
+        self.call("turn/steer", params, Pending::Other).await
+    }
+
     async fn notify(&mut self, method: &str) -> std::io::Result<()> {
         self.agent.write_line(&json!({ "method": method, "params": {} }).to_string()).await
     }
@@ -158,6 +163,8 @@ pub async fn run(launch: Launch, emit: Emit, mut commands: mpsc::UnboundedReceiv
     let mut last_error = None;
     let mut approvals: HashMap<String, Value> = HashMap::new();
     let mut interrupted_at: Option<tokio::time::Instant> = None;
+    // Steering has to name a turn, so a message sent before one has started waits for it.
+    let mut early: Vec<String> = Vec::new();
 
     loop {
         let deadline = interrupted_at.map(|t| t + INTERRUPT_GRACE);
@@ -230,7 +237,13 @@ pub async fn run(launch: Launch, emit: Emit, mut commands: mpsc::UnboundedReceiv
                             }
                             Pending::Turn => {
                                 turn_id = message["result"]["turn"]["id"].as_str().map(String::from);
-                                Ok(())
+                                let mut steered = Ok(());
+                                if let (Some(thread), Some(turn)) = (&thread_id, &turn_id) {
+                                    for text in early.drain(..) {
+                                        steered = rpc.steer(thread, turn, &text).await;
+                                    }
+                                }
+                                steered
                             }
                             Pending::Other => Ok(()),
                         };
@@ -244,12 +257,12 @@ pub async fn run(launch: Launch, emit: Emit, mut commands: mpsc::UnboundedReceiv
             }
             command = commands.recv() => match command {
                 // Images are not sent to Codex yet: the interface says so before sharing.
-                Some(Command::Send { text, .. }) => {
-                    if let (Some(thread), Some(turn)) = (&thread_id, &turn_id) {
-                        let params = json!({ "threadId": thread, "expectedTurnId": turn, "input": turn_input(&text) });
-                        let _ = rpc.call("turn/steer", params, Pending::Other).await;
+                Some(Command::Send { text, .. }) => match (&thread_id, &turn_id) {
+                    (Some(thread), Some(turn)) => {
+                        let _ = rpc.steer(thread, turn, &text).await;
                     }
-                }
+                    _ => early.push(text),
+                },
                 Some(Command::Answer { id, allow }) => {
                     if let Some(rpc_id) = approvals.remove(&id) {
                         let decision = if allow { "accept" } else { "decline" };
@@ -282,6 +295,7 @@ pub async fn run(launch: Launch, emit: Emit, mut commands: mpsc::UnboundedReceiv
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::{last_status, recorder};
 
     fn parse(line: &str, last_error: &mut Option<String>) -> Parsed {
         let v: Value = serde_json::from_str(line).unwrap();
@@ -340,6 +354,34 @@ mod tests {
         let approval = approval_for("item/commandExecution/requestApproval", &params, "7").unwrap();
         assert_eq!((approval.id.as_str(), approval.summary.as_str()), ("7", "rm -rf build"));
         assert!(approval_for("item/tool/requestUserInput", &params, "8").is_none());
+    }
+
+    /// Answers the handshake, starts its turn late, and finishes only when steered.
+    const LATE_TURN: &str = "require('readline').createInterface({ input: process.stdin }).on('line', (line) => {
+        const m = JSON.parse(line);
+        const reply = (result) => console.log(JSON.stringify({ id: m.id, result }));
+        if (m.method === 'initialize') reply({});
+        if (m.method === 'thread/start') reply({ thread: { id: 't' } });
+        if (m.method === 'turn/start') setTimeout(() => reply({ turn: { id: 'u' } }), 300);
+        if (m.method === 'turn/steer') console.log(JSON.stringify({ method: 'turn/completed', params: { turn: { status: 'completed' } } }));
+    });";
+
+    #[tokio::test]
+    async fn a_follow_up_sent_before_the_turn_starts_still_arrives() {
+        let dir = std::env::temp_dir().join(format!("meridian-codex-{}", uuid::Uuid::new_v4().simple()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("late.js"), LATE_TURN).unwrap();
+        let exe = dir.join("codex.cmd");
+        std::fs::write(&exe, "@node \"%~dp0late.js\"\r\n").unwrap();
+        let launch = Launch { exe, cwd: ".".into(), prompt: "hi".into(), model: None, resume: None, restricted: false, images: vec![] };
+        let (emit, events) = recorder();
+        let (tx, rx) = mpsc::unbounded_channel();
+        tx.send(Command::Send { text: "and this".into(), images: vec![] }).unwrap();
+
+        tokio::time::timeout(Duration::from_secs(10), run(launch, emit, rx)).await.unwrap();
+
+        assert_eq!(last_status(&events.lock().unwrap()), Some(SessionStatus::Completed));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

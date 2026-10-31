@@ -82,6 +82,113 @@ test("the island is one element that morphs, never a swap", async ({ page }) => 
   expect((await island(page).boundingBox())!.width).toBeGreaterThan(700);
 });
 
+test("a preview ends by itself, and what arrived meanwhile is not lost", async ({ page }) => {
+  await page.evaluate(() => (window as never as { __mock: { publishWatched(id: string): void } }).__mock.publishWatched("watch:real"));
+  await expect(island(page)).toContainText("Editing cart.ts");
+  await preview(page, "error");
+  await expect(island(page)).toContainText("Anthropic unreachable");
+  await page.evaluate(() => (window as never as { __mock: { publishWatchedApproval(id: string): void } }).__mock.publishWatchedApproval("watch:real"));
+  await expect(island(page)).toContainText("Anthropic unreachable");
+  await expect(island(page)).toContainText("npm install stripe", { timeout: 10_000 });
+});
+
+test("a preview shows from the panel, gives focus back, and opening the panel ends it", async ({ page }) => {
+  await island(page).click();
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await page.getByRole("button", { name: "Island", exact: true }).click();
+  await page.getByRole("button", { name: "working", exact: true }).click();
+  await expect(island(page)).toHaveAttribute("data-view", "working");
+  await page.evaluate(() => (window as never as { __meridian: { openPanel(): void } }).__meridian.openPanel());
+  await expect(island(page)).toHaveAttribute("data-view", "expanded");
+  await page.keyboard.press("Escape");
+  await expect(island(page)).toHaveAttribute("data-view", "idle");
+});
+
+test("no sample music shows through a later preview", async ({ page }) => {
+  await preview(page, "media");
+  await expect(island(page)).toHaveAttribute("data-view", "media");
+  await preview(page, "idle");
+  await expect(island(page)).toHaveAttribute("data-view", "idle");
+});
+
+test("a long line stops at its ellipsis, short of the button beside it", async ({ page }) => {
+  await page.evaluate(() =>
+    (window as never as { __meridian: { pushNotice(n: object): void } }).__meridian.pushNotice({ tone: "info", title: "A very long title ".repeat(8), body: "A very long body ".repeat(8) }),
+  );
+  await expect(island(page)).toHaveAttribute("data-view", "notification");
+  const text = await island(page).locator(".text-button .label").boundingBox();
+  const dismiss = await island(page).getByRole("button", { name: "Dismiss" }).boundingBox();
+  expect(text!.x + text!.width).toBeLessThanOrEqual(dismiss!.x);
+});
+
+test("the answers so far survive the pointer leaving", async ({ page }) => {
+  const hover = (on: boolean) => page.evaluate((v) => (window as never as { __meridian: { setHovered(v: boolean): void } }).__meridian.setHovered(v), on);
+  await page.evaluate(() => {
+    const mock = (window as never as { __mock: { publishWatched(id: string): void; publishWatchedQuestion(id: string): void } }).__mock;
+    mock.publishWatched("watch:h");
+    mock.publishWatchedQuestion("watch:h");
+  });
+  await hover(true);
+  await page.waitForTimeout(260);
+  await island(page).getByRole("button", { name: "Amber" }).click();
+  await expect(island(page)).toContainText("And then?");
+  await hover(false);
+  await page.waitForTimeout(320);
+  await expect(island(page)).toContainText("And then?");
+});
+
+test("long words on the island never push its buttons off the edge", async ({ page }) => {
+  await preview(page, "contextual");
+  const long = "Error: something went wrong in a very long stack trace line ".repeat(4);
+  await page.locator(".island .body").evaluate((el, text) => (el.textContent = text), long);
+  await settled(page);
+  const shape = await page.locator(".island-shape").boundingBox();
+  const button = await island(page).getByRole("button", { name: "Ignore" }).boundingBox();
+  expect(button!.y + button!.height).toBeLessThanOrEqual(shape!.y + shape!.height);
+});
+
+test("a long question leaves its answers and Skip on the island, and still shows two lines", async ({ page }) => {
+  await page.evaluate(() => {
+    const mock = (window as never as { __mock: { publishWatched(id: string): void; publishWatchedQuestion(id: string, multi: boolean): void } }).__mock;
+    mock.publishWatched("watch:long");
+    mock.publishWatchedQuestion("watch:long", true);
+  });
+  await expect(island(page)).toContainText("Which one?");
+  await settled(page);
+  const line = await page.locator(".question-text").evaluate((el) => {
+    const shortHeight = el.getBoundingClientRect().height;
+    el.textContent = "Which of these should this use, given everything we know about how it will be run later on? ".repeat(5);
+    return shortHeight;
+  });
+  const shape = await page.locator(".island-shape").boundingBox();
+  const text = await page.locator(".question-text").boundingBox();
+  const skip = await island(page).getByRole("button", { name: "Skip" }).boundingBox();
+  expect(skip!.y + skip!.height).toBeLessThanOrEqual(shape!.y + shape!.height);
+  expect(text!.height).toBeGreaterThanOrEqual(line * 2 - 1);
+});
+
+test("the bubble stays on screen when the island sits on the right", async ({ page }) => {
+  await page.evaluate(() => (window as never as { __meridian: { updateSettings(p: object): Promise<void> } }).__meridian.updateSettings({ islandAlign: "right" }));
+  await page.evaluate(() => (window as never as { __mock: { addFlight(m: number): void } }).__mock.addFlight(31));
+  await page.evaluate(() => (window as never as { __meridian: { refreshActivity(): Promise<void> } }).__meridian.refreshActivity());
+  await page.evaluate(() => (window as never as { __meridian: { pushNotice(n: object): void } }).__meridian.pushNotice({ tone: "info", title: "Heads up", body: "" }));
+  await expect(page.locator(".bubble")).toBeVisible();
+  const bubble = await page.locator(".bubble").boundingBox();
+  expect(bubble!.x).toBeGreaterThanOrEqual(0);
+  expect(bubble!.x + bubble!.width).toBeLessThanOrEqual(860);
+});
+
+test("a tired face is startled awake by the pointer", async ({ page }) => {
+  await page.clock.install();
+  await page.goto("/");
+  await expect(island(page)).toHaveAttribute("data-view", "idle");
+  await page.clock.fastForward(46_000);
+  await expect(page.locator(".island .face")).toHaveAttribute("data-mood", "sleepy");
+  await page.evaluate(() => (window as never as { __meridian: { setHovered(v: boolean): void } }).__meridian.setHovered(true));
+  await page.clock.runFor(300);
+  await expect(page.locator(".island .peek-face .face")).toHaveAttribute("data-mood", "needs");
+});
+
 test("the listening preview never asks for the microphone", async ({ page }) => {
   await page.addInitScript(() => {
     (window as never as { micCalls: number }).micCalls = 0;
@@ -249,6 +356,175 @@ test.describe("panel", () => {
     await page.getByRole("button", { name: "Send" }).click();
     await expect(page.locator('.message[data-role="assistant"]')).toContainText("browser stand-in");
     await expect(page.locator(".bar .tabular")).toHaveText("12 / 9");
+  });
+
+  test("a question from a terminal is answered in full from the Agents page", async ({ page }) => {
+    await page.evaluate(() => {
+      const mock = (window as never as { __mock: { publishWatched(id: string): void; publishWatchedQuestion(id: string): void } }).__mock;
+      mock.publishWatched("watch:q");
+      mock.publishWatchedQuestion("watch:q");
+    });
+    await page.getByRole("button", { name: "Agents", exact: true }).click();
+    await page.locator(".session-list").getByRole("button", { name: /Claude Code/ }).click();
+    const approval = page.locator(".approval");
+    await expect(approval.getByRole("button", { name: "Allow" })).toHaveCount(0);
+    await approval.getByRole("button", { name: "Amber" }).click();
+    await approval.getByRole("button", { name: "Ship it" }).click();
+    await expect.poll(() => page.evaluate(() => (window as never as { __mock: { lastAnswers(): unknown } }).__mock.lastAnswers())).toEqual({ "Which one?": "Amber", "And then?": "Ship it" });
+  });
+
+  test("a plan from a terminal is shown in full on the Agents page", async ({ page }) => {
+    await page.evaluate(() => {
+      const mock = (window as never as { __mock: { publishWatched(id: string): void; publishWatchedPlan(id: string): void } }).__mock;
+      mock.publishWatched("watch:p");
+      mock.publishWatchedPlan("watch:p");
+    });
+    await page.getByRole("button", { name: "Agents", exact: true }).click();
+    await page.locator(".session-list").getByRole("button", { name: /Claude Code/ }).click();
+    await expect(page.locator(".approval .plan-text li")).toHaveCount(2);
+    await expect(page.locator(".approval").getByRole("button", { name: "Approve plan" })).toBeVisible();
+  });
+
+  test("what is being written survives the panel closing and changing page", async ({ page }) => {
+    await page.getByRole("button", { name: "Chat", exact: true }).click();
+    await page.getByRole("radio", { name: "Anthropic" }).click();
+    await page.getByLabel("Message").fill("half a thought");
+    await page.keyboard.press("Escape");
+    await island(page).click();
+    await expect(page.getByLabel("Message")).toHaveValue("half a thought");
+    await page.getByRole("button", { name: "Home", exact: true }).click();
+    await page.getByRole("button", { name: "Chat", exact: true }).click();
+    await expect(page.getByLabel("Message")).toHaveValue("half a thought");
+  });
+
+  test("an urgent reminder is still waiting after the panel has been open", async ({ page }) => {
+    await page.evaluate(() =>
+      (window as never as { __mock: { publishReminder(r: object): void } }).__mock.publishReminder({
+        key: "r2",
+        eventId: "e1",
+        stage: { type: "lead", minutes: 15 },
+        priority: "important",
+        title: "Your meeting starts in 15 minutes",
+        startsAt: null,
+        approximateTime: false,
+        actions: [],
+      }),
+    );
+    await page.keyboard.press("Escape");
+    await expect(island(page)).toHaveAttribute("data-view", "notification");
+    await page.evaluate(() => (window as never as { __meridian: { openPanel(): void } }).__meridian.openPanel());
+    await expect(island(page)).toHaveAttribute("data-view", "expanded");
+    await page.keyboard.press("Escape");
+    await expect(island(page)).toHaveAttribute("data-view", "notification");
+  });
+
+  test("what went wrong shows in the panel, and can be retried or dismissed", async ({ page }) => {
+    await page.evaluate(() => (window as never as { __mock: { publishWatched(id: string): void } }).__mock.publishWatched("watch:bad"));
+    await page.evaluate(() => {
+      const api = window as never as { __mock: { publishFailure(id: string, why: string): void } };
+      api.__mock.publishFailure("watch:bad", `It stopped. ${"Something went wrong a long way down. ".repeat(40)}`);
+    });
+    const alert = page.getByRole("alert");
+    await expect(alert).toContainText("failed");
+    expect((await alert.boundingBox())!.height).toBeLessThan(80);
+    await expect(page.locator(".dock")).toBeVisible();
+    await alert.getByRole("button", { name: "Dismiss" }).click();
+    await expect(alert).toHaveCount(0);
+  });
+
+  test("New chat during a reply stops it, and the chat stays empty", async ({ page }) => {
+    const errors: string[] = [];
+    page.on("pageerror", (err) => errors.push(err.message));
+    await page.getByRole("button", { name: "Chat", exact: true }).click();
+    await page.getByRole("radio", { name: "Anthropic" }).click();
+    await page.getByLabel("Message").fill("hello");
+    await page.getByRole("button", { name: "Send" }).click();
+    await page.getByRole("button", { name: "New chat" }).click();
+    await page.waitForTimeout(400);
+    await expect(page.locator(".message")).toHaveCount(0);
+    expect(errors).toEqual([]);
+  });
+
+  test("a log stays where the reader left it, and follows again from the end", async ({ page }) => {
+    const text = (words: string) =>
+      page.evaluate((w) => (window as never as { __mock: { publishText(id: string, t: string): void } }).__mock.publishText("watch:long", w), words);
+    await page.evaluate(() => (window as never as { __mock: { publishWatched(id: string): void } }).__mock.publishWatched("watch:long"));
+    await page.getByRole("button", { name: "Agents", exact: true }).click();
+    await page.locator(".session-list").getByRole("button", { name: /Claude Code/ }).click();
+    await text("A line.\n\n".repeat(60));
+    const log = page.locator(".log");
+    const gap = () => log.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight);
+    await expect.poll(gap).toBeLessThan(2);
+
+    // A scroll is reported on the next frame.
+    const scrollTo = (top: number) => log.evaluate((el, at) => { el.scrollTop = at; return new Promise(requestAnimationFrame); }, top);
+    await scrollTo(0);
+    await text("Another.\n\n");
+    await page.waitForTimeout(80);
+    expect(await log.evaluate((el) => el.scrollTop)).toBe(0);
+
+    await scrollTo(1_000_000);
+    await text("And one more.\n\n");
+    await expect.poll(gap).toBeLessThan(2);
+  });
+
+  test("a selection on a screenshot is measured against the picture itself", async ({ page }) => {
+    await page.getByRole("button", { name: "Chat", exact: true }).click();
+    await page.getByRole("radio", { name: "Anthropic" }).click();
+    await page.getByRole("button", { name: "This window" }).click();
+    await page.getByRole("button", { name: "See what would be shared" }).click();
+    const [box, picture] = await Promise.all([page.locator(".preview").boundingBox(), page.locator(".preview img").boundingBox()]);
+    expect(box!.width).toBeCloseTo(picture!.width, 0);
+    expect(box!.width / box!.height).toBeCloseTo(16 / 9, 1);
+  });
+
+  test("a suggestion opens chat with its question written, and sends nothing", async ({ page }) => {
+    await page.keyboard.press("Escape");
+    await preview(page, "contextual");
+    await island(page).getByRole("button", { name: "Suggest fix" }).click();
+    await expect(island(page)).toHaveAttribute("data-view", "expanded");
+    await expect(page.getByLabel("Message")).toHaveValue("Suggest a fix for this.");
+    await expect(page.locator(".look-pill")).toBeVisible();
+    await expect(page.locator('.message[data-role="user"]')).toHaveCount(0);
+  });
+
+  test("an update under way survives the panel closing", async ({ page }) => {
+    await page.evaluate(() => (window as never as { __mock: { setUpdate(s: unknown): void } }).__mock.setUpdate({ available: true, latest: "v0.9.0", message: "Version 0.9.0 is ready to install." }));
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await page.getByRole("button", { name: "Updates", exact: true }).click();
+    await page.getByRole("button", { name: "Update now" }).click();
+    await page.keyboard.press("Escape");
+    await island(page).click();
+    await expect(page.getByText("Downloading and checking the update.")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Update now" })).toBeDisabled();
+
+    await page.evaluate(() => (window as never as { __mock: { failInstall(why: string): void } }).__mock.failInstall("The download does not match its checksum."));
+    await expect(page.getByRole("alert")).toContainText("checksum");
+    await expect(page.getByRole("button", { name: "Update now" })).toBeEnabled();
+  });
+
+  test("local-only mode checks for nothing, even on the Updates page", async ({ page }) => {
+    await page.evaluate(() => (window as never as { __mock: { setUpdate(s: unknown): void } }).__mock.setUpdate({ message: "Reached GitHub." }));
+    await page.evaluate(() => (window as never as { __meridian: { updateSettings(p: object): Promise<void> } }).__meridian.updateSettings({ localOnly: true }));
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await page.getByRole("button", { name: "Updates", exact: true }).click();
+    await expect(page.getByText("Update checks are off in local-only mode.")).toBeVisible();
+  });
+
+  test("a sign-in under way survives the panel closing, and a failure reaches the island", async ({ page }) => {
+    await page.evaluate(() => (window as never as { __mock: { holdConnect(): void } }).__mock.holdConnect());
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await page.getByRole("button", { name: "Providers", exact: true }).click();
+    await page.getByRole("button", { name: "Linear" }).click();
+    await page.getByRole("button", { name: "Connect Linear" }).click();
+    await page.keyboard.press("Escape");
+    await island(page).click();
+    await page.getByRole("button", { name: "Linear" }).click();
+    await expect(page.locator(".link-detail")).toContainText("Finish in your browser");
+    await page.keyboard.press("Escape");
+    await page.evaluate(() => (window as never as { __mock: { failConnect(why: string): void } }).__mock.failConnect("Linear said no."));
+    await expect(island(page)).toHaveAttribute("data-view", "error");
+    await expect(island(page)).toContainText("Could not sign in to Linear");
   });
 
   test("runs a session through approval to completion", async ({ page }) => {
@@ -524,9 +800,25 @@ test.describe("panel", () => {
       await page.getByLabel("Message").fill("chat: work here");
       await page.getByRole("button", { name: "Send" }).click();
       await expect(page.locator(".island")).toHaveAttribute("data-view", "expanded");
+      await expect(page.getByRole("alert")).toContainText("Choose a project folder");
+      await expect(page.getByLabel("Message")).toHaveValue("chat: work here");
       await expect(page.locator(".log")).not.toContainText("Hello from the stand-in agent.");
       await page.getByRole("button", { name: "Choose folder" }).click();
       await expect(page.locator(".bar", { hasText: "sample" })).toBeVisible();
+    });
+
+    test("after clearing history, the next message starts afresh and its reply shows", async ({ page }) => {
+      await page.getByLabel("Message").fill("chat: hello");
+      await page.getByRole("button", { name: "Send" }).click();
+      await expect(page.locator(".log")).toContainText("Hello from the stand-in agent.");
+      await page.getByRole("button", { name: "Settings", exact: true }).click();
+      await page.getByRole("button", { name: "Privacy", exact: true }).click();
+      await page.getByRole("button", { name: "Clear history" }).click();
+      await page.getByRole("button", { name: "Chat", exact: true }).click();
+      await expect(page.locator(".log")).not.toContainText("Hello from the stand-in agent.");
+      await page.getByLabel("Message").fill("chat: again");
+      await page.getByRole("button", { name: "Send" }).click();
+      await expect(page.locator(".log")).toContainText("Hello from the stand-in agent.");
     });
 
     test("referenced files travel with the message", async ({ page }) => {
@@ -583,6 +875,18 @@ test.describe("panel", () => {
       await expect(page.locator(".beam")).toHaveAttribute("data-on", "true");
       await expect(page.getByRole("button", { name: "search_issues" })).toHaveAttribute("aria-pressed", "true");
       await expect(page.locator(".beam")).toHaveAttribute("data-on", "false");
+    });
+
+    test("a server with dozens of tools still shows what it fetched", async ({ page }) => {
+      await page.getByRole("button", { name: "Linear" }).click();
+      await page.getByRole("button", { name: "Connect Linear" }).click();
+      await expect(page.locator(".fetched-row")).toHaveCount(2);
+      await page.locator(".link-feed .chips").evaluate((el) => {
+        for (let i = 0; i < 40; i++) el.append(el.firstElementChild!.cloneNode(true));
+      });
+      const row = await page.locator(".fetched-row").last().boundingBox();
+      const pane = await page.locator(".link-detail").boundingBox();
+      expect(row!.y + row!.height).toBeLessThanOrEqual(pane!.y + pane!.height);
     });
 
     test("disconnecting drops what was fetched", async ({ page }) => {

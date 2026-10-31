@@ -20,16 +20,31 @@ pub const DEFAULT_EXCLUSIONS: &[&str] = &[
     "windows security",
 ];
 
+/// Sign-in pages, also always on. Whole words only, or "catalog in" and "design in"
+/// would count. `login.rs` still does, because missing a real sign-in page is worse.
+const SIGN_IN_PHRASES: &[&str] = &["sign in", "sign-in", "log in", "log-in", "login"];
+
+fn has_whole(text: &str, phrase: &str) -> bool {
+    text.match_indices(phrase).any(|(at, _)| {
+        let before = text[..at].chars().next_back();
+        let after = text[at + phrase.len()..].chars().next();
+        !before.is_some_and(char::is_alphanumeric) && !after.is_some_and(char::is_alphanumeric)
+    })
+}
+
 /// The rule that blocks this window, if any. Case-insensitive, and the built-in
-/// list cannot be turned off by emptying the user's own.
+/// lists cannot be turned off by emptying the user's own.
 pub fn exclusion_reason(window: &WindowInfo, user: &[String]) -> Option<String> {
     let process = window.process.to_lowercase();
     let title = window.title.to_lowercase();
-    DEFAULT_EXCLUSIONS
-        .iter()
-        .map(|rule| rule.to_string())
-        .chain(user.iter().map(|rule| rule.trim().to_lowercase()))
-        .find(|rule| !rule.is_empty() && (process.contains(rule) || title.contains(rule)))
+    let sign_in = SIGN_IN_PHRASES.iter().find(|phrase| has_whole(&process, phrase) || has_whole(&title, phrase));
+    sign_in.map(|phrase| phrase.to_string()).or_else(|| {
+        DEFAULT_EXCLUSIONS
+            .iter()
+            .map(|rule| rule.to_string())
+            .chain(user.iter().map(|rule| rule.trim().to_lowercase()))
+            .find(|rule| !rule.is_empty() && (process.contains(rule) || title.contains(rule)))
+    })
 }
 
 #[cfg(test)]
@@ -50,6 +65,23 @@ mod tests {
     fn private_browsing_and_login_pages_are_blocked_by_title() {
         assert!(exclusion_reason(&window("msedge.exe", "Bank - InPrivate"), &[]).is_some());
         assert!(exclusion_reason(&window("chrome.exe", "Reset your password"), &[]).is_some());
+    }
+
+    #[test]
+    fn sign_in_pages_are_blocked_by_title() {
+        for title in ["Sign in - Google Accounts", "Sign-in", "Log in to GitHub", "Log-in", "Login | Example"] {
+            assert!(exclusion_reason(&window("chrome.exe", title), &[]).is_some(), "{title}");
+        }
+    }
+
+    #[test]
+    fn sign_in_phrases_match_whole_words_only() {
+        for title in ["The catalog in print", "My blog in review", "A design in progress", "Dialog-in box"] {
+            assert!(exclusion_reason(&window("chrome.exe", title), &[]).is_none(), "{title}");
+        }
+        for title in ["login.rs - dock-agent", "user_login", "Please log in."] {
+            assert!(exclusion_reason(&window("code.exe", title), &[]).is_some(), "{title}");
+        }
     }
 
     #[test]

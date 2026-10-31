@@ -25,7 +25,7 @@ struct MatchaConfig { acoustic_model: Text, vocoder: Text, lexicon: Text, tokens
 #[repr(C)]
 struct KokoroConfig { model: Text, voices: Text, tokens: Text, data_dir: Text, length_scale: f32, dict_dir: Text, lexicon: Text, lang: Text }
 #[repr(C)]
-struct KittenConfig { model: Text, voices: Text, tokens: Text, data_dir: Text, length_scale: f32, lexicon: Text }
+struct KittenConfig { model: Text, voices: Text, tokens: Text, data_dir: Text, length_scale: f32 }
 #[repr(C)]
 struct ZipvoiceConfig { tokens: Text, encoder: Text, decoder: Text, vocoder: Text, data_dir: Text, lexicon: Text, feat_scale: f32, t_shift: f32, target_rms: f32, guidance_scale: f32 }
 #[repr(C)]

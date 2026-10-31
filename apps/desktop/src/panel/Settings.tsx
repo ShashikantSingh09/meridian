@@ -7,7 +7,7 @@ import { motion } from "motion/react";
 import { useState, useEffect } from "react";
 import { Face, FACES, type Mood } from "../island/faces";
 import { bridge } from "../lib/bridge";
-import { checkForUpdates, clearHistory, feel, PREVIEWS, refreshAuth, setSettingsSection, showPreview, updateSettings, useApp, type SettingsSection } from "../lib/store";
+import { checkForUpdates, clearHistory, feel, installUpdate, PREVIEWS, refreshAuth, setSettingsSection, showPreview, updateSettings, useApp, type SettingsSection } from "../lib/store";
 import type { AgentInfo, Settings } from "../lib/types";
 import { Integrations } from "./Integrations";
 import { Providers } from "./Providers";
@@ -147,12 +147,12 @@ function IslandSection() {
         <Toggle name="showNextMeeting" label="Show the next meeting" hint="On the island when you point at it." />
         <Toggle name="mediaEnabled" label="Show what is playing" hint="Any player that publishes to Windows media controls." />
         <Toggle name="islandAutoHide" label="Hide when idle" hint="Shrinks to a sliver at the top of the screen, and returns on hover or activity." />
-        <Toggle name="ambient" label="Ambient breathing" hint="The line breathes for a few seconds after activity, then rests." />
+        <Toggle name="ambient" label="Ambient breathing" hint="The face breathes for a few seconds after activity, then rests." />
         <p className="meta">Hide it completely from the tray icon. The shortcut brings it back.</p>
       </div>
       <div className="stack">
         <h2>Preview island states</h2>
-        <p className="meta">Shows each state with sample data so you can judge the design.</p>
+        <p className="meta">Shows each state with sample data for a few seconds, so you can judge the design.</p>
         <div className="chips">
           {PREVIEWS.map((p) => (
             <button key={p.name} className="chip" aria-pressed={preview === p.name} onClick={() => showPreview(p.name)}>{p.name}</button>
@@ -240,29 +240,10 @@ function Privacy() {
 function UpdatesSection() {
   const version = useApp((s) => s.version);
   const update = useApp((s) => s.update);
-  const [busy, setBusy] = useState<"checking" | "installing" | null>(null);
-  const [problem, setProblem] = useState<string | null>(null);
-
-  const check = async () => {
-    setBusy("checking");
-    setProblem(null);
-    await checkForUpdates();
-    setBusy(null);
-  };
-
-  const install = async () => {
-    setBusy("installing");
-    setProblem(null);
-    try {
-      await bridge.installUpdate();
-    } catch (err) {
-      setProblem(String(err));
-      setBusy(null);
-    }
-  };
+  const busy = useApp((s) => s.updating);
 
   useEffect(() => {
-    void check();
+    void checkForUpdates();
   }, []);
 
   const when = update.published ? new Date(update.published).toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" }) : null;
@@ -275,10 +256,9 @@ function UpdatesSection() {
             <span className="label">Meridian {version}</span>
             <span className="meta" role="status">{busy === "checking" ? "Checking" : busy === "installing" ? "Downloading and checking the update. Meridian will restart by itself." : update.message}</span>
           </span>
-          <button className="ghost" disabled={busy !== null} onClick={() => void check()}>Check for updates</button>
-          {update.available && <button className="solid" disabled={busy !== null} onClick={() => void install()}>Update now</button>}
+          <button className="ghost" disabled={busy !== null} onClick={() => void checkForUpdates()}>Check for updates</button>
+          {update.available && <button className="solid" disabled={busy !== null} onClick={() => void installUpdate()}>Update now</button>}
         </div>
-        {problem && <p className="meta bad" role="alert">{problem}</p>}
         {update.available && update.notes && (
           <>
             <h2>What is new in {update.latest?.replace(/^v/, "")}{when ? `, ${when}` : ""}</h2>

@@ -114,7 +114,7 @@ pub fn integrations_list(links: State<'_, Links>) -> Vec<IntegrationInfo> {
         .collect()
 }
 
-fn refuse_if_local(core: &Core) -> Result<(), String> {
+pub fn refuse_if_local(core: &Core) -> Result<(), String> {
     if core.settings.lock().unwrap().local_only {
         return Err("Local-only mode is on, so cloud services are not contacted.".into());
     }

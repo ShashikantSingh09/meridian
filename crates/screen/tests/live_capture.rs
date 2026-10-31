@@ -16,6 +16,20 @@ fn find_window() -> Option<isize> {
     Some(hwnd.0 as isize)
 }
 
+/// Read-only, and it prints no titles, because a title can hold anything.
+#[test]
+#[ignore = "reads the real desktop"]
+fn lists_what_a_capture_could_show() {
+    let front = screen::foreground().expect("a window in front");
+    let display = screen::windows_in_view(front.hwnd, true).expect("whole screen");
+    let above = screen::windows_in_view(front.hwnd, false).expect("window");
+    assert!(display.iter().any(|window| window.hwnd == front.hwnd), "the target is on its own display");
+    assert!(!above.iter().any(|window| window.hwnd == front.hwnd), "the walk stops at the target");
+    let names = |windows: &[screen::WindowInfo]| windows.iter().map(|w| w.process.clone()).collect::<Vec<_>>();
+    println!("whole screen: {} windows, {:?}", display.len(), names(&display));
+    println!("above the target: {} windows, {:?}", above.len(), names(&above));
+}
+
 #[test]
 #[ignore = "opens a real window"]
 fn reads_a_real_window_and_finds_the_error() {

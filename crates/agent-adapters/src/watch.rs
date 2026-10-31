@@ -36,6 +36,9 @@ const EVENTS: [&str; 9] = [
 /// The URL path of every hook, and how ours are found again.
 pub const HOOK_PATH: &str = "/meridian-hook";
 const TOKEN_HEADER: &str = "X-Meridian-Token";
+/// Stands in for a header's value wherever the settings are shown.
+const HIDDEN: &str = "(hidden)";
+const RESPACED: &str = "The spacing of the rest of this file will change. Nothing else in it does.";
 /// Set on every agent this app launches. Hooks in user settings fire for those
 /// runs too, and they already have their own approvals and their own row, so
 /// the hook echoes this variable back and the server steps aside.
@@ -152,6 +155,11 @@ fn back_up(path: &Path) -> Result<(), WatchError> {
     }
 }
 
+/// The layout a save gives the whole file, whatever it had before.
+fn formatted(settings: &Value) -> Result<String, WatchError> {
+    Ok(serde_json::to_string_pretty(settings).map_err(std::io::Error::from)? + "\n")
+}
+
 /// Goes through a temp file, so a crash leaves the old settings or the new
 /// ones, never half of either.
 fn save(path: &Path, before: Option<&Value>, after: &Value) -> Result<(), WatchError> {
@@ -165,10 +173,8 @@ fn save(path: &Path, before: Option<&Value>, after: &Value) -> Result<(), WatchE
     } else if let Some(folder) = path.parent() {
         fs::create_dir_all(folder)?;
     }
-    let mut text = serde_json::to_string_pretty(after).map_err(std::io::Error::from)?;
-    text.push('\n');
     let temp = sibling(path, ".meridian-tmp");
-    let written = fs::write(&temp, text).and_then(|()| fs::rename(&temp, path));
+    let written = fs::write(&temp, formatted(after)?).and_then(|()| fs::rename(&temp, path));
     if written.is_err() {
         let _ = fs::remove_file(&temp);
     }
@@ -229,24 +235,39 @@ fn diff_lines(before: &str, after: &str) -> Vec<ChangeLine> {
     shown
 }
 
-/// What turning following on or off would do, without writing anything. Passing
-/// `on` gives the address to show, so that the real token never reaches the screen.
-pub fn preview(settings_path: &Path, on: Option<(&str, &str)>) -> Result<SettingsChange, WatchError> {
-    let text = match fs::read_to_string(settings_path) {
-        Ok(text) => text,
-        Err(err) if err.kind() == ErrorKind::NotFound => String::new(),
-        Err(err) => return Err(err.into()),
-    };
-    let mut after = read(settings_path)?.unwrap_or_else(|| json!({}));
+/// How the settings read on screen. Only `hooks`, because the rest of the file can hold keys,
+/// and with every header's value hidden, because that is where a hook keeps its credential.
+fn shown(settings: &Value) -> Result<String, WatchError> {
+    let mut hooks = settings.get("hooks").cloned().unwrap_or_else(|| json!({}));
+    let events = hooks.as_object_mut().into_iter().flat_map(|events| events.values_mut());
+    let groups = events.filter_map(Value::as_array_mut).flatten();
+    let handlers = groups.filter_map(|group| group.get_mut("hooks")?.as_array_mut()).flatten();
+    let headers = handlers.filter_map(|handler| handler.get_mut("headers")?.as_object_mut());
+    headers.flat_map(|headers| headers.values_mut()).for_each(|value| *value = HIDDEN.into());
+    Ok(serde_json::to_string_pretty(&json!({ "hooks": hooks })).map_err(std::io::Error::from)?)
+}
+
+/// What turning following on or off would do, without writing anything. Passing `on` gives
+/// the address to show. No token is taken, so the real one cannot reach the screen.
+pub fn preview(settings_path: &Path, on: Option<&str>) -> Result<SettingsChange, WatchError> {
+    let before = read(settings_path)?.unwrap_or_else(|| json!({}));
+    let mut after = before.clone();
     match on {
-        Some((url, token)) => add(&mut after, url, token)?,
+        Some(url) => add(&mut after, url, HIDDEN)?,
         None => strip(&mut after)?,
     }
-    let new = serde_json::to_string_pretty(&after).map_err(std::io::Error::from)? + "\n";
+    let (old, new) = (shown(&before)?, shown(&after)?);
+    let mut lines = diff_lines(&old, &new);
+    // Only `hooks` is listed, and a save rewrites the whole file, so that is said here. No
+    // change means no save, and a file that is not there yet has no spacing to lose.
+    let layout = formatted(&before)?;
+    if old != new && fs::read_to_string(settings_path).is_ok_and(|text| text.trim_start_matches('\u{feff}') != layout) {
+        lines.insert(0, ChangeLine { kind: "plain", text: RESPACED.to_string() });
+    }
     Ok(SettingsChange {
         path: settings_path.display().to_string(),
         backup: sibling(settings_path, ".meridian-backup").display().to_string(),
-        lines: diff_lines(text.trim_start_matches('\u{feff}'), &new),
+        lines,
     })
 }
 
@@ -311,7 +332,8 @@ fn approval_summary(tool: &str, input: &Value) -> String {
     }
     let label = tool_label(tool, input);
     let shown = label.chars().count().saturating_sub("$ ".len());
-    match (input["command"].as_str(), input["file_path"].as_str()) {
+    // Only a shell's label holds its command. Any other tool's would go unseen.
+    match (input["command"].as_str().filter(|_| label.starts_with("$ ")), input["file_path"].as_str()) {
         (Some(command), _) if command.trim().chars().count() > shown => format!("{label} ... (cut short, see the terminal)"),
         (Some(_), _) => label,
         // The folder is what makes a write dangerous: Startup, .ssh, a shell profile.
@@ -669,6 +691,9 @@ mod tests {
         let summary = approval_summary("mcp__db__run", &json!({ "query": "drop table users" }));
         assert!(summary.contains("details in the terminal"), "{summary}");
         assert!(!summary.contains("drop table"), "{summary}");
+        // Only a shell's label shows its command, however short the command is.
+        let summary = approval_summary("mcp__box__run", &json!({ "command": "rm -rf ~" }));
+        assert!(summary.contains("details in the terminal"), "{summary}");
     }
 
     #[test]
@@ -923,7 +948,7 @@ mod tests {
         let original = "{\n  \"model\": \"opus\",\n  \"hooks\": {\n    \"Stop\": [\n      { \"hooks\": [{ \"type\": \"command\", \"command\": \"mine\" }] }\n    ]\n  },\n  \"theme\": \"dark\"\n}\n";
         fs::write(&path, original).unwrap();
         let url = format!("http://127.0.0.1:1{HOOK_PATH}");
-        let change = preview(&path, Some((&url, "hidden"))).unwrap();
+        let change = preview(&path, Some(url.as_str())).unwrap();
         assert_eq!(fs::read_to_string(&path).unwrap(), original, "nothing is written");
         assert!(!dir.backup().exists());
         assert!(change.backup.ends_with(".meridian-backup"));
@@ -933,6 +958,45 @@ mod tests {
         let removal = preview(&path, None).unwrap();
         assert!(removal.lines.iter().any(|l| l.kind == "removed" && l.text.contains("127.0.0.1")));
         assert!(removal.lines.iter().all(|l| l.kind != "added"));
+    }
+
+    #[test]
+    fn a_preview_shows_no_token_and_nothing_outside_the_hooks_in_either_direction() {
+        let dir = Scratch::new();
+        let path = dir.settings();
+        // Four spaces, so that a diff of the raw file would list every line of it.
+        fs::write(&path, "{\n    \"env\": {\n        \"API_KEY\": \"sk-secret\"\n    }\n}\n").unwrap();
+        let url = format!("http://127.0.0.1:1{HOOK_PATH}");
+        let on = Some(url.as_str());
+        let text = |change: SettingsChange| serde_json::to_string(&change).unwrap();
+
+        assert!(!text(preview(&path, on).unwrap()).contains("sk-secret"));
+        install(&path, &url, "real-token").unwrap();
+        for change in [preview(&path, None).unwrap(), preview(&path, on).unwrap()] {
+            let text = text(change);
+            assert!(!text.contains("real-token"), "{text}");
+            assert!(!text.contains("sk-secret"), "{text}");
+        }
+        // Another tool's header is hidden as well, wherever the diff lands.
+        let foreign = json!({ "hooks": { "Stop": [{ "hooks": [{ "type": "http", "url": "https://x.dev", "headers": { "Authorization": "Bearer theirs" } }] }] } });
+        assert!(!shown(&foreign).unwrap().contains("theirs"));
+    }
+
+    #[test]
+    fn a_preview_warns_only_when_saving_would_respace_the_file() {
+        let dir = Scratch::new();
+        let path = dir.settings();
+        let url = format!("http://127.0.0.1:1{HOOK_PATH}");
+        let on = Some(url.as_str());
+        let warned = |on| preview(&path, on).unwrap().lines.iter().any(|l| l.text == RESPACED);
+
+        assert!(!warned(on), "a new file has no spacing to lose");
+        fs::write(&path, "{\n    \"model\": \"opus\"\n}\n").unwrap();
+        assert!(warned(on));
+        assert!(!warned(None), "with nothing to remove, nothing is written");
+
+        install(&path, &url, TOKEN).unwrap();
+        assert!(!warned(None), "what saving writes is already in that format");
     }
 
     #[test]

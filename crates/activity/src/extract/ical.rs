@@ -105,13 +105,14 @@ fn parse_duration(value: &str) -> Option<TimeDelta> {
             'W' | 'D' | 'H' | 'M' | 'S' => {
                 let amount: i64 = number.parse().ok()?;
                 number.clear();
-                total += match c {
-                    'W' => TimeDelta::weeks(amount),
-                    'D' => TimeDelta::days(amount),
-                    'H' => TimeDelta::hours(amount),
-                    'M' => TimeDelta::minutes(amount),
-                    _ => TimeDelta::seconds(amount),
-                };
+                let part = match c {
+                    'W' => TimeDelta::try_weeks(amount),
+                    'D' => TimeDelta::try_days(amount),
+                    'H' => TimeDelta::try_hours(amount),
+                    'M' => TimeDelta::try_minutes(amount),
+                    _ => TimeDelta::try_seconds(amount),
+                }?;
+                total = total.checked_add(&part)?;
             }
             _ => return None,
         }
@@ -119,12 +120,13 @@ fn parse_duration(value: &str) -> Option<TimeDelta> {
     Some(total)
 }
 
-fn shifted(start: EventTime, by: TimeDelta) -> EventTime {
-    match start {
-        EventTime::Date(date) => EventTime::Date(date + by),
-        EventTime::Naive(naive) => EventTime::Naive(naive + by),
-        EventTime::Zoned(zoned) => EventTime::Zoned(zoned + by),
-    }
+/// The sender picks `by`, so a sum past the calendar's end is no end time.
+fn shifted(start: EventTime, by: TimeDelta) -> Option<EventTime> {
+    Some(match start {
+        EventTime::Date(date) => EventTime::Date(date.checked_add_signed(by)?),
+        EventTime::Naive(naive) => EventTime::Naive(naive.checked_add_signed(by)?),
+        EventTime::Zoned(zoned) => EventTime::Zoned(zoned.checked_add_signed(by)?),
+    })
 }
 
 pub(super) fn extract(message: &Message, calendar: &str) -> Vec<ContextEvent> {
@@ -165,7 +167,7 @@ fn event(message: &Message, method: Option<&str>, properties: &[Property]) -> Op
     let starts_at = start.map(|s| s.0);
     let ends_at = match (end.map(|e| e.0), starts_at, duration) {
         (Some(end), ..) => Some(end),
-        (None, Some(start), Some(duration)) => Some(shifted(start, duration)),
+        (None, Some(start), Some(duration)) => shifted(start, duration),
         _ => None,
     };
     // DTEND on an all-day event is exclusive; the model keeps the last day.
@@ -254,5 +256,13 @@ mod tests {
         assert_eq!(parse_duration("P1DT2H"), Some(TimeDelta::hours(26)));
         assert_eq!(parse_duration("P2W"), Some(TimeDelta::weeks(2)));
         assert_eq!(parse_duration("nonsense"), None);
+    }
+
+    #[test]
+    fn a_duration_too_long_to_hold_is_no_duration() {
+        assert_eq!(parse_duration("P9999999999999W"), None);
+        assert_eq!(parse_duration("P106751991167DT9999999H"), None);
+        let start = EventTime::Date(NaiveDate::from_ymd_opt(2026, 11, 5).unwrap());
+        assert_eq!(shifted(start, TimeDelta::days(99_999_999)), None);
     }
 }

@@ -13,8 +13,8 @@ use windows::Win32::Media::Audio::Endpoints::{
 };
 use windows::Win32::Media::Audio::{eConsole, eRender, IMMDeviceEnumerator, MMDeviceEnumerator, AUDIO_VOLUME_NOTIFICATION_DATA};
 use windows::Win32::System::Com::{
-    CoCreateInstance, CoInitializeEx, CoSetProxyBlanket, CLSCTX_ALL, COINIT_MULTITHREADED, EOAC_NONE,
-    RPC_C_AUTHN_LEVEL_CALL, RPC_C_IMP_LEVEL_IMPERSONATE,
+    CoCreateInstance, CoInitializeEx, CoSetProxyBlanket, CoTaskMemFree, CLSCTX_ALL, COINIT_MULTITHREADED,
+    EOAC_NONE, RPC_C_AUTHN_LEVEL_CALL, RPC_C_IMP_LEVEL_IMPERSONATE,
 };
 use windows::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
 use windows::Win32::System::Rpc::{RPC_C_AUTHN_NONE, RPC_C_AUTHN_WINNT};
@@ -71,7 +71,10 @@ fn output() -> Result<(IAudioEndpointVolume, String)> {
     unsafe {
         let devices: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
         let device = devices.GetDefaultAudioEndpoint(eRender, eConsole)?;
-        let id = device.GetId()?.to_string().unwrap_or_default();
+        // The caller owns this string, and this runs every few seconds.
+        let raw = device.GetId()?;
+        let id = raw.to_string().unwrap_or_default();
+        CoTaskMemFree(Some(raw.0 as *const _));
         Ok((device.Activate(CLSCTX_ALL, None)?, id))
     }
 }

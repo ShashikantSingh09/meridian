@@ -162,6 +162,8 @@ pub struct Endpoint {
 pub fn client(protocol: Protocol, endpoint: Endpoint) -> Result<Box<dyn Provider>, ProviderError> {
     let http = reqwest::Client::builder()
         .connect_timeout(std::time::Duration::from_secs(10))
+        // Long, because a local model can load for minutes before its first byte.
+        .read_timeout(std::time::Duration::from_secs(300))
         .build()
         .map_err(ProviderError::from_reqwest)?;
     Ok(match protocol {
@@ -173,7 +175,12 @@ pub fn client(protocol: Protocol, endpoint: Endpoint) -> Result<Box<dyn Provider
 /// Runs a chat to its end. Whatever happens, `sink` sees exactly one terminal
 /// event, so a provider failure can never leave the UI waiting.
 pub async fn run_chat(provider: &dyn Provider, request: &ChatRequest, sink: &mut Sink<'_>, cancel: &CancellationToken) {
-    match provider.stream(request, sink, cancel).await {
+    // A provider only watches `cancel` once a body arrives, so this covers the wait before it.
+    let outcome = tokio::select! {
+        _ = cancel.cancelled() => Err(ProviderError::cancelled()),
+        outcome = provider.stream(request, sink, cancel) => outcome,
+    };
+    match outcome {
         Ok(()) => sink(ChatEvent::Done),
         Err(err) => sink(ChatEvent::Error { kind: err.kind, message: err.message }),
     }

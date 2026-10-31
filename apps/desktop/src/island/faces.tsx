@@ -1,8 +1,16 @@
 // The faces that live on the island. To add one in an update: draw it here, add its
 // moods to faces.css, and add a row to FACES. It then appears in Settings, Island.
 
+import { useReducedMotion } from "motion/react";
 import { useEffect, useRef } from "react";
+import { useApp } from "../lib/store";
 import "./faces.css";
+
+export function useReduced() {
+  const system = useReducedMotion() ?? false;
+  const setting = useApp((s) => s.settings.motion);
+  return setting === "reduced" || (setting === "system" && system);
+}
 
 type Base = "rest" | "working" | "needs" | "done" | "error" | "music" | "asleep";
 export type Mood = Base | "sleepy" | "curious" | "wink" | "love" | "dizzy";
@@ -60,8 +68,10 @@ export const FACES: FaceDef[] = [
 /** A face from a newer version, or one since removed, falls back to the default. */
 export const faceById = (id: string) => FACES.find((f) => f.id === id) ?? FACES[0];
 
-export function Face({ id, mood, scale = 1, reduced = false }: { id: string; mood: Mood; scale?: number; reduced?: boolean }) {
+export function Face({ id, mood, scale = 1, reduced: asked }: { id: string; mood: Mood; scale?: number; reduced?: boolean }) {
   const ref = useRef<HTMLSpanElement>(null);
+  const setting = useReduced();
+  const reduced = asked ?? setting;
 
   // Little things happen at random, because a steady rhythm reads as a machine. A timer costs
   // one short repaint every few seconds instead of a repaint every frame. Asleep, it snores.

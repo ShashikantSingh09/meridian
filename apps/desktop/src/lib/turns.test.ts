@@ -32,6 +32,16 @@ describe("speaking a reply as it arrives", () => {
     expect(sentences("Nearly there.", true)).toEqual({ ready: ["Nearly there."], rest: "" });
     expect(sentences("No full stop", true).ready).toEqual(["No full stop"]);
   });
+
+  it("keeps its place as a reply with markdown streams in, losing nothing", () => {
+    const reply = "The **quick** fox ran. See `this` thing.\n```ts\nconst a = 1;\n```\nAfter the code. Last one.";
+    const said: string[] = [];
+    for (let end = 1; end <= reply.length; end++) {
+      const { ready } = sentences(speakable(reply.slice(0, end)), end === reply.length);
+      while (said.length < ready.length) said.push(ready[said.length]!);
+    }
+    expect(said).toEqual(["The quick fox ran.", "See this thing.", "I put the code in chat.", "After the code.", "Last one."]);
+  });
 });
 
 describe("what gets read aloud", () => {

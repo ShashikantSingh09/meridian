@@ -3,13 +3,12 @@
 
 import { rowEnter } from "@meridian/design-system/motion";
 import { motion } from "motion/react";
-import { useState } from "react";
 import { span, timeOf } from "../island/live";
 import { activeSessions } from "../island/machine";
 import { AgentMark, Bars } from "../island/marks";
 import { Artwork, Clock, hostOf } from "../island/views";
 import { Icon } from "../lib/icons";
-import { endFocus, openLink, openPanel, openSettings, sendChat, setTab, startFocus, useApp } from "../lib/store";
+import { clearDraft, endFocus, openLink, openPanel, openSettings, sendChat, setDraft, setTab, startFocus, useApp } from "../lib/store";
 
 const HOUR = 3_600_000;
 const cardEnter = (i: number) =>
@@ -137,13 +136,14 @@ function Today() {
 }
 
 export function Home() {
-  const [text, setText] = useState("");
+  const text = useApp((s) => s.draft);
+  const pending = useApp((s) => s.chatPending);
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     const prompt = text.trim();
-    if (!prompt) return;
-    setText("");
+    if (!prompt || pending) return;
+    clearDraft();
     setTab("chat");
     void sendChat(prompt);
   };
@@ -158,8 +158,8 @@ export function Home() {
         <Today />
       </div>
       <form className="composer" onSubmit={submit}>
-        <input aria-label="Ask anything" placeholder="Ask anything" value={text} onChange={(e) => setText(e.target.value)} />
-        <button className="round solid" aria-label="Send" disabled={!text.trim()}>
+        <input aria-label="Ask anything" placeholder="Ask anything" value={text} onChange={(e) => setDraft(e.target.value)} />
+        <button className="round solid" aria-label="Send" disabled={!text.trim() || pending}>
           <Icon name="send" size={14} />
         </button>
       </form>

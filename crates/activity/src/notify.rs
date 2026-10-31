@@ -309,6 +309,10 @@ fn candidate(
 /// are skipped rather than fired late, so a restart ten minutes before a flight
 /// says "15 minutes", not all three at once.
 fn due_lead(event: &ContextEvent, lead_minutes: &[u32], now: DateTime<FixedOffset>) -> Option<(u32, EventTime)> {
+    // A news-driven category has no countdown, not even the day itself.
+    if lead_minutes.is_empty() {
+        return None;
+    }
     let start = event.starts_at?;
     let at = start.instant(*now.offset());
     let reached = |minutes: &u32| now.to_utc() >= at - TimeDelta::minutes((*minutes).into());
@@ -815,6 +819,13 @@ mod tests {
         let on_the_day = run(std::slice::from_ref(&deadline), at(6, 9, 0), context, &[]);
         assert_eq!(on_the_day.surface[0].stage, Stage::Lead { minutes: 0 });
         assert_eq!(run(&[deadline], at(7, 0, 1), context, &[]), Decision::default());
+    }
+
+    #[test]
+    fn a_news_driven_category_has_no_countdown_even_on_the_day() {
+        let mut parcel = package(at(1, 0, 0));
+        parcel.starts_at = Some(EventTime::Date(NaiveDate::from_ymd_opt(2026, 11, 5).unwrap()));
+        assert_eq!(run(&[parcel], at(5, 0, 1), InterruptionContext::default(), &[]), Decision::default());
     }
 
     #[test]

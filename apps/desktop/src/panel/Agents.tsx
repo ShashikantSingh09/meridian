@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { bridge } from "../lib/bridge";
 import { Icon } from "../lib/icons";
-import { answerApproval, cancelSession, sendToSession, startSession, useApp, type SessionDetail, openSettings } from "../lib/store";
+import { cancelSession, sendToSession, startSession, useApp, type SessionDetail, openSettings } from "../lib/store";
 import { AgentMark } from "../island/marks";
-import { LogLine } from "./LogLine";
+import { ApprovalCard } from "../island/views";
+import { LogLine, useFollow } from "./LogLine";
 import type { AgentId } from "../lib/types";
 
 const LIVE = ["starting", "running", "waiting"];
@@ -12,11 +13,7 @@ function Session({ session }: { session: SessionDetail }) {
   const watching = useApp((s) => s.watching);
   const live = LIVE.includes(session.status);
   const [text, setText] = useState("");
-  const log = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    log.current?.scrollTo({ top: log.current.scrollHeight });
-  }, [session.log]);
+  const follow = useFollow(session.log, session.id);
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -53,15 +50,11 @@ function Session({ session }: { session: SessionDetail }) {
       {session.approval && (
         <div className="approval">
           <span className="label">{session.approval.tool}</span>
-          <code className="command">{session.approval.summary}</code>
-          <div className="row end">
-            <button className="ghost" onClick={() => answerApproval(session.id, session.approval!.id, false)}>Deny</button>
-            <button className="allow" onClick={() => answerApproval(session.id, session.approval!.id, true)}>Allow</button>
-          </div>
+          <ApprovalCard sessionId={session.id} approval={session.approval} />
         </div>
       )}
 
-      <div className="log" ref={log}>
+      <div className="log" {...follow}>
         {session.log.map((entry, i) => (
           <LogLine key={i} entry={entry} />
         ))}

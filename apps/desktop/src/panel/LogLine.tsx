@@ -1,7 +1,28 @@
 import { rowEnter } from "@meridian/design-system/motion";
 import { motion } from "motion/react";
+import { useEffect, useRef } from "react";
 import type { LogEntry } from "../lib/store";
 import { Markdown } from "./Markdown";
+
+/** How near the end still counts as being there. */
+const FOLLOW_WITHIN = 40;
+
+/** Keeps a log on its newest line, unless the reader has scrolled up. Spread the result on the log. */
+export function useFollow(lines: unknown, conversation: unknown) {
+  const ref = useRef<HTMLDivElement>(null);
+  const following = useRef(true);
+  useEffect(() => {
+    following.current = true;
+  }, [conversation]);
+  useEffect(() => {
+    if (following.current) ref.current?.scrollTo({ top: ref.current.scrollHeight });
+  }, [lines, conversation]);
+  const onScroll = () => {
+    const el = ref.current;
+    if (el) following.current = el.scrollHeight - el.scrollTop - el.clientHeight < FOLLOW_WITHIN;
+  };
+  return { ref, onScroll };
+}
 
 /** One step of a session. Code changes and commands show what really happened. */
 export function LogLine({ entry }: { entry: LogEntry }) {

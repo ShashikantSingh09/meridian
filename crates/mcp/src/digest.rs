@@ -36,7 +36,13 @@ pub(crate) fn readable(tool: &Value, catalogued: bool) -> bool {
     annotations["readOnlyHint"] == true
         || (catalogued
             && READ_PREFIXES.iter().any(|prefix| name.starts_with(prefix))
-            && annotations["destructiveHint"] != true)
+            && !says_it_writes(annotations))
+}
+
+/// "This writes" is believed even though "this is safe" is not: only the first
+/// keeps a call from being made.
+fn says_it_writes(annotations: &Value) -> bool {
+    annotations["readOnlyHint"] == false || annotations["destructiveHint"] == true
 }
 
 fn has_type(property: &Value, wanted: &[&str]) -> bool {
@@ -76,7 +82,7 @@ pub(crate) fn arguments(tool: &Value) -> Option<Value> {
 /// Names in the catalog were picked by hand, so they need no read-sounding prefix.
 fn picked(tool: &Value, service: Option<&Service>) -> bool {
     let named = service.is_some_and(|s| tool["name"].as_str().is_some_and(|name| s.prefer.contains(&name)));
-    named && tool["annotations"]["destructiveHint"] != true
+    named && !says_it_writes(&tool["annotations"])
 }
 
 fn usable(tool: &Value, service: Option<&Service>) -> bool {
@@ -239,6 +245,14 @@ mod tests {
         let tool = json!({ "name": "whoami", "annotations": { "readOnlyHint": false } });
         assert!(!readable(&tool, false));
         assert!(!readable(&tool, true));
+    }
+
+    #[test]
+    fn a_read_only_hint_of_false_beats_a_read_sounding_or_hand_picked_name() {
+        let writes = json!({ "name": "fetch_and_lock", "annotations": { "readOnlyHint": false } });
+        assert!(!readable(&writes, true));
+        let service = Service { prefer: &["fetch_and_lock"], ..SERVICE };
+        assert!(!usable(&writes, Some(&service)));
     }
 
     #[test]

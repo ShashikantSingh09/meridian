@@ -41,6 +41,7 @@ test.use({
 
 type Mock = {
   setHeard(words: string): void;
+  setPacks(ids: string[]): void;
   spoken(): string[];
   publishWatched(id: string): void;
 };
@@ -103,6 +104,16 @@ test("a voice needs a key or a download before it can be used, and says so", asy
   await page.getByRole("button", { name: /Download, 328 MB/ }).click();
   await expect(page.getByRole("button", { name: "Hear Bella" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Remove" })).toBeVisible();
+});
+
+test("hearing that is here still offers the engine it needs", async ({ page }) => {
+  await mock(page)((m) => m.setPacks(["hearing"]));
+  await island(page).click();
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await page.getByRole("button", { name: "Voice", exact: true }).click();
+
+  await page.getByRole("button", { name: /Download, 8 MB/ }).click();
+  await expect(page.getByRole("button", { name: /Download/ })).toHaveCount(0);
 });
 
 test("every state of a conversation has its own face and words", async ({ page }) => {

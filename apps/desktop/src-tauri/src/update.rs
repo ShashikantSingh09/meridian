@@ -6,6 +6,7 @@
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
@@ -13,6 +14,8 @@ use tauri::AppHandle;
 const REPO: &str = "ShashikantSingh09/meridian";
 const NO_WINDOW: u32 = 0x0800_0000;
 const NOT_READY: &str = "Updating needs the GitHub command line, signed in. Run gh auth login once, then try again.";
+/// Set from a click until the install fails or the app exits.
+static INSTALLING: AtomicBool = AtomicBool::new(false);
 
 #[derive(Deserialize)]
 struct Published {
@@ -104,6 +107,18 @@ fn fetch(version: &str, tag: &str) -> Result<PathBuf, String> {
 /// Only ever from a click. Installing restarts the app, which would end a running agent.
 #[tauri::command]
 pub async fn update_install(app: AppHandle) -> Result<(), String> {
+    // The panel can close and reopen during a download, and a second run would delete the first's.
+    if INSTALLING.swap(true, Ordering::SeqCst) {
+        return Err("An update is already being installed.".to_string());
+    }
+    let outcome = install(&app).await;
+    if outcome.is_err() {
+        INSTALLING.store(false, Ordering::SeqCst);
+    }
+    outcome
+}
+
+async fn install(app: &AppHandle) -> Result<(), String> {
     let current = app.package_info().version.to_string();
     let installer = tauri::async_runtime::spawn_blocking(move || {
         let release = latest()?;
@@ -121,7 +136,7 @@ pub async fn update_install(app: AppHandle) -> Result<(), String> {
     let script = format!("ping -n 3 127.0.0.1 >nul & \"{}\" /S & start \"\" \"{}\"", installer.display(), exe.display());
     // Not detached: ping would then open a console window of its own.
     Command::new("cmd").arg("/c").raw_arg(format!("\"{script}\"")).creation_flags(NO_WINDOW).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().map_err(|e| e.to_string())?;
-    app.exit(0);
+    crate::quit(app);
     Ok(())
 }
 

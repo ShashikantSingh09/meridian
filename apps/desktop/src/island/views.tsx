@@ -36,6 +36,8 @@ import { useMicLevel } from "./useMicLevel";
 /** With nothing to do and no pointer, the face gets drowsy, then falls asleep. */
 const SLEEPY_AFTER_MS = 45_000;
 const ASLEEP_AFTER_MS = 2 * 60_000;
+/** Hovering swaps the idle view for a new one, so being tired has to outlive it. */
+let tiredOut = false;
 
 export const greetingWord = () => {
   const hour = new Date().getHours();
@@ -75,7 +77,7 @@ export function Clock({ className = "rest-time tabular" }: { className?: string 
   return <span className={className}>{now.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>;
 }
 
-function Peek() {
+function Peek({ reduced }: { reduced: boolean }) {
   const next = useApp((s) => (s.settings.showNextMeeting ? s.activity.next : null));
   const sessions = useApp((s) => s.sessions);
   const active = activeSessions(sessions);
@@ -83,7 +85,7 @@ function Peek() {
   return (
     <div className="peek-card">
       <div className="row">
-        <span className="peek-face"><Mine mood="rest" scale={0.86} reduced={false} /></span>
+        <span className="peek-face"><Mine mood="rest" scale={0.86} reduced={reduced} /></span>
         <div className="grow stacked">
           <span className="peek-title">{greetingWord()}</span>
           <span className="meta">{today}</span>
@@ -110,12 +112,16 @@ export function IdleView({ reduced, hovered, sliver }: { reduced: boolean; hover
   const [tired, setTired] = useState<Mood>("rest");
 
   useEffect(() => {
-    if (hovered) return setTired((was) => {
+    if (hovered) {
       // Woken up: a moment of surprise.
-      if (was !== "rest") feel("needs", 800);
-      return "rest";
-    });
-    const drowsy = setTimeout(() => setTired("sleepy"), SLEEPY_AFTER_MS);
+      if (tiredOut) feel("needs", 800);
+      return;
+    }
+    tiredOut = false;
+    const drowsy = setTimeout(() => {
+      tiredOut = true;
+      setTired("sleepy");
+    }, SLEEPY_AFTER_MS);
     const asleep = setTimeout(() => setTired("asleep"), ASLEEP_AFTER_MS);
     return () => {
       clearTimeout(drowsy);
@@ -126,15 +132,15 @@ export function IdleView({ reduced, hovered, sliver }: { reduced: boolean; hover
   if (greeting) {
     return (
       <div className="rest">
-        <Mine mood="wink" reduced={reduced} />
+        <Mine mood="rest" reduced={reduced} />
         <span className="greeting">{greetingWord()}</span>
       </div>
     );
   }
   if (sliver && !hovered) return null;
-  if (hovered) return <Peek />;
+  if (hovered) return <Peek reduced={reduced} />;
   return (
-    <div className="rest">
+    <div className="rest ambient">
       <Mine mood={tired} reduced={reduced} />
       {clock && <Clock />}
     </div>
@@ -217,6 +223,21 @@ function PlanCard({ sessionId, approval }: { sessionId: string; approval: Approv
   );
 }
 
+/** What is being asked and how to answer it, the same on the island and in the panel. */
+export function ApprovalCard({ sessionId, approval }: { sessionId: string; approval: Approval }) {
+  if (approval.questions?.length) return <QuestionCard key={approval.id} sessionId={sessionId} approval={approval} />;
+  if (approval.plan) return <PlanCard sessionId={sessionId} approval={approval} />;
+  return (
+    <>
+      <code className="command" title={approval.summary}>{approval.summary}</code>
+      <div className="row end">
+        <button className="ghost" onClick={() => answerApproval(sessionId, approval.id, false)}>Deny</button>
+        <button className="allow" onClick={() => answerApproval(sessionId, approval.id, true)}>Allow</button>
+      </div>
+    </>
+  );
+}
+
 export function WorkingView({ reduced, hovered }: { reduced: boolean; hovered: boolean }) {
   const sessions = useApp((s) => s.sessions);
   const blocked = waitingApproval(sessions);
@@ -233,19 +254,7 @@ export function WorkingView({ reduced, hovered }: { reduced: boolean; hovered: b
           <span className="grow label truncate">{blocked.agent} {asks}</span>
           <span className="meta">{blocked.project}</span>
         </div>
-        {approval.questions?.length ? (
-          <QuestionCard key={approval.id} sessionId={blocked.id} approval={approval} />
-        ) : approval.plan ? (
-          <PlanCard sessionId={blocked.id} approval={approval} />
-        ) : (
-          <>
-            <code className="command" title={approval.summary}>{approval.summary}</code>
-            <div className="row end">
-              <button className="ghost" onClick={() => answerApproval(blocked.id, approval.id, false)}>Deny</button>
-              <button className="allow" onClick={() => answerApproval(blocked.id, approval.id, true)}>Allow</button>
-            </div>
-          </>
-        )}
+        <ApprovalCard sessionId={blocked.id} approval={approval} />
       </div>
     );
   }

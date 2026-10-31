@@ -2,9 +2,9 @@
 //! is per-monitor DPI aware.
 
 use serde::Serialize;
-use windows::core::PWSTR;
-use windows::Win32::Foundation::{CloseHandle, HWND, RECT};
-use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_EXTENDED_FRAME_BOUNDS};
+use windows::core::{BOOL, PWSTR};
+use windows::Win32::Foundation::{CloseHandle, FALSE, HWND, LPARAM, RECT, TRUE};
+use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS};
 use windows::Win32::Graphics::Gdi::{
     BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject, GetDC, GetDIBits, GetMonitorInfoW,
     MonitorFromWindow, ReleaseDC, SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, CAPTUREBLT, DIB_RGB_COLORS,
@@ -14,7 +14,7 @@ use windows::Win32::System::Threading::{
     OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetClassNameW, GetForegroundWindow, GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindowVisible,
+    EnumWindows, GetClassNameW, GetForegroundWindow, GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindowVisible,
 };
 
 use crate::ScreenError;
@@ -136,8 +136,19 @@ pub fn capture_window(hwnd: isize) -> Result<Frame, ScreenError> {
     if unsafe { IsIconic(hwnd) }.as_bool() {
         return Err(ScreenError::Capture("That window is minimized.".into()));
     }
+    let rect = frame_bounds(hwnd)?;
+    grab(rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top)
+}
+
+/// Captures the whole display a window is on.
+pub fn capture_screen_of(hwnd: isize) -> Result<Frame, ScreenError> {
+    let r = monitor_bounds(HWND(hwnd as *mut _))?;
+    grab(r.left, r.top, r.right - r.left, r.bottom - r.top)
+}
+
+/// The extended bounds leave out the invisible resize border and shadow.
+fn frame_bounds(hwnd: HWND) -> windows::core::Result<RECT> {
     let mut rect = RECT::default();
-    // The extended bounds leave out the invisible resize border and shadow.
     unsafe {
         DwmGetWindowAttribute(
             hwnd,
@@ -146,18 +157,68 @@ pub fn capture_window(hwnd: isize) -> Result<Frame, ScreenError> {
             std::mem::size_of::<RECT>() as u32,
         )?;
     }
-    grab(rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top)
+    Ok(rect)
 }
 
-/// Captures the whole display a window is on.
-pub fn capture_screen_of(hwnd: isize) -> Result<Frame, ScreenError> {
-    let monitor = unsafe { MonitorFromWindow(HWND(hwnd as *mut _), MONITOR_DEFAULTTONEAREST) };
+fn monitor_bounds(hwnd: HWND) -> Result<RECT, ScreenError> {
+    let monitor = unsafe { MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST) };
     let mut info = MONITORINFO { cbSize: std::mem::size_of::<MONITORINFO>() as u32, ..Default::default() };
     if !unsafe { GetMonitorInfoW(monitor, &mut info) }.as_bool() {
         return Err(ScreenError::Capture("The display could not be read.".into()));
     }
-    let r = info.rcMonitor;
-    grab(r.left, r.top, r.right - r.left, r.bottom - r.top)
+    Ok(info.rcMonitor)
+}
+
+fn overlaps(a: &RECT, b: &RECT) -> bool {
+    a.left.max(b.left) < a.right.min(b.right) && a.top.max(b.top) < a.bottom.min(b.bottom)
+}
+
+/// Cloaked windows report as visible but are not drawn: another virtual desktop,
+/// or a suspended Store app.
+fn is_cloaked(hwnd: HWND) -> bool {
+    let mut cloaked = 0u32;
+    let read = unsafe {
+        DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, &mut cloaked as *mut u32 as *mut _, std::mem::size_of::<u32>() as u32)
+    };
+    read.is_ok() && cloaked != 0
+}
+
+struct InView {
+    area: RECT,
+    stop_at: Option<HWND>,
+    stopped: bool,
+    found: Vec<WindowInfo>,
+}
+
+unsafe extern "system" fn visit(hwnd: HWND, state: LPARAM) -> BOOL {
+    let search = unsafe { &mut *(state.0 as *mut InView) };
+    if search.stop_at == Some(hwnd) {
+        search.stopped = true;
+        return FALSE;
+    }
+    let drawn = unsafe { IsWindowVisible(hwnd).as_bool() && !IsIconic(hwnd).as_bool() } && !is_cloaked(hwnd);
+    // Bounds nobody can read count as overlapping, because this list guards a refusal.
+    if drawn && frame_bounds(hwnd).map_or(true, |bounds| overlaps(&bounds, &search.area)) {
+        search.found.push(describe(hwnd));
+    }
+    TRUE
+}
+
+/// Every window a capture could show besides its target. A window capture stops at
+/// the target, because the list runs front to back and only what is in front can show.
+// ponytail: a whole-screen capture lists the whole display, so a password manager
+// covered by other windows blocks it too. Subtract the windows above each one if
+// that turns out too strict.
+pub fn windows_in_view(hwnd: isize, whole_screen: bool) -> Result<Vec<WindowInfo>, ScreenError> {
+    let target = HWND(hwnd as *mut _);
+    let (area, stop_at) = if whole_screen { (monitor_bounds(target)?, None) } else { (frame_bounds(target)?, Some(target)) };
+    let mut search = InView { area, stop_at, stopped: false, found: Vec::new() };
+    let listed = unsafe { EnumWindows(Some(visit), LPARAM(&mut search as *mut InView as isize)) };
+    // Stopping early reads as a failure. A real one must refuse, not pass an empty list.
+    if !search.stopped {
+        listed?;
+    }
+    Ok(search.found)
 }
 
 /// A part of a frame, as fractions of its size so it survives preview scaling.
@@ -191,6 +252,14 @@ mod tests {
             }
         }
         Frame { width, height, bgra }
+    }
+
+    #[test]
+    fn only_a_shared_area_counts_as_overlapping() {
+        let area = RECT { left: 0, top: 0, right: 100, bottom: 100 };
+        assert!(overlaps(&area, &RECT { left: 99, top: 99, right: 200, bottom: 200 }));
+        assert!(!overlaps(&area, &RECT { left: 100, top: 0, right: 200, bottom: 100 }), "touching edges");
+        assert!(!overlaps(&area, &RECT { left: 50, top: 50, right: 50, bottom: 50 }), "no size");
     }
 
     #[test]

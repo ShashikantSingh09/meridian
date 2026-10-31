@@ -113,13 +113,16 @@ pub async fn auth_status(agent: AgentKind) -> Option<AuthStatus> {
     hide_console(&mut cmd);
     path_with_parent(&mut cmd, &exe);
     let output = tokio::time::timeout(Duration::from_secs(10), cmd.output()).await.ok()?.ok()?;
-    // codex prints its status on stderr in some versions.
-    let text = [output.stdout, output.stderr].concat();
-    let text = String::from_utf8_lossy(&text);
-    Some(match agent {
-        AgentKind::ClaudeCode => parse_claude_auth(&text),
-        AgentKind::Codex => parse_codex_auth(&text),
-    })
+    Some(read_auth(agent, &output.stdout, &output.stderr))
+}
+
+/// Claude Code's stdout is JSON, which a warning on stderr would spoil if the two were joined.
+/// codex prints its status on stderr in some versions.
+fn read_auth(agent: AgentKind, stdout: &[u8], stderr: &[u8]) -> AuthStatus {
+    match agent {
+        AgentKind::ClaudeCode => parse_claude_auth(&String::from_utf8_lossy(stdout)),
+        AgentKind::Codex => parse_codex_auth(&String::from_utf8_lossy(&[stdout, stderr].concat())),
+    }
 }
 
 /// Starts the CLI's own sign-in in its own window. The whole flow belongs to the
@@ -185,6 +188,13 @@ mod tests {
     fn claude_signed_out_and_garbage_are_told_apart() {
         assert_eq!(parse_claude_auth(r#"{"loggedIn":false}"#).signed_in, Some(false));
         assert_eq!(parse_claude_auth("not json").signed_in, None);
+    }
+
+    #[test]
+    fn a_warning_on_stderr_does_not_hide_claudes_status() {
+        let status = read_auth(AgentKind::ClaudeCode, br#"{"loggedIn":true}"#, b"(node:1) DeprecationWarning: x\n");
+        assert_eq!(status.signed_in, Some(true));
+        assert_eq!(read_auth(AgentKind::Codex, b"", b"Logged in using ChatGPT\n").method.as_deref(), Some("ChatGPT"));
     }
 
     #[test]

@@ -4,7 +4,7 @@ import { useEffect } from "react";
 import { Face } from "../island/faces";
 import { Clock, greetingWord } from "../island/views";
 import { Icon, type IconName } from "../lib/icons";
-import { closePanel, setTab, useApp, type Tab } from "../lib/store";
+import { closePanel, dismissError, setTab, useApp, type Tab } from "../lib/store";
 import { Agents } from "./Agents";
 import { Chat } from "./Chat";
 import { Home } from "./Home";
@@ -33,6 +33,21 @@ const PAGES: Record<Tab, () => React.JSX.Element> = {
   inbox: Inbox,
   settings: SettingsPage,
 };
+
+/** The open panel covers the island, so what went wrong shows here until it is dismissed. */
+function PanelError() {
+  const error = useApp((s) => s.errors[0]);
+  if (!error) return null;
+  return (
+    <div className="auth-banner" role="alert">
+      <span className="grow meta bad clamp" title={error.body}>{error.title}. {error.body}</span>
+      {error.retry && <button className="ghost" onClick={() => { const retry = error.retry; dismissError(error.id); retry?.(); }}>Retry</button>}
+      <button className="round" aria-label="Dismiss" title="Dismiss" onClick={() => dismissError(error.id)}>
+        <Icon name="close" size={14} />
+      </button>
+    </div>
+  );
+}
 
 export function Panel() {
   const tab = useApp((s) => s.tab);
@@ -63,6 +78,7 @@ export function Panel() {
           <Icon name="close" size={15} />
         </button>
       </header>
+      <PanelError />
       <motion.main key={onboarded ? tab : "welcome"} className="page" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}>
         <Page />
       </motion.main>

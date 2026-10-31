@@ -63,6 +63,11 @@ ring, because it needs a status line script installed in Claude Code. Trains, be
 
 ## Licensing: read before distributing
 
+**The local speech engine contains GPL code.** Kokoro and Piper need espeak-ng to read plain text, and sherpa-onnx took it out in v2.0.0 to
+become GPL-free, so the engine stays pinned at v1.13.8. Its DLL contains espeak-ng, which is GPL. It is a separate download, made only on
+request, but it loads into the app's own process. That is fine for the owner's own use. Before giving the app to customers, take legal
+advice, or move Kokoro and Piper to a lexicon or an outside process. See `docs/DECISIONS.md`, D51.
+
 Chatting through Claude Code uses your own installed CLI and your own sign-in. Anthropic's terms do not permit third-party
 developers to offer Claude.ai login in their own apps, or to route requests through Free, Pro or Max credentials on behalf
 of their users. Using this yourself on your machine is the case this design serves. Giving it to other people is a
@@ -98,7 +103,7 @@ What stands between this build and a stranger installing it. Only the owner can 
 | Codex full turn | Handshake, thread start and failure path ran for real. A successful turn, streaming, approvals and usage did not, because the sign-in here has expired. | Run `codex login`, then `node tests/live/e2e.mjs codex` |
 | Cloud chat APIs | No live call was made to any cloud API. Adapters are tested against a real local socket. An OpenRouter key was added here, but it was not used, to avoid spending it. | Send a message |
 | Ollama, LM Studio, llama.cpp | Not installed here. Tested through the real app against a stand-in server. | Run a real server |
-| Local voices and hearing | The owner downloaded the engine and hearing through the app on 2026-10-31, and no crash was recorded. Nobody has confirmed they work, because loading the downloaded DLL during development was refused by a safety check. Kokoro's speaker names are from memory | Press Ctrl Alt V and talk, or run `cargo test -p voice --test live_local -- --ignored` with `MERIDIAN_SPEECH_DIR` set |
+| Local voices and hearing | The owner downloaded the engine and hearing through the app on 2026-10-31, and no crash was recorded. The engine is now v1.13.8, so it needs downloading again, at about 8 MB. Nobody has confirmed it works, because loading the downloaded DLL during development was refused by a safety check. Kokoro's speaker names are from memory | Press Ctrl Alt V and talk, or run `cargo test -p voice --test live_local -- --ignored` with `MERIDIAN_SPEECH_DIR` set |
 | Cloud voices and hearing | The owner added an ElevenLabs key and picked a voice, so its voice list works for real. Whether it has spoken is not recorded. OpenAI, Cartesia, Deepgram and cloud hearing are written from their docs and tested on pure parts only | Press a play button in Settings, Voice |
 | Talking with a real microphone | A recording stood in for the mic, through the real audio path. Interrupting a reply needs a real person and real speakers | Talk to it |
 | Brightness and battery | Only a desktop was available, so neither has fired for real. Volume keys were proved on the installed app | Try on a laptop |
@@ -163,6 +168,10 @@ What stands between this build and a stranger installing it. Only the owner can 
 - Talking needs something to hear with. Hearing defaults to this PC, which needs a download of about 65 MB, or an ElevenLabs or Deepgram
   key. Until one is set, the microphone button opens Settings, Voice and says why. Speaking needs neither, because the Windows voice is
   always there.
+- A whole-screen capture is refused while an excluded window is anywhere on that display, even behind other windows, and the error names the app. A window with `login` in its title is refused too, which includes a file called `login.rs`.
+- Local-only mode also stops mail and calendar sync, and update checks.
+- Previews of island states end after 8 seconds, or when the panel opens or closes, and they always leave the panel closed.
+- Finished events and the reminder log are removed after 90 days.
 - Cloud hearing runs at the end of a turn, so words do not appear while talking. Only local hearing shows them live.
 - What is new on the Updates page is the release's notes, which still open with the install instructions from `release.yml`.
 - A portable copy that updates installs the normal version, then restarts the portable one, which is still the old version.

@@ -21,7 +21,7 @@ const stageText = (entry: ReminderLogEntry) => {
 const placeText = { surfaced: "Shown on the island", centre: "Kept here", held: "Held back" };
 
 export function Inbox() {
-  const { log, events } = useApp((s) => s.activity);
+  const { log, all } = useApp((s) => s.activity);
   const preferences = useApp((s) => s.settings.activity);
 
   useEffect(() => {
@@ -31,7 +31,7 @@ export function Inbox() {
   }, []);
 
   const save = (patch: Partial<ActivityPreferences>) => void updateSettings({ activity: { ...preferences, ...patch } });
-  const titleOf = (id: string) => events.find((e) => e.id === id)?.title ?? "Item no longer listed";
+  const titleOf = (id: string) => all.find((e) => e.id === id)?.title ?? "Item no longer listed";
   const recent = log.slice().reverse().slice(0, 40);
 
   return (

@@ -284,6 +284,20 @@ fn prepared(frame: Frame, window: Option<WindowInfo>) -> Result<Capture, String>
     Ok(Capture { image, text, window, signals, width: frame.width, height: frame.height })
 }
 
+/// A capture copies the screen, so it holds whatever covers the target, and all of
+/// that has to pass the exclusions. Checked last, to catch a window opened during the wait.
+fn read_unless_excluded(window: &WindowInfo, target: &str, rules: &[String]) -> Result<Frame, String> {
+    let whole_screen = target == "screen";
+    let in_view = screen::windows_in_view(window.hwnd, whole_screen).map_err(stringify)?;
+    if let Some(other) = in_view.iter().find(|w| screen::exclusion_reason(w, rules).is_some()) {
+        // The process alone: its title is what may be private.
+        let name = if other.process.is_empty() { "Another window" } else { other.process.as_str() };
+        return Err(format!("{name} is in view, and it is excluded from capture."));
+    }
+    let frame = if whole_screen { screen::capture_screen_of(window.hwnd) } else { screen::capture_window(window.hwnd) };
+    frame.map_err(stringify)
+}
+
 /// Pixels of the given window or its display, with the island kept out of them.
 pub fn take_capture(app: &AppHandle, core: &Core, target: &str) -> Result<(Frame, WindowInfo), String> {
     let settings = core.settings.lock().unwrap().clone();
@@ -301,12 +315,9 @@ pub fn take_capture(app: &AppHandle, core: &Core, target: &str) -> Result<(Frame
     island::exclude_from_capture(&win, true);
     // The exclusion takes effect at the next composition.
     std::thread::sleep(std::time::Duration::from_millis(50));
-    let frame = match target {
-        "screen" => screen::capture_screen_of(window.hwnd),
-        _ => screen::capture_window(window.hwnd),
-    };
+    let frame = read_unless_excluded(&window, target, &settings.screen_exclusions);
     island::exclude_from_capture(&win, false);
-    Ok((frame.map_err(stringify)?, window))
+    Ok((frame?, window))
 }
 
 #[tauri::command]

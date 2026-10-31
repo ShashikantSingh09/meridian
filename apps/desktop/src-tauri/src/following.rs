@@ -211,8 +211,7 @@ pub fn watch_preview(following: State<'_, Following>, on: bool) -> Result<watch:
     let settings = following.settings.as_ref().ok_or("Could not find your Claude Code settings.")?;
     let port = following.saved().map_or(0, |address| address.port);
     let url = format!("http://127.0.0.1:{port}{HOOK_PATH}");
-    // The token is written to the file but has no reason to be on the screen.
-    watch::preview(settings, on.then_some((url.as_str(), "(a private token)"))).map_err(stringify)
+    watch::preview(settings, on.then_some(url.as_str())).map_err(stringify)
 }
 
 #[tauri::command]

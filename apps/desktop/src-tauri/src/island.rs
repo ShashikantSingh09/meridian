@@ -134,7 +134,8 @@ pub fn set_interactive(win: &WebviewWindow, gate: &Gate, on: bool) {
     gate.interactive.store(on, Ordering::Relaxed);
     let mine = hwnd(win);
     let foreground = unsafe { GetForegroundWindow() };
-    if on {
+    // A panel already open is asked again by a shortcut or a tab, and has become the foreground.
+    if on && mine != Some(foreground) {
         gate.previous.store(foreground.0 as isize, Ordering::Relaxed);
     }
     apply_style(win, gate);

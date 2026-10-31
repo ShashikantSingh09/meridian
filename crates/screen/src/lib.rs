@@ -7,7 +7,7 @@ mod ocr;
 mod policy;
 mod signals;
 
-pub use capture::{capture_screen_of, capture_window, crop, foreground, window_at, Frame, WindowInfo};
+pub use capture::{capture_screen_of, capture_window, crop, foreground, window_at, windows_in_view, Frame, WindowInfo};
 pub use ocr::{ocr, to_jpeg};
 pub use policy::{exclusion_reason, DEFAULT_EXCLUSIONS};
 pub use signals::{detect, Signal, SignalKind};

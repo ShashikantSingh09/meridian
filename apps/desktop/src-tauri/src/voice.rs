@@ -16,6 +16,7 @@ use crate::secrets;
 
 const LOCAL_ONLY: &str = "Local-only mode is on, so nothing can go to a cloud voice.";
 const NEEDS_DOWNLOAD: &str = "Hearing on this PC needs a download first. Open Settings, Voice.";
+const NEEDS_ENGINE: &str = "Speech on this PC needs a small download first. Open Settings, Voice.";
 /// Sent to the interface a piece at a time, so a cut-off stops within a moment.
 const PIECE: usize = 4096;
 /// Two minutes of 16 kHz audio is far more than one turn, and a limit on what is held.
@@ -38,8 +39,11 @@ pub struct Voice {
 }
 
 pub fn state(app: &tauri::App) -> Result<Voice, Box<dyn std::error::Error>> {
+    let root = app.path().app_local_data_dir()?.join("speech");
+    // Nothing has loaded the engine yet, so its files are free to go.
+    packs::clear_old(&root);
     Ok(Voice {
-        root: app.path().app_local_data_dir()?.join("speech"),
+        root,
         engine: Mutex::new(None),
         speaker: Mutex::new(None),
         ears: Mutex::new(None),
@@ -52,7 +56,7 @@ impl Voice {
     fn engine(&self) -> Result<Arc<Engine>, VoiceError> {
         let mut engine = self.engine.lock().unwrap();
         if engine.is_none() {
-            let pack = packs::find("engine").ok_or_else(|| VoiceError::Engine("No engine is listed.".into()))?;
+            let pack = packs::find("engine").filter(|pack| packs::installed(&self.root, pack)).ok_or_else(|| VoiceError::Engine(NEEDS_ENGINE.into()))?;
             *engine = Some(Engine::load(&packs::folder(&self.root, pack))?);
         }
         Ok(engine.clone().unwrap())
@@ -147,7 +151,8 @@ pub async fn voice_download(app: AppHandle, id: String, on: Channel<u64>) -> Res
     let root = voice.root.clone();
     let pack = packs::find(&id).ok_or("That is not a download.")?;
     let mut before = 0;
-    for needed in [packs::find("engine").filter(|engine| engine.id != pack.id), Some(pack)].into_iter().flatten() {
+    // Asking for a pack that is here still fetches an engine that is not.
+    for needed in [packs::find("engine").filter(|engine| engine.id != pack.id), Some(pack)].into_iter().flatten().filter(|needed| !packs::installed(&root, needed)) {
         packs::download(&root, needed, |bytes| drop(on.send(before + bytes))).await.map_err(stringify)?;
         before += needed.bytes;
     }
@@ -223,16 +228,11 @@ pub fn voice_stop(voice: State<'_, Voice>) {
 #[tauri::command]
 pub async fn voice_hear_start(app: AppHandle) -> Result<(), String> {
     let core = app.state::<Core>();
-    let (hearing, local_only) = {
-        let settings = core.settings.lock().unwrap();
-        (settings.voice_hearing.clone(), settings.local_only)
-    };
+    let hearing = core.settings.lock().unwrap().voice_hearing.clone();
     app.state::<Voice>().heard.lock().unwrap().clear();
     if hearing != "local" {
-        if local_only {
-            return Err(LOCAL_ONLY.into());
-        }
-        return Ok(());
+        // Better to say so now than after the user has spoken a whole turn.
+        return cloud_key(&core, &hearing).map(drop);
     }
     let worker = app.clone();
     tauri::async_runtime::spawn_blocking(move || worker.state::<Voice>().start_hearing()).await.map_err(stringify)?.map_err(stringify)

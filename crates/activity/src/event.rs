@@ -3,7 +3,7 @@
 
 use std::fmt;
 
-use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, SecondsFormat, TimeDelta, Utc};
+use chrono::{DateTime, Datelike, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime, SecondsFormat, TimeDelta, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
@@ -92,7 +92,8 @@ impl EventTime {
     /// others are read as that person's wall clock, which is a scheduling
     /// convenience and never written back to the event.
     pub fn instant(&self, local: FixedOffset) -> DateTime<Utc> {
-        let wall_clock = |naive: NaiveDateTime| (naive - TimeDelta::seconds(local.local_minus_utc().into())).and_utc();
+        let shift = TimeDelta::seconds(local.local_minus_utc().into());
+        let wall_clock = |naive: NaiveDateTime| naive.checked_sub_signed(shift).unwrap_or(naive).and_utc();
         match self {
             Self::Date(date) => wall_clock(date.and_time(NaiveTime::MIN)),
             Self::Naive(naive) => wall_clock(*naive),
@@ -110,6 +111,17 @@ impl EventTime {
 
     pub fn is_exact(&self) -> bool {
         matches!(self, Self::Zoned(_))
+    }
+
+    /// A year anything real could fall in. Mail chooses these values, and one at
+    /// the edge of what the calendar holds breaks every later sum on it.
+    pub fn sensible(&self) -> bool {
+        let year = match self {
+            Self::Date(date) => date.year(),
+            Self::Naive(naive) => naive.year(),
+            Self::Zoned(zoned) => zoned.year(),
+        };
+        (1900..=2200).contains(&year)
     }
 
     /// A date-only or naive restatement of `finer` adds nothing, while a

@@ -94,7 +94,6 @@ export interface AgentChat {
 export interface ScreenState {
   capture: Capture | null;
   capturing: boolean;
-  question: string;
   includeImage: boolean;
   /** Why the last capture did not happen, shown where it was asked for. */
   refused: string | null;
@@ -169,6 +168,13 @@ export interface AppState {
   watching: boolean;
   version: string;
   update: UpdateStatus;
+  /** What the update is doing. Here, because the panel can close while it runs. */
+  updating: "checking" | "installing" | null;
+  /** Sign-ins under way. Each opens a browser, which closes the panel. */
+  signingIn: string[];
+  /** The message being written, kept while the panel is closed or on another page. */
+  draft: string;
+  draftFiles: string[];
 }
 
 const LOG_LIMIT = 500;
@@ -179,12 +185,16 @@ const HOVER_OUT_MS = 240;
 const ANSWER_GAP_MS = 400;
 const SIGN_IN_POLLS = 60;
 const SIGN_IN_POLL_MS = 2000;
+/** A click on the tray icon blurs the panel on the way down, then toggles it on the way up. */
+const TOGGLE_AFTER_BLUR_MS = 300;
+/** Sample data shows for this long, then the real state comes back by itself. */
+const PREVIEW_MS = 8000;
 
 let state: AppState = {
   panelOpen: false,
   activity: { category: "today", events: [], accounts: [], log: [], next: null, all: [] },
   media: { current: null, sessions: [], reportedAt: 0, recent: [] },
-  screen: { capture: null, capturing: false, question: "", includeImage: true, refused: null },
+  screen: { capture: null, capturing: false, includeImage: true, refused: null },
   tab: "home",
   settingsSection: "general",
   listening: false,
@@ -221,6 +231,10 @@ let state: AppState = {
   watching: false,
   version: "",
   update: { current: "", latest: null, available: false, notes: "", published: null, message: "" },
+  updating: null,
+  signingIn: [],
+  draft: "",
+  draftFiles: [],
 };
 
 const listeners = new Set<() => void>();
@@ -229,7 +243,8 @@ function set(patch: Partial<AppState>) {
   state = { ...state, ...patch };
   listeners.forEach((l) => l());
   reportContext();
-  if (patch.sessions || patch.chat) saveHistory();
+  // Sample sessions must never replace the saved ones.
+  if ((patch.sessions || patch.chat) && !state.preview) saveHistory();
 }
 
 // ── History ─────────────────────────────────────────────────────────────────
@@ -261,20 +276,29 @@ function saveHistory() {
   }, 1000);
 }
 
+function forgetHistory() {
+  try {
+    localStorage.removeItem(HISTORY_KEY);
+  } catch {
+    // Storage is unavailable, so there is nothing to forget.
+  }
+}
+
 function restoreHistory() {
   try {
     const saved = JSON.parse(localStorage.getItem(HISTORY_KEY) ?? "{}");
     const sessions: SessionDetail[] = (saved.sessions ?? []).map((s: SessionDetail) => ({ ...s, restored: true }));
     set({ sessions, chat: { ...state.chat, messages: saved.messages ?? [] } });
   } catch {
-    localStorage.removeItem(HISTORY_KEY);
+    forgetHistory();
   }
 }
 
 export function clearHistory() {
   clearTimeout(saveTimer);
-  localStorage.removeItem(HISTORY_KEY);
-  set({ sessions: state.sessions.filter((s) => !s.restored && !ENDED.includes(s.status)), chat: { ...state.chat, messages: [], usage: null } });
+  forgetHistory();
+  clearChat();
+  set({ sessions: state.sessions.filter((s) => !s.restored && !ENDED.includes(s.status)) });
 }
 
 /** Tells the core what the user is in the middle of, for interruption decisions. */
@@ -307,19 +331,39 @@ const newId = () => crypto.randomUUID();
 // ── Panel ───────────────────────────────────────────────────────────────────
 
 export function openPanel(tab?: Tab) {
+  showPreview(null);
   if (!state.panelOpen && state.settings.sounds) chime("open");
-  set({ panelOpen: true, tab: tab ?? state.tab, notices: [], mediaOpen: false });
+  // A reminder that needs an answer is still waiting when the panel closes.
+  set({ panelOpen: true, tab: tab ?? state.tab, notices: state.notices.filter((n) => n.sticky), mediaOpen: false });
   void bridge.setInteractive(true);
   void refreshLocal();
 }
 
 export function closePanel() {
+  showPreview(null);
   if (state.panelOpen && state.settings.sounds) chime("close");
   set({ panelOpen: false });
   void bridge.setInteractive(false);
 }
 
 export const togglePanel = () => (state.panelOpen ? closePanel() : openPanel());
+
+let blurClosedAt = 0;
+
+export function closeOnBlur() {
+  if (!state.panelOpen || bridge.dialogOpen()) return;
+  blurClosedAt = Date.now();
+  closePanel();
+}
+
+/** The shortcut and the tray. The tray's click has already closed the panel if it was open. */
+export function toggleFromCore() {
+  if (Date.now() - blurClosedAt >= TOGGLE_AFTER_BLUR_MS) togglePanel();
+}
+
+export const setDraft = (draft: string) => set({ draft });
+export const addDraftFile = (file: string) => set({ draftFiles: [...state.draftFiles, file] });
+export const clearDraft = () => set({ draft: "", draftFiles: [] });
 export const setTab = (tab: Tab) => set({ tab });
 export const setSettingsSection = (settingsSection: SettingsSection) => set({ settingsSection });
 export const openSettings = (settingsSection: SettingsSection) => set({ tab: "settings", settingsSection });
@@ -342,7 +386,10 @@ export function reportView(islandView: IslandView) {
   if (islandView !== state.islandView) set({ islandView });
 }
 
-export const setListening = (listening: boolean) => set({ listening, preview: null });
+export function setListening(listening: boolean) {
+  set({ listening });
+  showPreview(null);
+}
 
 // ── Notices and errors ──────────────────────────────────────────────────────
 
@@ -444,9 +491,14 @@ export async function sendChat(text: string, images: string[] = [], spoken = fal
     pushError({ title: "No AI provider ready", body: "Add a key or start a local server in Settings, AI models." });
     return;
   }
+  // A new question replaces one still being answered, as talking over a reply does.
+  cancelChat();
+  // Set before anything waits, because a spoken turn takes a quiet chat to mean the reply is over.
+  set({ chatPending: true });
   if (state.chat.providerId !== provider.id || !state.chat.model) await selectProvider(provider.id, state.chat.model);
   const model = state.chat.model;
   if (!model) {
+    set({ chatPending: false });
     pushError({ title: "No model available", body: `${provider.name} offered no model to use.` });
     return;
   }
@@ -472,9 +524,14 @@ export async function sendChat(text: string, images: string[] = [], spoken = fal
     },
   });
 
-  const finish = () => set({ chatPending: false, chat: { ...state.chat, requestId: null } });
+  // Only the current request touches the chat. Anything else has been replaced or cleared.
+  const current = () => state.chat.requestId === requestId;
+  const finish = () => {
+    if (current()) set({ chatPending: false, chat: { ...state.chat, requestId: null } });
+  };
   try {
     await bridge.streamChat(requestId, provider.id, model, [...system, ...history], (event) => {
+      if (!current()) return;
       if (event.type === "delta") patchLastMessage((t) => t + event.text);
       else if (event.type === "usage")
         set({ chat: { ...state.chat, usage: { input: event.input, output: event.output } } });
@@ -495,7 +552,7 @@ function retryLast() {
   if (messages[messages.length - 1]?.role === "assistant") messages.pop();
   const user = messages.pop();
   set({ chat: { ...state.chat, messages } });
-  if (user) void sendChat(user.content);
+  if (user) void sendChat(user.content, user.images);
 }
 
 export function cancelChat() {
@@ -503,7 +560,10 @@ export function cancelChat() {
   if (id) void bridge.cancelChat(id);
 }
 
-export const clearChat = () => set({ chat: { ...state.chat, messages: [], usage: null } });
+export function clearChat() {
+  cancelChat();
+  set({ chatPending: false, chat: { ...state.chat, requestId: null, messages: [], usage: null } });
+}
 
 // ── Engines ─────────────────────────────────────────────────────────────────
 
@@ -537,10 +597,12 @@ export async function sendAgentChat(said: string, images: string[] = [], spoken 
   const text = spoken ? said + SPOKEN : said;
   const earlier = state.sessions.find((s) => s.id === sessionId);
   // History saved before ids were kept cannot be resumed, so that chat starts afresh.
-  if (sessionId && !(earlier?.restored && !earlier.nativeId)) return sendToSession(sessionId, text, images);
+  if (earlier && !(earlier.restored && !earlier.nativeId)) return sendToSession(earlier.id, text, images);
   const dir = mode === "project" ? (cwd ?? state.settings.agentDefaultDir) : await bridge.assistantDir();
   if (!dir) {
     pushError({ title: "Choose a project folder", body: "Project mode needs a folder to work in." });
+    // What was said waits in the message box while a folder is chosen.
+    set({ draft: said });
     return;
   }
   const id = await startSession({ agent, cwd: dir, prompt: text, model: null, restricted: mode === "general", images }, "chat", mode);
@@ -568,8 +630,14 @@ function appendLog(s: SessionDetail, kind: LogEntry["kind"], text: string): LogE
 // failure can arrive first. They wait here until the session exists.
 const earlyEvents = new Map<string, AgentEnvelope[]>();
 
+function hold(envelope: AgentEnvelope) {
+  earlyEvents.set(envelope.sessionId, [...(earlyEvents.get(envelope.sessionId) ?? []), envelope]);
+}
+
 export function applyAgentEvent(envelope: AgentEnvelope) {
   const { sessionId, event } = envelope;
+  // Sample sessions are on show. The real ones catch up when they come back.
+  if (state.preview) return hold(envelope);
   if (event.type === "watched") {
     addWatchedSession(sessionId, event.agent, event.cwd, event.title);
     return;
@@ -580,10 +648,7 @@ export function applyAgentEvent(envelope: AgentEnvelope) {
     addWatchedSession(sessionId, "Claude Code", "", null);
   }
   const session = state.sessions.find((s) => s.id === sessionId);
-  if (!session) {
-    earlyEvents.set(sessionId, [...(earlyEvents.get(sessionId) ?? []), envelope]);
-    return;
-  }
+  if (!session) return hold(envelope);
   switch (event.type) {
     case "started":
       patchSession(sessionId, (s) => ({ ...s, model: event.model, nativeId: event.nativeId ?? s.nativeId }));
@@ -736,7 +801,8 @@ export function answerApproval(sessionId: string, approvalId: string, allow: boo
 
 export async function sendToSession(id: string, text: string, images: string[] = []) {
   const session = state.sessions.find((s) => s.id === id);
-  patchSession(id, (s) => ({ ...s, log: appendLog(s, "user", text.replace(SPOKEN, "")) }));
+  // Running from this moment, or a spoken follow-up reads the last turn's end as this one's.
+  patchSession(id, (s) => ({ ...s, status: ENDED.includes(s.status) ? "running" : s.status, log: appendLog(s, "user", text.replace(SPOKEN, "")) }));
   try {
     // A conversation from before a restart exists only here until the app is told about it.
     if (session?.restored && session.nativeId) {
@@ -746,6 +812,7 @@ export async function sendToSession(id: string, text: string, images: string[] =
     }
     await bridge.sendToSession(id, text, images);
   } catch (err) {
+    patchSession(id, (s) => ({ ...s, status: session?.status ?? s.status }));
     pushError({ title: "Message not delivered", body: describe(err) });
   }
 }
@@ -924,15 +991,30 @@ export async function fetchIntegration(integration: Integration, tool: string | 
   }
 }
 
-/** One click: the service's own page opens in the browser, and this returns once signed in. */
-export async function connectIntegration(integration: Integration) {
-  if (integration.access === "account") {
-    await connectAccount(integration.id === "outlook" ? "microsoft" : "google", null);
-  } else {
-    await bridge.integrationConnect(integration.id);
+/** The browser takes focus, which closes the panel, so a sign-in is followed here and a failure
+ *  shows on the island. A second click while one is under way does nothing. */
+async function signingIn(id: string, name: string, work: () => Promise<unknown>) {
+  if (state.signingIn.includes(id)) return;
+  set({ signingIn: [...state.signingIn, id] });
+  try {
+    await work();
+  } catch (err) {
+    pushError({ title: `Could not sign in to ${name}`, body: describe(err) });
+  } finally {
+    set({ signingIn: state.signingIn.filter((x) => x !== id) });
   }
-  await refreshIntegrations();
 }
+
+/** One click: the service's own page opens in the browser, and this returns once signed in. */
+export const connectIntegration = (integration: Integration) =>
+  signingIn(integration.id, integration.name, async () => {
+    if (integration.access === "account") {
+      await connectAccount(integration.id === "outlook" ? "microsoft" : "google", null);
+    } else {
+      await bridge.integrationConnect(integration.id);
+    }
+    await refreshIntegrations();
+  });
 
 export async function disconnectIntegration(integration: Integration) {
   if (integration.access === "account") {
@@ -962,19 +1044,21 @@ export function describeWhen(value: string) {
 // ── Claude Code sessions in other terminals ─────────────────────────────────
 
 /** A CLI signs in through its own window, so this waits to see it succeed. */
-export async function signInAgent(agent: AgentId) {
-  await bridge.agentLogin(agent);
-  for (let i = 0; i < SIGN_IN_POLLS; i++) {
-    await new Promise((r) => setTimeout(r, SIGN_IN_POLL_MS));
-    if ((await refreshAuth(agent))?.signedIn) return true;
-  }
-  return false;
-}
+export const signInAgent = (agent: AgentId, name: string) =>
+  signingIn(agent, name, async () => {
+    await bridge.agentLogin(agent);
+    for (let i = 0; i < SIGN_IN_POLLS; i++) {
+      await new Promise((r) => setTimeout(r, SIGN_IN_POLL_MS));
+      if ((await refreshAuth(agent))?.signedIn) return;
+    }
+    throw new Error("Sign-in did not finish. Try again when you are ready.");
+  });
 
-export async function signInProvider(id: string) {
-  await bridge.aiSignIn(id);
-  await refreshProviders();
-}
+export const signInProvider = (id: string, name: string) =>
+  signingIn(id, name, async () => {
+    await bridge.aiSignIn(id);
+    await refreshProviders();
+  });
 
 export async function setWatching(on: boolean) {
   await bridge.watchSet(on);
@@ -1041,7 +1125,7 @@ function onLevel(level: Level) {
 }
 
 function onMedia(snapshot: MediaSnapshot) {
-  const before = state.media;
+  const before = beforePreview?.media ?? state.media;
   const art = snapshot.current?.artwork ?? null;
   if (art !== before.current?.artwork) {
     if (art) tintOf(art, (artTint) => set({ artTint }));
@@ -1051,7 +1135,10 @@ function onMedia(snapshot: MediaSnapshot) {
   const recent = changed
     ? [before.current!, ...before.recent.filter((t) => t.title !== before.current!.title)].slice(0, RECENT_TRACKS)
     : before.recent;
-  set({ media: { ...snapshot, reportedAt: Date.now(), recent } });
+  const media = { ...snapshot, reportedAt: Date.now(), recent };
+  // Sample music may be on show, so the real track waits with the rest.
+  if (beforePreview) beforePreview = { ...beforePreview, media };
+  else set({ media });
 }
 
 export const mediaAction = (action: MediaAction) => void bridge.mediaAction(action);
@@ -1060,7 +1147,6 @@ export const mediaAction = (action: MediaAction) => void bridge.mediaAction(acti
 
 const setScreen = (patch: Partial<ScreenState>) => set({ screen: { ...state.screen, ...patch } });
 
-export const setScreenQuestion = (question: string) => setScreen({ question });
 export const setIncludeImage = (includeImage: boolean) => setScreen({ includeImage });
 
 export async function captureScreen(target: "window" | "screen") {
@@ -1082,7 +1168,7 @@ export async function cropCapture(x: number, y: number, w: number, h: number) {
 }
 
 export function discardCapture() {
-  setScreen({ capture: null, question: "", refused: null });
+  setScreen({ capture: null, refused: null });
   void bridge.screenDiscard();
 }
 
@@ -1133,10 +1219,10 @@ export function ignoreSuggestion(suggestion: Suggestion) {
   if (suggestion.key) void bridge.screenIgnore(suggestion.key);
 }
 
-/** A suggestion never sends anything. It opens the preview, ready to approve. */
+/** A suggestion never sends anything. It opens the preview with the question written, ready to approve. */
 export function assist(suggestion: Suggestion, question: string) {
   dismissSuggestion(suggestion.id);
-  setScreen({ question });
+  set({ draft: question });
   openPanel("chat");
   void captureScreen("window");
 }
@@ -1195,10 +1281,35 @@ const clear: Partial<AppState> = {
   level: null,
   levelBefore: null,
   voice: null,
+  media: { current: null, sessions: [], reportedAt: 0, recent: [] },
 };
 
 export async function checkForUpdates() {
-  set({ update: await bridge.checkUpdate() });
+  if (state.updating) return;
+  if (state.settings.localOnly) {
+    set({ update: { ...state.update, available: false, message: "Update checks are off in local-only mode." } });
+    return;
+  }
+  set({ updating: "checking" });
+  try {
+    set({ update: await bridge.checkUpdate() });
+  } catch {
+    set({ update: { ...state.update, available: false, message: "Could not check for updates." } });
+  } finally {
+    set({ updating: null });
+  }
+}
+
+/** Succeeding ends the app, so only a failure comes back here. */
+export async function installUpdate() {
+  if (state.updating) return;
+  set({ updating: "installing" });
+  try {
+    await bridge.installUpdate();
+  } catch (err) {
+    set({ updating: null });
+    pushError({ title: "Could not update", body: describe(err), retry: () => void installUpdate() });
+  }
 }
 
 export const PREVIEWS: Preview[] = [
@@ -1266,28 +1377,40 @@ export const PREVIEWS: Preview[] = [
 
 /** The real state, held aside while sample data is on show. */
 let beforePreview: Partial<AppState> | null = null;
+let previewTimer: ReturnType<typeof setTimeout> | undefined;
 
 export function showPreview(name: string | null) {
+  clearTimeout(previewTimer);
   const preview = PREVIEWS.find((p) => p.name === name);
   if (preview) {
     beforePreview ??= {
-      panelOpen: state.panelOpen,
+      // Reopening the panel afterwards would take focus from whatever is in use by then.
+      panelOpen: false,
       listening: state.listening,
-      chatPending: state.chatPending,
       sessions: state.sessions,
       notices: state.notices,
       suggestions: state.suggestions,
       errors: state.errors,
       media: state.media,
       live: state.live,
-      level: state.level,
-      levelBefore: state.levelBefore,
+      // A level lasts a moment, and its timer can run out while sample data shows.
+      level: null,
+      levelBefore: null,
       voice: state.voice,
     };
-    set({ ...preview.apply(), preview: preview.name });
-  } else {
-    set({ ...beforePreview, preview: null });
+    const sample = preview.apply();
+    if (state.panelOpen && !sample.panelOpen) void bridge.setInteractive(false);
+    set({ ...sample, preview: preview.name });
+    previewTimer = setTimeout(() => showPreview(null), PREVIEW_MS);
+  } else if (beforePreview) {
+    if (state.panelOpen) void bridge.setInteractive(false);
+    // A reply can finish while sample data shows, and nothing would then clear the flag.
+    set({ ...beforePreview, chatPending: state.chat.requestId !== null, preview: null });
     beforePreview = null;
+    const held = [...earlyEvents.values()].flat();
+    earlyEvents.clear();
+    held.forEach(applyAgentEvent);
+    refreshLive();
   }
 }
 
@@ -1301,7 +1424,7 @@ export async function boot() {
   void refreshLocal();
   void refreshActivity();
   void bridge.monitors().then((monitors) => set({ monitors }));
-  if (!settings.onboarded) set({ notices: [{ id: "welcome", tone: "info", title: "Welcome to Meridian", body: "Click here to set up", sticky: true }] });
+  if (!settings.onboarded) set({ notices: [{ id: "welcome", tone: "info", title: "Welcome to Meridian", body: "Click here to set up" }] });
   else if (native) {
     set({ greeting: true });
     setTimeout(() => set({ greeting: false }), GREETING_MS);
@@ -1311,12 +1434,7 @@ export async function boot() {
   void bridge.builtInClients().then((builtInClients) => set({ builtInClients }));
   void bridge.watchStatus().then((watching) => set({ watching }));
   void bridge.appVersion().then((version) => set({ version }));
-  if (settings.localOnly) set({ update: { ...state.update, available: false, message: "Update checks are off in local-only mode." } });
-  else
-    void bridge.checkUpdate().then(
-      (update) => set({ update }),
-      () => set({ update: { ...state.update, available: false, message: "Could not check for updates." } }),
-    );
+  void checkForUpdates();
   setInterval(fetchInBackground, FETCH_EVERY_MS);
   for (const a of agents) if (a.installed) void refreshAuth(a.id);
   await Promise.all([
@@ -1327,10 +1445,8 @@ export async function boot() {
       island?.style.setProperty("--gx", `${(x * 4).toFixed(1)}px`);
       island?.style.setProperty("--gy", `${(y * 3).toFixed(1)}px`);
     }),
-    bridge.onTogglePanel(togglePanel),
-    bridge.onBlur(() => {
-      if (state.panelOpen && !bridge.dialogOpen()) closePanel();
-    }),
+    bridge.onTogglePanel(toggleFromCore),
+    bridge.onBlur(closeOnBlur),
     bridge.onOpenTab((tab) => openPanel(tab as Tab)),
     bridge.onMedia(onMedia),
     bridge.onLevel(onLevel),
