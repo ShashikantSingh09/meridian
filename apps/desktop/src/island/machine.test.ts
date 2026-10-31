@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deriveView, geometryFor, MULTITASK_MAX_ROWS, type SessionSummary, type Snapshot } from "./machine";
+import { deriveView, geometryFor, MULTITASK_MAX_ROWS, TODO_MAX_ROWS, type SessionSummary, type Snapshot } from "./machine";
 
 const base: Snapshot = {
   panelOpen: false,
@@ -120,6 +120,35 @@ describe("geometryFor", () => {
 
   it("makes room for an approval", () => {
     expect(geometryFor("working", { ...ctx, approval: true }).h).toBeGreaterThan(geometryFor("working", ctx).h);
+  });
+
+  it("opens the pill to the stages, or to the agent's own list when it keeps one", () => {
+    const pill = geometryFor("working", ctx);
+    const stages = geometryFor("working", { ...ctx, hovered: true });
+    expect(stages.h).toBeGreaterThan(pill.h);
+    const list = geometryFor("working", { ...ctx, hovered: true, todos: 5 });
+    expect(list.h).toBeGreaterThan(pill.h);
+    expect(geometryFor("working", { ...ctx, hovered: true, todos: 40 }).h).toBe(geometryFor("working", { ...ctx, hovered: true, todos: TODO_MAX_ROWS }).h);
+  });
+
+  it("keeps whoever else is at work on show under a request, without shrinking the request", () => {
+    const alone = geometryFor("working", { ...ctx, approval: true, rows: 1 });
+    const beside = geometryFor("working", { ...ctx, approval: true, rows: 3 });
+    expect(beside.h).toBeGreaterThan(alone.h);
+    expect(geometryFor("working", { ...ctx, approval: true, rows: 30 }).h).toBe(geometryFor("working", { ...ctx, approval: true, rows: MULTITASK_MAX_ROWS }).h);
+    expect(geometryFor("working", { ...ctx, approval: true }).h).toBe(alone.h);
+  });
+
+  it("makes a finished card only as tall as what it has to say", () => {
+    const plain = geometryFor("notification", ctx);
+    const brief = geometryFor("notification", { ...ctx, finished: "brief" });
+    const message = geometryFor("notification", { ...ctx, finished: "message" });
+    expect(brief.h).toBeGreaterThan(plain.h);
+    expect(message.h).toBeGreaterThan(brief.h);
+  });
+
+  it("gives an agent that stopped room to say why", () => {
+    expect(geometryFor("error", { ...ctx, stopped: true }).h).toBeGreaterThan(geometryFor("error", ctx).h);
   });
 
   it("caps multitask rows", () => {

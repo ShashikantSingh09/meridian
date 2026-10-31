@@ -1,7 +1,7 @@
 // What the island shows, as a pure function of app state. No DOM, no timers,
 // so every priority rule below is covered by machine.test.ts.
 
-import type { Approval, SessionStatus } from "../lib/types";
+import type { Approval, SessionStatus, Todo } from "../lib/types";
 import type { LiveActivity } from "./live";
 
 export type IslandView =
@@ -26,6 +26,8 @@ export interface SessionSummary {
   activity: string;
   startedAt: number;
   approval: Approval | null;
+  /** The agent's own to-do list, when it keeps one. In memory only. */
+  todos?: Todo[];
 }
 
 export interface NoticeAction {
@@ -44,6 +46,8 @@ export interface Notice {
   actions?: NoticeAction[];
   /** Stays on the island until answered. */
   sticky?: boolean;
+  /** A session has ended, so the island shows what it did. */
+  finished?: boolean;
 }
 
 export interface Suggestion {
@@ -59,6 +63,8 @@ export interface IslandError {
   title: string;
   body: string;
   retry?: () => void;
+  /** An agent stopped, so the island says where and can open it. */
+  sessionId?: string;
 }
 
 export interface Snapshot {
@@ -124,14 +130,14 @@ export interface Geometry {
 /** The radius is for the two bottom corners only: the top is the screen's edge. */
 export const EXPANDED: Geometry = { w: 820, h: 600, r: 32 };
 
-/** Each page is only as big as it needs, so moving between them is a morph too. */
+/** One size for every page, as on the boards, so moving between tabs never resizes the window. */
 const PANELS: Record<string, Geometry> = {
-  home: { w: 780, h: 560, r: 32 },
-  chat: { w: 680, h: 560, r: 32 },
+  home: { w: 820, h: 600, r: 32 },
+  chat: { w: 820, h: 600, r: 32 },
   agents: { w: 820, h: 600, r: 32 },
-  media: { w: 640, h: 310, r: 32 },
-  day: { w: 720, h: 580, r: 32 },
-  inbox: { w: 640, h: 500, r: 32 },
+  media: { w: 820, h: 600, r: 32 },
+  day: { w: 820, h: 600, r: 32 },
+  inbox: { w: 820, h: 600, r: 32 },
   settings: EXPANDED,
 };
 
@@ -142,11 +148,11 @@ const SIZES: Record<IslandView, Geometry> = {
   idle: { w: 104, h: 34, r: 15 },
   listening: { w: 340, ...BAR },
   thinking: { w: 270, ...BAR },
-  working: { w: 372, ...BAR },
+  working: { w: 324, h: 52, r: 22 },
   notification: { w: 392, h: 62, r: 22 },
   expanded: EXPANDED,
   contextual: { w: 420, h: 112, r: 24 },
-  multitask: { w: 392, h: 0, r: 22 },
+  multitask: { w: 344, h: 0, r: 22 },
   screen: { w: 264, ...BAR },
   media: { w: 340, ...BAR },
   live: { w: 300, ...BAR },
@@ -159,7 +165,7 @@ const IDLE_HOVER: Geometry = { w: 380, h: 118, r: 26 };
 const GREETING: Geometry = { w: 224, h: 40, r: 17 };
 const LIVE_OPEN: Geometry = { w: 408, h: 148, r: 28 };
 const LIVE_OPEN_SHORT: Geometry = { w: 408, h: 122, r: 28 };
-const MEDIA_OPEN: Geometry = { w: 388, h: 160, r: 28 };
+const MEDIA_OPEN: Geometry = { w: 388, h: 172, r: 28 };
 const BATTERY: Geometry = { w: 340, ...BAR };
 const BATTERY_OPEN: Geometry = { w: 408, h: 104, r: 28 };
 const APPROVAL: Geometry = { w: 430, h: 132, r: 26 };
@@ -170,10 +176,20 @@ const QUESTION_ROW = 40;
 const MULTITASK_ROW = 34;
 const MULTITASK_PAD = 18;
 export const MULTITASK_MAX_ROWS = 4;
+/** A session carrying on while another one asks, under the question. */
+const OTHER_ROW = 38;
+const STAGES: Geometry = { w: 344, h: 208, r: 22 };
+/** The heading of the to-do card, plus this much per line. */
+const TODO_BASE = 46;
+const TODO_ROW = 23;
+export const TODO_MAX_ROWS = 6;
+const FINISHED: Geometry = { w: 344, h: 196, r: 22 };
+/** Nothing to quote, so only the heading, the facts and the buttons. */
+const FINISHED_BRIEF: Geometry = { w: 344, h: 126, r: 22 };
+const STOPPED: Geometry = { w: 344, h: 164, r: 22 };
 
 const IDLE_CLOCK: Geometry = { w: 148, h: 34, r: 15 };
 const SLIVER: Geometry = { w: 96, h: 6, r: 3 };
-const WORKING_HOVER: Geometry = { w: 420, h: 132, r: 24 };
 const REMINDER: Geometry = { w: 420, h: 112, r: 24 };
 
 export interface GeometryContext {
@@ -199,6 +215,12 @@ export interface GeometryContext {
   greeting?: boolean;
   /** The live activity has a route or steps, which need a row of their own. */
   liveRich?: boolean;
+  /** Lines in the agent's own to-do list. */
+  todos?: number;
+  /** A session's end is on show, and whether there is a message to quote. */
+  finished?: "message" | "brief";
+  /** What is on show is an agent that stopped. */
+  stopped?: boolean;
 }
 
 export function geometryFor(view: IslandView, ctx: GeometryContext): Geometry {
@@ -207,13 +229,18 @@ export function geometryFor(view: IslandView, ctx: GeometryContext): Geometry {
   if (view === "idle" && ctx.hovered) return IDLE_HOVER;
   if (view === "idle" && ctx.sliver) return SLIVER;
   if (view === "idle" && ctx.clock) return IDLE_CLOCK;
-  if (view === "working" && ctx.asking?.plan) return PLAN;
+  // Whoever else is at work stays on show under a question, with what needs the user first.
+  const others = Math.max(0, Math.min(ctx.rows, MULTITASK_MAX_ROWS) - 1) * OTHER_ROW;
+  if (view === "working" && ctx.asking?.plan) return { ...PLAN, h: PLAN.h + others };
   if (view === "working" && ctx.asking?.questions?.length) {
     const most = Math.max(...ctx.asking.questions.map((q) => Math.min(q.options.length, 4)));
-    return { ...APPROVAL, h: QUESTION_BASE + most * QUESTION_ROW };
+    return { ...APPROVAL, h: QUESTION_BASE + most * QUESTION_ROW + others };
   }
-  if (view === "working" && ctx.approval) return APPROVAL;
-  if (view === "working" && ctx.hovered) return WORKING_HOVER;
+  if (view === "working" && ctx.approval) return { ...APPROVAL, h: APPROVAL.h + others };
+  if (view === "working" && ctx.hovered && ctx.todos) return { w: 324, h: TODO_BASE + Math.min(ctx.todos, TODO_MAX_ROWS) * TODO_ROW, r: 22 };
+  if (view === "working" && ctx.hovered) return STAGES;
+  if (view === "notification" && ctx.finished) return ctx.finished === "message" ? FINISHED : FINISHED_BRIEF;
+  if (view === "error" && ctx.stopped) return STOPPED;
   if (view === "media" && ctx.mediaOpen) return MEDIA_OPEN;
   if (view === "voice" && ctx.voiceLong) return { ...SIZES.voice, h: 118 };
   if (view === "level" && ctx.battery) return ctx.hovered ? BATTERY_OPEN : BATTERY;

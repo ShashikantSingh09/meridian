@@ -7,6 +7,7 @@ import { contentEnter, contentEnterReduced, instant, scaled, spring } from "@mer
 import { AnimatePresence, animate, motion, useMotionValue, useTransform } from "motion/react";
 import { useEffect, useMemo, useRef } from "react";
 import { bridge } from "../lib/bridge";
+import { lastMessage } from "../lib/sessions";
 import { reportView, togglePanel, useApp } from "../lib/store";
 import { Panel } from "../panel/Panel";
 import { useReduced } from "./faces";
@@ -28,6 +29,7 @@ import {
   VoiceView,
   WorkingView,
 } from "./views";
+import "./stages.css";
 
 /** What the shape grows out of when the app starts: a dot at the screen's edge. */
 const BIRTH = { w: 18, h: 4 };
@@ -64,7 +66,7 @@ function CompactContent({ view, reduced, hovered, sliver, mediaOpen }: { view: I
     case "working":
       return <WorkingView reduced={reduced} hovered={hovered} />;
     case "multitask":
-      return <MultitaskView reduced={reduced} />;
+      return <MultitaskView />;
     case "notification":
       return <NotificationView reduced={reduced} />;
     case "contextual":
@@ -101,14 +103,25 @@ export function Island() {
   const wakeOn = useApp((s) => s.wake.state === "listening");
   const battery = useApp((s) => s.level?.kind === "battery");
   const voiceLong = useApp((s) => ((s.voice?.words.length ?? 0) + (s.voice?.ahead.length ?? 0)) > VOICE_LINE);
+  const stagesOpen = useApp((s) => s.stagesOpen);
+  const finished = useApp((s) => {
+    const notice = s.notices[0];
+    const session = notice?.finished ? s.sessions.find((x) => x.id === notice.sessionId) : undefined;
+    return session ? (lastMessage(session) ? "message" : "brief") : undefined;
+  });
   const view = deriveView(snapshot);
   const waiting = waitingApproval(snapshot.sessions);
+  const active = activeSessions(snapshot.sessions);
+  const opened = hovered || (view === "working" && stagesOpen);
 
   useEffect(() => reportView(view), [view]);
 
   const target = geometryFor(view, {
-    hovered,
-    rows: activeSessions(snapshot.sessions).length,
+    hovered: opened,
+    rows: active.length,
+    todos: active[0]?.todos?.length,
+    finished,
+    stopped: snapshot.sessions.some((s) => s.id === snapshot.errors[0]?.sessionId),
     approval: waiting !== null,
     asking: waiting?.approval,
     clock,
@@ -164,7 +177,7 @@ export function Island() {
   const glow = view === "media" ? artTint ?? "#ff7a9c" : `var(${stateToken(view, snapshot)})`;
   // A waiting request looks the same either way, and swapping it would lose the answers so far.
   const opensOnHover = view === "idle" || view === "live" || (view === "working" && waiting === null);
-  const contentKey = expanded ? "panel" : view + (hovered && opensOnHover ? "-hover" : "") + (view === "media" && mediaOpen ? "-open" : "");
+  const contentKey = expanded ? "panel" : view + (opened && opensOnHover ? "-hover" : "") + (view === "media" && mediaOpen ? "-open" : "");
 
   return (
     <motion.div
@@ -191,7 +204,7 @@ export function Island() {
         <span className="island-tint" aria-hidden="true" />
         <AnimatePresence initial={false}>
           <motion.div key={contentKey} className="island-content" style={{ width: target.w, height: target.h }} initial={enter.initial} animate={enter.animate} exit={enter.exit}>
-            {expanded ? <Panel /> : <CompactContent view={view} reduced={reduced} hovered={hovered} sliver={sliver} mediaOpen={mediaOpen} />}
+            {expanded ? <Panel /> : <CompactContent view={view} reduced={reduced} hovered={opened} sliver={sliver} mediaOpen={mediaOpen} />}
           </motion.div>
         </AnimatePresence>
         {wakeOn && <span className="wake-dot" role="img" aria-label="Listening for a wake word" title="Listening for a wake word" />}

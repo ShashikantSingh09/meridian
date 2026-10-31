@@ -4,6 +4,7 @@
 import type { Approval, Level } from "../lib/types";
 import { useEffect, useMemo, useState, useLayoutEffect, useRef } from "react";
 import { Markdown } from "../panel/Markdown";
+import { StepRow } from "../panel/LogLine";
 import { Icon } from "../lib/icons";
 import {
   answerApproval,
@@ -17,15 +18,19 @@ import {
   ignoreSuggestion,
   openLink,
   openPanel,
+  openSession,
+  openStages,
   setListening,
   setMediaOpen,
   snoozeReminder,
   useApp,
+  type SessionDetail,
 } from "../lib/store";
+import { actionOf, asking, changedFiles, clock, endFacts, lastMessage, needsFirst, planSteps, spent, stageLine, stagesOf, stepsOf, thisTurn, todoStep, todoWindow, turnStart } from "../lib/sessions";
 import { Face, type Mood } from "./faces";
 import type { LineSegment } from "./line";
 import { focusActivity } from "./live";
-import { activeSessions, MULTITASK_MAX_ROWS, waitingApproval } from "./machine";
+import { activeSessions, MULTITASK_MAX_ROWS, TODO_MAX_ROWS, waitingApproval } from "./machine";
 import { AgentMark, Bars, Sparks, Transport } from "./marks";
 import { MeridianLine } from "./MeridianLine";
 import { Progress } from "./Progress";
@@ -57,8 +62,7 @@ function Elapsed({ since }: { since: number }) {
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, []);
-  const seconds = Math.max(0, Math.floor((now - since) / 1000));
-  return <span className="tabular">{`${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`}</span>;
+  return <span className="tabular">{clock(now - since)}</span>;
 }
 
 const iconButton = (label: string, icon: Parameters<typeof Icon>[0]["name"], onClick: () => void, disabled = false) => (
@@ -176,13 +180,15 @@ export function ThinkingView({ reduced }: { reduced: boolean }) {
   );
 }
 
-/** Claude Code has asked something. Each question gets its own step, then they all go back together. */
-function QuestionCard({ sessionId, approval }: { sessionId: string; approval: Approval }) {
+/** Claude Code has asked something. Each question gets its own step, then they all go back together.
+ *  On the island a tap answers. The panel has room to choose first, then confirm. */
+function QuestionCard({ sessionId, approval, panel }: { sessionId: string; approval: Approval; panel?: boolean }) {
   const questions = approval.questions!;
   const [answers, setAnswers] = useState<Record<string, string | string[]>>({});
   const [picked, setPicked] = useState<string[]>([]);
   const step = questions.length === 1 ? 0 : Object.keys(answers).length;
   const question = questions[Math.min(step, questions.length - 1)]!;
+  const choosing = panel || question.multi;
 
   const finish = (pick: string | string[]) => {
     const next = { ...answers, [question.text]: pick };
@@ -190,30 +196,39 @@ function QuestionCard({ sessionId, approval }: { sessionId: string; approval: Ap
     if (Object.keys(next).length === questions.length) answerApproval(sessionId, approval.id, true, next);
     else setAnswers(next);
   };
-  const toggle = (option: string) => setPicked((p) => (p.includes(option) ? p.filter((o) => o !== option) : [...p, option]));
+  const toggle = (option: string) =>
+    setPicked((p) => (!question.multi ? [option] : p.includes(option) ? p.filter((o) => o !== option) : [...p, option]));
 
   return (
     <>
+      {panel && <span className="approval-kicker">A question{questions.length > 1 ? `, ${step + 1} of ${questions.length}` : ""}</span>}
       <p className="question-text" title={question.text}>{question.text}</p>
       <div className="question-options" role="group" aria-label={question.text}>
-        {question.options.slice(0, 4).map((option) => (
-          <button key={option} className="question-option" aria-pressed={question.multi ? picked.includes(option) : undefined} onClick={() => (question.multi ? toggle(option) : finish(option))}>
+        {question.options.slice(0, 4).map((option, i) => (
+          <button key={option} className="question-option" aria-pressed={choosing ? picked.includes(option) : undefined} onClick={() => (choosing ? toggle(option) : finish(option))}>
             <span className="truncate">{option}</span>
+            {panel && question.details?.[i] && <span className="meta truncate">{question.details[i]}</span>}
           </button>
         ))}
       </div>
       <div className="row end">
-        {questions.length > 1 && <span className="meta grow tabular">{step + 1} of {questions.length}</span>}
+        {!panel && questions.length > 1 && <span className="meta grow tabular">{step + 1} of {questions.length}</span>}
         <button className="ghost" onClick={() => answerApproval(sessionId, approval.id, false)}>Skip</button>
-        {question.multi && <button className="allow" disabled={picked.length === 0} onClick={() => finish(picked)}>Done</button>}
+        {choosing && (
+          <button className="allow" disabled={picked.length === 0} onClick={() => finish(question.multi ? picked : picked[0]!)}>
+            {panel && step + 1 < questions.length ? "Next" : "Done"}
+          </button>
+        )}
       </div>
     </>
   );
 }
 
-function PlanCard({ sessionId, approval }: { sessionId: string; approval: Approval }) {
+function PlanCard({ sessionId, approval, panel }: { sessionId: string; approval: Approval; panel?: boolean }) {
+  const steps = planSteps(approval.plan!);
   return (
     <>
+      {panel && <span className="label">Plan ready to read{steps > 0 && <span className="meta"> {steps} {steps === 1 ? "step" : "steps"}</span>}</span>}
       <div className="plan-text"><Markdown text={approval.plan!} /></div>
       <div className="row end">
         <button className="ghost" onClick={() => answerApproval(sessionId, approval.id, false)}>Keep planning</button>
@@ -223,18 +238,81 @@ function PlanCard({ sessionId, approval }: { sessionId: string; approval: Approv
   );
 }
 
-/** What is being asked and how to answer it, the same on the island and in the panel. */
-export function ApprovalCard({ sessionId, approval }: { sessionId: string; approval: Approval }) {
-  if (approval.questions?.length) return <QuestionCard key={approval.id} sessionId={sessionId} approval={approval} />;
-  if (approval.plan) return <PlanCard sessionId={sessionId} approval={approval} />;
+/** What is being asked and how to answer it, on the island and in the panel. Every answer here is
+ *  one click on one request. There is deliberately no way to allow something ahead of time. */
+export function ApprovalCard({ sessionId, approval, panel }: { sessionId: string; approval: Approval; panel?: boolean }) {
+  if (approval.questions?.length) return <QuestionCard key={approval.id} sessionId={sessionId} approval={approval} panel={panel} />;
+  if (approval.plan) return <PlanCard sessionId={sessionId} approval={approval} panel={panel} />;
   return (
     <>
+      {panel && <span className="approval-kicker">{asking(approval)}</span>}
       <code className="command" title={approval.summary}>{approval.summary}</code>
       <div className="row end">
         <button className="ghost" onClick={() => answerApproval(sessionId, approval.id, false)}>Deny</button>
-        <button className="allow" onClick={() => answerApproval(sessionId, approval.id, true)}>Allow</button>
+        <button className="allow" onClick={() => answerApproval(sessionId, approval.id, true)}>Allow once</button>
       </div>
     </>
+  );
+}
+
+/** One session among others: its project, and the stage it is at. */
+function SessionLine({ session }: { session: SessionDetail }) {
+  const { text, kind } = stageLine(session);
+  return (
+    <button className="stage-row" data-kind={kind} onClick={() => openSession(session.id)}>
+      <AgentMark agent={session.agent} size={18} live={false} />
+      <span className="label grow">{session.project}</span>
+      <span className="stage-now truncate">{text}</span>
+    </button>
+  );
+}
+
+/** What is open while the pointer is on the island: the list the agent keeps, or else every stage so far. */
+function StageCard({ session }: { session: SessionDetail }) {
+  const todos = session.todos ?? [];
+  const head = (right: React.ReactNode) => (
+    <div className="row stage-head">
+      <AgentMark agent={session.agent} size={18} live={false} />
+      <button className="grow text-button" onClick={() => openSession(session.id)}>
+        <span className="label">{session.project}</span>
+        <span className="meta truncate">{session.title}</span>
+      </button>
+      {right}
+      {!session.watched && iconButton("Stop task", "stop", () => cancelSession(session.id))}
+    </div>
+  );
+  if (todos.length > 0) {
+    return (
+      <div className="stage-card">
+        {head(<span className="stage-count tabular">{todoStep(todos)}</span>)}
+        <ul className="todo-list">
+          {todoWindow(todos, TODO_MAX_ROWS).map((todo) => (
+            <li key={todo.id} className="todo-line" data-status={todo.status}>
+              <i aria-hidden="true" />
+              <span className="truncate">{todo.text}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
+  }
+  const start = turnStart(session);
+  return (
+    <div className="stage-card">
+      {head(<span className="meta"><Elapsed since={start} /></span>)}
+      <div className="stage-bars">
+        {stagesOf(session).map((stage) => (
+          <div key={stage.name} className="stage-bar" data-state={stage.state}>
+            <i />
+            <span className="stage-name">{stage.name}</span>
+            <span className="stage-note truncate">{stage.note}</span>
+          </div>
+        ))}
+      </div>
+      <div className="stage-steps">
+        {stepsOf(thisTurn(session)).slice(-4).map((step, i) => <StepRow key={i} step={step} start={start} />)}
+      </div>
+    </div>
   );
 }
 
@@ -246,7 +324,8 @@ export function WorkingView({ reduced, hovered }: { reduced: boolean; hovered: b
 
   if (blocked?.approval) {
     const { approval } = blocked;
-    const asks = approval.questions?.length ? "asks" : approval.plan ? "has a plan" : `wants to run ${approval.tool}`;
+    const asks = approval.questions?.length ? "asks" : approval.plan ? "has a plan" : approval.tool === "Action" ? "needs your OK" : `wants to run ${approval.tool}`;
+    const others = activeSessions(sessions).filter((s) => s.id !== blocked.id).slice(0, MULTITASK_MAX_ROWS - 1);
     return (
       <div className="stack pad-card">
         <div className="row">
@@ -255,65 +334,85 @@ export function WorkingView({ reduced, hovered }: { reduced: boolean; hovered: b
           <span className="meta">{blocked.project}</span>
         </div>
         <ApprovalCard sessionId={blocked.id} approval={approval} />
+        {others.map((s) => <SessionLine key={s.id} session={s} />)}
       </div>
     );
   }
 
-  const open = () => openPanel(session.surface === "chat" ? "chat" : "agents");
+  if (hovered) return <StageCard session={session} />;
 
-  if (hovered) {
-    const recent = session.log.filter((l) => l.kind === "activity" || l.kind === "text").slice(-3);
-    return (
-      <div className="stack pad-card">
-        <div className="row">
-          <AgentMark agent={session.agent} />
-          <button className="grow text-button" onClick={open}>
-            <span className="label">{session.agent}</span>
-            <span className="meta truncate">{session.title}</span>
-          </button>
-          <span className="meta"><Elapsed since={session.startedAt} /></span>
-          {!session.watched && iconButton("Stop task", "stop", () => cancelSession(session.id))}
-        </div>
-        <div className="peek">
-          {recent.length === 0 && <p className="meta">{session.activity || "Starting"}</p>}
-          {recent.map((entry, i) => (
-            <p key={i} className={entry.kind === "activity" ? "peek-tool truncate" : "meta truncate"}>
-              {entry.text.split("\n").pop()}
-            </p>
-          ))}
-        </div>
-      </div>
-    );
-  }
-
+  const { word, what } = session.status === "starting" ? { word: "Starting", what: "" } : actionOf(session.activity);
+  const todos = session.todos ?? [];
+  const steps = stepsOf(thisTurn(session)).length;
   return (
-    <div className="row pad-pill">
-      <AgentMark agent={session.agent} size={20} />
-      <button className="grow text-button stacked" onClick={open}>
-        <span className="label">{session.agent}</span>
-        <span className="doing truncate">{session.activity || session.project}</span>
+    <div className="row pad-pill stage-pill">
+      <AgentMark agent={session.agent} size={20} live={false} />
+      {/* The space keeps the two lines apart for a screen reader, and for anything that copies them. */}
+      <button className="grow text-button stacked" onClick={openStages}>
+        <span className="label truncate">{word}</span>{" "}
+        <span className="doing truncate">{what || session.project}</span>
       </button>
+      <span className="stage-clock">
+        {todos.length > 0 ? <span>{todoStep(todos)}</span> : steps > 0 && <span>Step {steps}</span>}
+        <Elapsed since={turnStart(session)} />
+      </span>
       <Mine mood="working" scale={0.5} reduced={reduced} />
-      <span className="meta"><Elapsed since={session.startedAt} /></span>
-      {!session.watched && iconButton("Stop task", "stop", () => cancelSession(session.id))}
     </div>
   );
 }
 
-export function MultitaskView({ reduced }: { reduced: boolean }) {
+export function MultitaskView() {
   const sessions = useApp((s) => s.sessions);
-  const active = useMemo(() => activeSessions(sessions), [sessions]);
-  const shown = active.slice(0, MULTITASK_MAX_ROWS);
+  const shown = useMemo(() => needsFirst(activeSessions(sessions)).slice(0, MULTITASK_MAX_ROWS), [sessions]);
   return (
     <div className="stack pad-rows">
-      {shown.map((s) => (
-        <button key={s.id} className="session-row" onClick={() => openPanel(s.surface === "chat" ? "chat" : "agents")}>
-          <AgentMark agent={s.agent} size={15} live={!reduced && s.status !== "waiting"} />
-          <span className="label">{s.agent}</span>
-          <span className="meta truncate grow">{s.activity || s.project}</span>
-          <span className="meta"><Elapsed since={s.startedAt} /></span>
+      {shown.map((s) => <SessionLine key={s.id} session={s} />)}
+    </div>
+  );
+}
+
+/** How a session came out, in its own words, for a moment before it moves to Notifications. */
+function FinishedCard({ noticeId, title, session, reduced }: { noticeId: string; title: string; session: SessionDetail; reduced: boolean }) {
+  const message = lastMessage(session);
+  const facts = endFacts(session);
+  const changed = changedFiles(session.log).length > 0;
+  return (
+    <div className="stack pad-card stage-end" data-tone="done">
+      <div className="row">
+        <span className="notice-face">
+          <Mine mood="done" scale={0.56} reduced={reduced} />
+          {!reduced && <Sparks />}
+        </span>
+        <span className="grow label truncate">{title}</span>
+        <span className="meta tabular">{spent((session.endedAt ?? Date.now()) - turnStart(session))}</span>
+      </div>
+      {message && <p className="stage-message">{message}</p>}
+      {facts && <p className="meta truncate">{facts}</p>}
+      <div className="row end stage-actions">
+        <button className="stage-button" onClick={() => dismissNotice(noticeId)}>Dismiss</button>
+        <button className="stage-button" data-main="true" onClick={() => { dismissNotice(noticeId); openSession(session.id, changed ? "changes" : "activity"); }}>
+          {changed ? "See what changed" : "Open"}
         </button>
-      ))}
+      </div>
+    </div>
+  );
+}
+
+/** What went wrong, in the agent's words. It stays until someone has seen it, which can be hours,
+ *  so its face holds still: anything moving would redraw the whole window for all of that time. */
+function StoppedCard({ errorId, body, session }: { errorId: string; body: string; session: SessionDetail }) {
+  return (
+    <div className="stack pad-card stage-end" data-tone="bad">
+      <div className="row">
+        <Mine mood="error" scale={0.56} reduced />
+        <span className="grow label truncate">{session.project} stopped</span>
+        <span className="meta tabular">{spent((session.endedAt ?? Date.now()) - turnStart(session))}</span>
+      </div>
+      <p className="stage-message">{body}</p>
+      <div className="row end stage-actions">
+        <button className="stage-button" onClick={() => dismissError(errorId)}>Dismiss</button>
+        <button className="stage-button" data-main="true" onClick={() => { dismissError(errorId); openSession(session.id); }}>Open</button>
+      </div>
     </div>
   );
 }
@@ -333,6 +432,8 @@ export function NotificationView({ reduced }: { reduced: boolean }) {
   const sessions = useApp((s) => s.sessions);
   if (!notice) return null;
   const mood: Mood = notice.tone === "success" ? "done" : notice.tone === "urgent" ? "needs" : "rest";
+  const ended = notice.finished && sessions.find((s) => s.id === notice.sessionId);
+  if (ended) return <FinishedCard noticeId={notice.id} title={notice.title} session={ended} reduced={reduced} />;
 
   if (notice.eventId) {
     return (
@@ -455,7 +556,7 @@ export function MediaView({ open }: { open: boolean }) {
         <Bars playing={track.playing} height={22} />
       </div>
       <Progress />
-      <Transport track={track} />
+      <div className="transport-room"><Transport track={track} /></div>
     </div>
   );
 }
@@ -676,7 +777,9 @@ export function Bubble() {
 
 export function ErrorView({ reduced }: { reduced: boolean }) {
   const error = useApp((s) => s.errors[0]);
+  const stopped = useApp((s) => s.sessions.find((session) => session.id === s.errors[0]?.sessionId));
   if (!error) return null;
+  if (stopped) return <StoppedCard errorId={error.id} body={error.body} session={stopped} />;
   return (
     <div className="row pad-pill">
       <Mine mood="error" scale={0.56} reduced={reduced} />
