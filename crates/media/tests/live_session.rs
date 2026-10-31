@@ -14,6 +14,8 @@ use windows::Media::{MediaPlaybackStatus, MediaPlaybackType, SystemMediaTranspor
 use windows::Storage::Streams::{DataWriter, InMemoryRandomAccessStream, RandomAccessStreamReference};
 
 const TITLE: &str = "Meridian Test Track";
+/// The session tests publish the same track from one process, so they take turns.
+static ONE_SESSION: Mutex<()> = Mutex::new(());
 
 fn find(state: &Mutex<Snapshot>) -> Option<Track> {
     state.lock().unwrap().sessions.iter().find(|t| t.title == TITLE).cloned()
@@ -30,6 +32,7 @@ fn wait_for(mut check: impl FnMut() -> bool, what: &str) {
 #[test]
 #[ignore = "publishes a system media session"]
 fn sees_a_session_and_controls_it() {
+    let _turn = ONE_SESSION.lock().unwrap_or_else(|e| e.into_inner());
     let player = MediaPlayer::new().unwrap();
     player.CommandManager().unwrap().SetIsEnabled(false).unwrap();
     let controls = player.SystemMediaTransportControls().unwrap();
@@ -69,8 +72,9 @@ fn sees_a_session_and_controls_it() {
     let before = *sends.lock().unwrap();
     controller.perform(Action::Refresh);
     wait_for(|| *sends.lock().unwrap() > before, "a refresh to send the state again");
+    // Windows can publish the title before the artist, so a later update has to bring it.
+    wait_for(|| find(&state).is_some_and(|t| t.artist == "Test Artist"), "the artist to be seen");
     let track = find(&state).unwrap();
-    assert_eq!(track.artist, "Test Artist");
     assert!(track.playing);
     assert!(track.can_next);
     assert!(!track.can_previous, "previous was never enabled");
@@ -131,6 +135,7 @@ fn hears_an_app_making_sound() {
 #[test]
 #[ignore = "publishes a system media session"]
 fn reads_album_art() {
+    let _turn = ONE_SESSION.lock().unwrap_or_else(|e| e.into_inner());
     // A 1 by 1 red PNG.
     const PNG: [u8; 69] = [
         0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0x0d, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 1, 0, 0, 0, 1, 8, 2, 0, 0, 0,

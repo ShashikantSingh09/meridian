@@ -42,6 +42,8 @@ const until = async (expr, ms, label) => {
   console.log("TIMEOUT", label, await ev("JSON.stringify(__meridian.getState().sessions.map(s=>({s:s.status,a:s.activity,log:s.log.slice(-3)})))"));
   return null;
 };
+// Followed sessions join the list ahead of ours, so always look a session up by its id.
+const session = (sid) => `__meridian.getState().sessions.find((s) => s.id === ${JSON.stringify(sid)})`;
 const view = () => ev("document.querySelector('.island').dataset.view");
 const pass = (name, ok, extra = "") => console.log(ok ? "PASS" : "FAIL", name, extra);
 
@@ -82,17 +84,17 @@ if (mode === "claude" || mode === "deny") {
   const req = JSON.stringify({ agent: "claude-code", cwd: work, model: "claude-haiku-5-5", prompt: "Use the Bash tool to run exactly: echo hello > out.txt  Then reply with the single word done." });
   const sid = await ev(`__meridian.startSession(${req})`);
   pass("session started", !!sid, sid);
-  await until(`__meridian.getState().sessions[0]?.status === 'running'`, 30000, "running");
+  await until(`${session(sid)}?.status === 'running'`, 30000, "running");
   { const v = await view(); const st = await ev("JSON.stringify({n:__meridian.getState().notices.length,e:__meridian.getState().errors.map(x=>x.title),p:__meridian.getState().panelOpen,l:__meridian.getState().listening,sessions:__meridian.getState().sessions.map(x=>x.status)})"); pass("island shows working", ["working", "multitask"].includes(v), `${v} ${st}`); }
-  const hasApproval = await until(`__meridian.getState().sessions[0]?.approval?.id`, 60000, "approval");
+  const hasApproval = await until(`${session(sid)}?.approval?.id`, 60000, "approval");
   pass("permission request reached the island", !!hasApproval);
-  const summary = await ev(`__meridian.getState().sessions[0].approval.summary`);
+  const summary = await ev(`${session(sid)}.approval.summary`);
   pass("approval names the real command", summary.includes("out.txt"), summary);
   await sleep(500);
   pass("file not written before approval", !fs.existsSync(path.join(work, "out.txt")));
   await ev(`__meridian.answerApproval('${sid}', '${hasApproval}', ${mode === "claude"}); 'ok'`);
-  await until(`['completed','failed','cancelled'].includes(__meridian.getState().sessions[0]?.status)`, 60000, "finish");
-  const s = JSON.parse(await ev(`JSON.stringify(__meridian.getState().sessions[0])`));
+  await until(`['completed','failed','cancelled'].includes(${session(sid)}?.status)`, 60000, "finish");
+  const s = JSON.parse(await ev(`JSON.stringify(${session(sid)})`));
   pass("session finished", s.status === "completed", s.status);
   if (mode === "claude") {
     pass("approved command really ran", fs.existsSync(path.join(work, "out.txt")));
@@ -111,10 +113,10 @@ if (mode === "cancel") {
   fs.mkdirSync(work, { recursive: true });
   const req = JSON.stringify({ agent: "claude-code", cwd: work, model: "claude-haiku-5-5", prompt: "Count slowly from 1 to 500 in words, one per line." });
   const sid = await ev(`__meridian.startSession(${req})`);
-  await until(`__meridian.getState().sessions[0]?.status === 'running'`, 30000, "running");
+  await until(`${session(sid)}?.status === 'running'`, 30000, "running");
   await ev(`window.__TAURI_INTERNALS__.invoke('session_cancel', { id: '${sid}' }).then(() => 'ok')`);
-  await until(`__meridian.getState().sessions[0]?.status === 'cancelled'`, 15000, "cancel");
-  pass("cancel stops a running agent", (await ev(`__meridian.getState().sessions[0].status`)) === "cancelled");
+  await until(`${session(sid)}?.status === 'cancelled'`, 15000, "cancel");
+  pass("cancel stops a running agent", (await ev(`${session(sid)}.status`)) === "cancelled");
 }
 
 if (mode === "resume") {
@@ -122,12 +124,12 @@ if (mode === "resume") {
   fs.mkdirSync(work, { recursive: true });
   const req = JSON.stringify({ agent: "claude-code", cwd: work, model: "claude-haiku-5-5", prompt: "Remember the word heron. Reply with just: ok" });
   const sid = await ev(`__meridian.startSession(${req})`);
-  await until(`__meridian.getState().sessions[0]?.status === 'completed'`, 60000, "first turn");
-  pass("first turn completed", (await ev(`__meridian.getState().sessions[0].status`)) === "completed");
+  await until(`${session(sid)}?.status === 'completed'`, 60000, "first turn");
+  pass("first turn completed", (await ev(`${session(sid)}.status`)) === "completed");
   await ev(`window.__TAURI_INTERNALS__.invoke('session_send', { id: '${sid}', text: 'What word did I ask you to remember? Reply with just that word.', images: [] }).then(() => 'ok')`);
-  await until(`__meridian.getState().sessions[0]?.status === 'running'`, 30000, "resumed");
-  await until(`__meridian.getState().sessions[0]?.status === 'completed'`, 60000, "second turn");
-  const text = await ev(`__meridian.getState().sessions[0].log.map(l => l.text).join(' ')`);
+  await until(`${session(sid)}?.status === 'running'`, 30000, "resumed");
+  await until(`${session(sid)}?.status === 'completed'`, 60000, "second turn");
+  const text = await ev(`${session(sid)}.log.map(l => l.text).join(' ')`);
   pass("resumed session kept its context", /heron/i.test(text.split("ok").pop()), text.slice(-60));
 }
 
@@ -274,9 +276,9 @@ if (mode === "codex") {
   const work = path.join(scratch, "session-codex");
   fs.mkdirSync(work, { recursive: true });
   const req = JSON.stringify({ agent: "codex", cwd: work, model: null, prompt: "Reply with the single word done." });
-  await ev(`__meridian.startSession(${req})`);
-  await until(`['completed','failed','cancelled'].includes(__meridian.getState().sessions[0]?.status)`, 45000, "finish");
-  const s = JSON.parse(await ev(`JSON.stringify(__meridian.getState().sessions[0])`));
+  const sid = await ev(`__meridian.startSession(${req})`);
+  await until(`['completed','failed','cancelled'].includes(${session(sid)}?.status)`, 45000, "finish");
+  const s = JSON.parse(await ev(`JSON.stringify(${session(sid)})`));
   console.log("codex outcome:", s.status, "|", s.activity || s.log.at(-1)?.text);
   pass("expired sign-in surfaces as a clear failure", s.status === "failed" && /sign in/i.test(JSON.stringify(s.log) + s.activity), "");
   pass("failure reaches the island", (await view()) === "error");

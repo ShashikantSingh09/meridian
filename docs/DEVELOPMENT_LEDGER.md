@@ -1,4 +1,34 @@
-﻿# Development ledger
+# Development ledger
+
+## 2026-10-31: End-to-end pass on v0.4.1
+
+Run through the real app, with real Claude Code sessions, on the reference machine with a 180 Hz display.
+
+### Proved
+
+| Area | Result |
+|---|---|
+| Update | 0.4.0 to 0.4.1 through the app's own Update now button. It came back on its own with no errors, and packs survived |
+| Approvals | Waits for an answer, Deny blocks the command, Allow runs it. The run's transcript shows the decision comes from the app's hook |
+| Sessions | Cancel, resume with context, images, follow-up on a live process, stop mid-turn |
+| Screen | A rule naming a window on top refuses a whole-screen capture, and capture works again without the rule |
+| Media | Silent live tests pass 10 runs in 10 in parallel |
+| Interface | 28 island states, 7 tabs, 10 Settings pages, no exceptions or layout faults |
+
+### Found
+
+- **Idle cost was 6.26% of one core, against a target of 0.5%.** A sleeping face drew a z for 2.4 s every 5 to 8 s, and each one redraws the
+  whole 860 by 660 window at 180 Hz. It now makes six and stops. GPU time asleep went from 4.05% to 0.00%, and the total to 1.26% on a dev
+  build. The release figure is not measured yet.
+- **What is new showed install instructions.** Releases now list commit subjects above a `---` line, and the Updates page stops at that line.
+- **Harness bugs, not app bugs.** `tests/live/e2e.mjs` read `sessions[0]`, which is a followed session once one starts, so it now looks up by id.
+  Two media tests published the same track from one process and collided, so they take turns.
+- **The one 404 is the browser asking for `/favicon.ico`.** Harmless. The IPC warning came only from reloading the page by hand, which the app never does.
+
+### Corrected along the way
+
+A test approval was allowed with no answer from the harness, which looked like a bypass. Recording real pointer events showed the owner had
+clicked Allow on the island while the test ran. Allow's only other route is a spoken yes.
 
 ## 2026-10-31: Bug review, v0.4.1
 

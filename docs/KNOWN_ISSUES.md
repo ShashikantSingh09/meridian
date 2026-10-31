@@ -171,6 +171,7 @@ What stands between this build and a stranger installing it. Only the owner can 
 - A whole-screen capture is refused while an excluded window is anywhere on that display, even behind other windows, and the error names the app. A window with `login` in its title is refused too, which includes a file called `login.rs`.
 - Local-only mode also stops mail and calendar sync, and update checks.
 - Previews of island states end after 8 seconds, or when the panel opens or closes, and they always leave the panel closed.
+- Any animation redraws the whole 860 by 660 window at the display's refresh rate. On a 180 Hz display the working state costs about 39% of one core, and the drowsy face about 16% for its 75 seconds. Stepping the working animations to 60 a second halved that in a test, but it drops their easing, so it needs a design decision. A smaller window while collapsed is the real fix.
 - Finished events and the reminder log are removed after 90 days.
 - Cloud hearing runs at the end of a turn, so words do not appear while talking. Only local hearing shows them live.
 - What is new on the Updates page is the release's notes, which still open with the install instructions from `release.yml`.
