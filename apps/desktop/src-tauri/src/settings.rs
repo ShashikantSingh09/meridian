@@ -44,6 +44,12 @@ pub struct Settings {
     pub onboarded: bool,
     /// Which face lives on the island. The interface falls back if it does not know it.
     pub face: String,
+    /// Which voice speaks: "windows", a cloud service, or a downloaded voice.
+    pub voice_provider: String,
+    pub voice_id: Option<String>,
+    /// "local", or the cloud service that hears.
+    pub voice_hearing: String,
+    pub voice_interrupt: bool,
 }
 
 impl Default for Settings {
@@ -75,6 +81,10 @@ impl Default for Settings {
             sounds: true,
             onboarded: false,
             face: "soft".into(),
+            voice_provider: "windows".into(),
+            voice_id: None,
+            voice_hearing: "local".into(),
+            voice_interrupt: true,
         }
     }
 }

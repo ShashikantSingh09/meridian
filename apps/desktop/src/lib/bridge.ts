@@ -28,6 +28,8 @@ import type {
   ScreenSuggestion,
   Settings,
   SettingsChange,
+  Level,
+  VoiceInfo,
 } from "./types";
 
 export const native = isTauri();
@@ -41,8 +43,17 @@ export interface IslandRect {
   h: number;
 }
 
+export interface VoiceStatus {
+  packs: { id: string; name: string; bytes: number; installed: boolean }[];
+  keys: string[];
+}
+
 export interface UpdateStatus {
+  current: string;
+  latest: string | null;
   available: boolean;
+  notes: string;
+  published: string | null;
   message: string;
 }
 
@@ -139,11 +150,11 @@ export const bridge = {
   watchSet: (on: boolean) => (native ? invoke<void>("watch_set", { on }) : mock.watchSet(on)),
 
   appVersion: () => (native ? invoke<string>("app_version") : Promise.resolve("0.0.0")),
-  checkUpdate: () =>
+  checkUpdate: (): Promise<UpdateStatus> =>
     native
       ? invoke<UpdateStatus>("update_check")
-      : Promise.resolve<UpdateStatus>({ available: false, message: "Updates are checked in the installed app." }),
-  installUpdate: () => (native ? invoke<void>("update_install") : Promise.resolve()),
+      : mock.checkUpdate(),
+  installUpdate: () => (native ? invoke<void>("update_install") : mock.installUpdate()),
   openLogs: () => (native ? invoke<void>("open_logs") : Promise.resolve()),
 
   screenCapture: (target: "window" | "screen") =>
@@ -220,6 +231,39 @@ export const bridge = {
   onActivityChanged(handler: () => void) {
     if (!native) return Promise.resolve(() => {});
     return listen("activity-changed", handler).then((un) => un);
+  },
+  voiceStatus: (): Promise<VoiceStatus> => (native ? invoke<VoiceStatus>("voice_status") : mock.voiceStatus()),
+  voiceList: (provider: string): Promise<VoiceInfo[]> => (native ? invoke<VoiceInfo[]>("voice_list", { provider }) : mock.voiceList(provider)),
+  voiceKeySet: (provider: string, key: string) => (native ? invoke<void>("voice_key_set", { provider, key }) : mock.voiceKeySet(provider)),
+  voiceKeyClear: (provider: string) => (native ? invoke<void>("voice_key_clear", { provider }) : mock.voiceKeyClear(provider)),
+  voiceDownload(id: string, onBytes: (bytes: number) => void) {
+    if (!native) return mock.voiceDownload(id, onBytes);
+    const on = new Channel<number>();
+    on.onmessage = onBytes;
+    return invoke<void>("voice_download", { id, on });
+  },
+  voiceRemove: (id: string) => (native ? invoke<void>("voice_remove", { id }) : mock.voiceRemove(id)),
+  /** The first thing `onAudio` gets is the sample rate. After that, 16-bit audio. */
+  voiceSpeak(text: string, provider: string | undefined, voiceId: string | undefined, onAudio: (data: ArrayBuffer) => void) {
+    if (!native) return mock.voiceSpeak(text);
+    return new Promise<void>((resolve, reject) => {
+      const on = new Channel<ArrayBuffer>();
+      // Finishes on the empty last message, not the call, so all the audio has arrived.
+      on.onmessage = (data) => (data.byteLength ? onAudio(data) : resolve());
+      invoke<void>("voice_speak", { text, provider: provider ?? null, voiceId: voiceId ?? null, on }).catch(reject);
+    });
+  },
+  voiceStop: () => (native ? invoke<void>("voice_stop") : Promise.resolve()),
+  voiceHearStart: () => (native ? invoke<void>("voice_hear_start") : Promise.resolve()),
+  voiceHear: (pcm: Uint8Array) => (native ? invoke<string>("voice_hear", pcm) : mock.voiceHeard()),
+  voiceHearEnd: () => (native ? invoke<string>("voice_hear_end") : mock.voiceHeard()),
+  onVoiceKey(handler: (down: boolean) => void) {
+    if (!native) return Promise.resolve(() => {});
+    return listen<boolean>("voice-key", (e) => handler(e.payload)).then((un) => un);
+  },
+  onLevel(handler: (level: Level) => void) {
+    if (!native) return mock.onLevel(handler);
+    return listen<Level>("level-change", (e) => handler(e.payload)).then((un) => un);
   },
   onMedia(handler: (s: MediaSnapshot) => void) {
     if (!native) return mock.onMedia(handler);

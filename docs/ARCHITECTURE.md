@@ -60,13 +60,16 @@ flowchart TB
 | `crates/ai-core` | Providers | reqwest |
 | `crates/agent-adapters` | Agent sessions | tokio |
 | `crates/screen` | Capture, OCR, signals, exclusions. No network code | Win32, WinRT |
-| `crates/media` | Media sessions and controls, and which players can be heard | WinRT, Core Audio |
+| `crates/media` | Media sessions and controls, which players can be heard, and volume, brightness and battery | WinRT, Core Audio, WMI |
+| `crates/voice` | Speaking and hearing: cloud services, the Windows voice, and the downloaded local engine | reqwest, WinRT, libloading |
 | `crates/activity` | Event model, extraction, store, notifications, connectors | SQLite, reqwest |
 | `crates/mcp` | MCP client, sign-in discovery, service catalog, tool choice, turning results into rows | reqwest, `activity` for OAuth |
 | `src-tauri/watch.rs` | The contextual screen loop | `screen` |
 | `src-tauri/life.rs` | Activity timers, keychain, sign-in, commands | `activity` |
 | `src-tauri/links.rs` | Providers over MCP, and OpenRouter sign-in | `mcp` |
 | `src-tauri/following.rs` | Following Claude Code from any terminal | `agent-adapters` |
+| `src-tauri/voice.rs` | Voice commands, keys and pack downloads | `voice` |
+| `src-tauri/update.rs` | Checking for and installing a release through `gh` | `gh` CLI |
 | `src-tauri/log.rs` | A redacted log of crashes | Nothing |
 
 The frontend never sees a provider or agent wire format. A provider failure comes back as a typed error, and every chat
@@ -90,8 +93,8 @@ window's.
 
 ## What the island shows
 
-`deriveView` is a pure priority list, highest first: expanded, listening, screen being read, blocked approval, error,
-notification, contextual, multitask, working, thinking, media, idle. An approval outranks everything automatic because an
+`deriveView` is a pure priority list, highest first: expanded, listening, screen being read, blocked approval, voice, error,
+notification, level, contextual, multitask, working, thinking, media, idle. An approval outranks everything automatic because an
 agent is stuck until someone answers. Reading the screen always shows. A suggestion never interrupts active work, and media
 only fills an otherwise empty island.
 

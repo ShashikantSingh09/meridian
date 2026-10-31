@@ -23,6 +23,7 @@ import type {
   Reminder,
   Settings,
   SettingsChange,
+  Level,
 } from "./types";
 import { defaultSettings } from "./types";
 
@@ -40,6 +41,13 @@ let authed = true;
 let pushReminders: (r: Reminder[]) => void = () => {};
 let accounts: ConnectedAccount[] = [];
 const known = new Set<string>();
+const voicePacks = new Set<string>();
+const voiceKeys = new Set<string>();
+let heardWords = "";
+const spokenWords: string[] = [];
+let updateStatus = { current: "0.3.0", latest: "v0.3.0", available: false, notes: "", published: null as string | null, message: "You are on the latest version." };
+let updateInstalled = false;
+let pushLevel: (level: Level) => void = () => {};
 let watching = false;
 let lastAnswers: Record<string, string | string[]> | null = null;
 let integrations: Integration[] = [
@@ -144,6 +152,11 @@ export const mock = {
     if (action.action === "next") track = { ...track, title: "Next Song" };
     pushMedia({ current: track, sessions: [track] });
   },
+  async onLevel(handler: (level: Level) => void) {
+    pushLevel = handler;
+    return () => {};
+  },
+  publishLevel: (level: Level) => pushLevel(level),
   async onMedia(handler: (s: MediaSnapshot) => void) {
     pushMedia = handler;
     return () => {};
@@ -192,6 +205,33 @@ export const mock = {
       text: null,
     };
   },
+  voiceStatus: async () => ({
+    packs: [
+      { id: "engine", name: "Speech engine", bytes: 7_900_000, installed: voicePacks.has("engine") },
+      { id: "hearing", name: "Hearing", bytes: 57_000_000, installed: voicePacks.has("hearing") },
+      { id: "kokoro", name: "Kokoro", bytes: 320_000_000, installed: voicePacks.has("kokoro") },
+      { id: "piper-amy", name: "Piper, Amy", bytes: 21_000_000, installed: voicePacks.has("piper-amy") },
+      { id: "piper-alan", name: "Piper, Alan", bytes: 21_000_000, installed: voicePacks.has("piper-alan") },
+    ],
+    keys: [...voiceKeys],
+  }),
+  voiceList: async (provider: string) => (provider === "kokoro" ? [{ id: "1", name: "Bella", note: "American" }] : [{ id: "w1", name: "Zira", note: "en-US" }]),
+  voiceKeySet: async (provider: string) => void voiceKeys.add(provider),
+  voiceKeyClear: async (provider: string) => void voiceKeys.delete(provider),
+  voiceDownload: async (id: string, onBytes: (bytes: number) => void) => {
+    onBytes(1000);
+    voicePacks.add("engine");
+    voicePacks.add(id);
+  },
+  voiceRemove: async (id: string) => void voicePacks.delete(id),
+  voiceSpeak: async (text: string) => void spokenWords.push(text),
+  voiceHeard: async () => heardWords,
+  setHeard: (words: string) => void (heardWords = words),
+  spoken: () => spokenWords,
+  checkUpdate: async () => updateStatus,
+  installUpdate: async () => void (updateInstalled = true),
+  setUpdate: (status: Partial<typeof updateStatus>) => void (updateStatus = { ...updateStatus, ...status }),
+  updateInstalled: () => updateInstalled,
   watching: () => watching,
   watchPreview: async (on: boolean): Promise<SettingsChange> => ({
     path: "C:\\Users\\you\\.claude\\settings.json",

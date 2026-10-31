@@ -18,6 +18,8 @@ mod links;
 mod log;
 mod secrets;
 mod settings;
+mod update;
+mod voice;
 mod watch;
 
 use commands::Core;
@@ -114,8 +116,14 @@ fn register_shortcuts(app: &App) {
             let _ = handle.emit_to(island::LABEL, "screen-capture-request", ());
         }
     });
+    // Held to talk, so the interface needs both the press and the release.
+    let talk = Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyV);
+    let handle = app.handle().clone();
+    let talking = app.global_shortcut().on_shortcut(talk, move |_, _, event| {
+        let _ = handle.emit_to(island::LABEL, "voice-key", event.state == ShortcutState::Pressed);
+    });
     // Another app may own a combination. The tray and the panel still work.
-    for result in [opened, captured] {
+    for result in [opened, captured, talking] {
         if let Err(err) = result {
             eprintln!("global shortcut unavailable: {err}");
         }
@@ -125,11 +133,9 @@ fn register_shortcuts(app: &App) {
 fn setup(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     let handle = app.handle().clone();
     log::on_panic(app.path().app_log_dir()?);
-    if let Some(key) = commands::UPDATE_KEY {
-        handle.plugin(tauri_plugin_updater::Builder::new().pubkey(key).build())?;
-    }
     app.manage(links::state(app)?);
     app.manage(following::state(app)?);
+    app.manage(voice::state(app)?);
     let path = settings::path(&handle).ok_or("no config directory")?;
     let settings = settings::load(&path);
     let placement = (settings.island_monitor.clone(), settings.island_align.clone());
@@ -143,6 +149,11 @@ fn setup(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     let emitter = handle.clone();
     let media = media::watch(move |snapshot| {
         let _ = emitter.emit_to(island::LABEL, "media-state", snapshot);
+    });
+
+    let emitter = handle.clone();
+    media::levels::watch(move |level| {
+        let _ = emitter.emit_to(island::LABEL, "level-change", level);
     });
 
     let gate = Arc::new(island::Gate::default());
@@ -228,9 +239,20 @@ pub fn run() {
             watch::screen_ignore,
             commands::open_project,
             commands::app_version,
-            commands::update_check,
-            commands::update_install,
+            update::update_check,
+            update::update_install,
             commands::open_logs,
+            voice::voice_status,
+            voice::voice_list,
+            voice::voice_key_set,
+            voice::voice_key_clear,
+            voice::voice_download,
+            voice::voice_remove,
+            voice::voice_speak,
+            voice::voice_stop,
+            voice::voice_hear_start,
+            voice::voice_hear,
+            voice::voice_hear_end,
             following::running_refresh,
             following::watch_preview,
             following::watch_status,

@@ -14,7 +14,6 @@ That sets the version, commits, tags and pushes. GitHub then tests the app, buil
 | `Meridian-0.2.0.msi` | Windows Installer, for managed machines |
 | `Meridian-0.2.0-portable.exe` | Runs with no install. Needs the WebView2 runtime, which Windows 11 includes |
 | `SHA256SUMS.txt` | Checksums for all of the above |
-| `latest.json` | The update feed, only once an update signing key is set |
 
 To try a build without publishing anything, open the Actions tab, choose Release, and press Run workflow. The files stay on that
 run for 7 days. Commit your work first: the script refuses to run with uncommitted changes.
@@ -30,40 +29,32 @@ Nothing, for a working unsigned build. These optional secrets, set under Setting
 
 | Secret | What it turns on |
 |---|---|
-| `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, `MERIDIAN_UPDATE_PUBKEY`, `MERIDIAN_UPDATE_URL` | Automatic updates |
 | The `MERIDIAN_CLIENT_*`, `MERIDIAN_SECRET_*` and Google and Microsoft IDs listed under Customer sign-in | Sign-in for those services |
+
+## How installed copies update
+
+Settings, Updates checks for a newer release and installs it on a click. It works while this repository is private, and only on a PC
+signed in to the GitHub CLI with access to it. Run `gh auth login` once on each PC. Nobody else can update, because nobody else can see
+the releases.
+
+The app asks GitHub for the latest release through `gh`, downloads the setup file and `SHA256SUMS.txt`, and refuses a file that does not
+match. It then quits, runs the installer silently, and starts again. A restart ends running agents, so nothing installs without the
+click. See `docs/DECISIONS.md`, D52.
+
+The checksum catches a damaged download. It proves nothing about who built the file. Updating customers needs a public host and a
+signed update, so it needs the plan in D52 first.
 
 ## One-time setup
 
-1. Generate the update signing key, once, and keep it out of the repository:
-   ```powershell
-   npx tauri signer generate -w $HOME\.meridian\update.key
-   ```
-   Back it up. Losing it means installed copies can never be updated again.
-2. Choose a public address for update metadata. A private GitHub repository will not work, because its release files need a
-   login.
-3. Get a code-signing certificate. Without one, Windows SmartScreen warns every customer.
+Get a code-signing certificate. Without one, Windows SmartScreen warns every customer.
 
 ## Building by hand
 
 1. Set the version in `apps/desktop/src-tauri/tauri.conf.json`, both `package.json` files and the workspace `Cargo.toml`.
 2. Build, from `apps/desktop`:
    ```powershell
-   $env:MERIDIAN_UPDATE_PUBKEY = "<contents of update.key.pub>"
-   $env:MERIDIAN_UPDATE_URL = "https://your-host/meridian/latest.json"
-   $env:TAURI_SIGNING_PRIVATE_KEY = Get-Content $HOME\.meridian\update.key -Raw
-   npx tauri build --config '{"bundle":{"createUpdaterArtifacts":true}}'
+   npx tauri build
    ```
-3. Publish the installer and a `latest.json` next to it:
-   ```json
-   {
-     "version": "0.2.0",
-     "notes": "What changed.",
-     "platforms": { "windows-x86_64": { "signature": "<contents of the .sig file>", "url": "https://your-host/meridian/Meridian_0.2.0_x64-setup.exe" } }
-   }
-   ```
-
-Installed copies check at start and show the update under Settings, About. It installs only on a click.
 
 ## Customer sign-in
 

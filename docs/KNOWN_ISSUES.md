@@ -80,7 +80,7 @@ What stands between this build and a stranger installing it. Only the owner can 
 | Blocker | Why it matters |
 |---|---|
 | **Code-signing certificate** | Without one, SmartScreen warns on the installer, and customers cannot tell it from a tampered copy |
-| **Public update host and a signing key** | The GitHub repository is private. Steps are in `docs/development/RELEASING.md`. Until then a build says it does not update itself |
+| **Public update host and a signing key** | Updates work only for a PC signed in to `gh` with access to this private repository. Customers need the signed path back. See `docs/DECISIONS.md`, D52 |
 | **Name and bundle ID** | Meridian is a working title with no clearance, and `dev.meridian.companion` is a placeholder. Changing the ID later orphans settings and stored tokens |
 | **Claude subscription decision** | See above |
 | **Google verification** | `gmail.readonly` is a restricted scope. A published app needs Google's verification and a security assessment, which takes weeks. Until then Gmail needs each user's own registration |
@@ -99,6 +99,10 @@ What stands between this build and a stranger installing it. Only the owner can 
 | Codex full turn | Handshake, thread start and failure path ran for real. A successful turn, streaming, approvals and usage did not, because the sign-in here has expired. | Run `codex login`, then `node tests/live/e2e.mjs codex` |
 | Cloud chat APIs | No live call was made to any cloud API. Adapters are tested against a real local socket. An OpenRouter key was added here, but it was not used, to avoid spending it. | Send a message |
 | Ollama, LM Studio, llama.cpp | Not installed here. Tested through the real app against a stand-in server. | Run a real server |
+| Local voices and hearing | Downloads, checksums and unpacking were checked by hand. The engine itself has never run, because loading the downloaded DLL here was refused by a safety check. Kokoro's speaker names are from memory | Use Download in Settings, Voice, or run `cargo test -p voice --test live_local -- --ignored` with `MERIDIAN_SPEECH_DIR` set |
+| Cloud voices and hearing | ElevenLabs, OpenAI, Cartesia and Deepgram are written from their docs and tested on pure parts only. No key was used | Add a key in Settings, Voice |
+| Talking with a real microphone | A recording stood in for the mic, through the real audio path. Interrupting a reply needs a real person and real speakers | Talk to it |
+| Brightness and battery | Only a desktop was available, so neither has fired for real. Volume was proved live | Try on a laptop |
 | Real media players | Tested with a silent session of its own. Spotify, browsers and VLC not tried, so artwork in particular is unproven. | Play something |
 | Focus return after Esc | Implemented. The check is unreliable while someone else is using the machine. | Try it |
 | Concurrent live agents | Multitask view is tested with sample data only. | Start two sessions |
@@ -135,8 +139,7 @@ What stands between this build and a stranger installing it. Only the owner can 
 
 ## Not built yet
 
-- **Voice.** The listening state shows the real microphone level. There is no speech to text, text to speech, wake word or
-  voice command.
+- **Wake by name and the Windows speech recognizer.** Left out of voice on purpose. See `docs/DECISIONS.md`, D51.
 - **Restored sessions are read-only.** Chat and finished sessions survive a restart, but a session's process does not, so it
   cannot be continued. Quitting ends every agent the app started. Agents in your own terminal carry on.
 - **Following Codex.** Claude Code only.
@@ -158,6 +161,10 @@ What stands between this build and a stranger installing it. Only the owner can 
 
 ## Behaviour to be aware of
 
+- Talking needs something to hear with. Hearing defaults to this PC, which needs a download of about 65 MB, or an ElevenLabs or Deepgram
+  key. Until one is set, the microphone button opens Settings, Voice and says why. Speaking needs neither, because the Windows voice is
+  always there.
+- Cloud hearing runs at the end of a turn, so words do not appear while talking. Only local hearing shows them live.
 - Windows reports screen brightness only for screens it controls, which means a laptop's own. A desktop monitor has no brightness to
   show, unless it is read over its cable, which is slow and not supported by every monitor.
 

@@ -4,9 +4,11 @@
 use keyring::Entry;
 
 const SERVICE: &str = "dev.meridian.companion";
+/// Voice services with a key of their own, beside the AI providers.
+const VOICE_SERVICES: [&str; 3] = ["elevenlabs", "cartesia", "deepgram"];
 
 fn entry(provider: &str) -> Result<Entry, String> {
-    if ai_core::find(provider).is_none() {
+    if ai_core::find(provider).is_none() && !VOICE_SERVICES.contains(&provider) {
         return Err(format!("Unknown provider {provider}"));
     }
     Entry::new(SERVICE, provider).map_err(|e| e.to_string())

@@ -175,6 +175,22 @@ test("the face shows how it feels by its shape, and it passes", async ({ page })
   await expect(face).toHaveAttribute("data-mood", "rest");
 });
 
+test("the volume keys and the charger show for a moment, and the face reacts", async ({ page }) => {
+  const publish = (level: unknown) =>
+    page.evaluate((l) => (window as never as { __mock: { publishLevel(l: unknown): void } }).__mock.publishLevel(l), level);
+  await publish({ kind: "volume", percent: 40, muted: false });
+  await expect(island(page)).toHaveAttribute("data-view", "level");
+  await expect(island(page)).toContainText("40");
+  await publish({ kind: "volume", percent: 55, muted: false });
+  await expect(island(page)).toContainText("55");
+  await expect(page.locator(".island .face").last()).toHaveAttribute("data-mood", "done");
+  await expect(island(page)).toHaveAttribute("data-view", "idle", { timeout: 4000 });
+
+  await publish({ kind: "battery", percent: 64, plugged: true, saver: false, secondsLeft: null, secondsToFull: 4320, watts: 65, health: 92 });
+  await expect(island(page)).toContainText("1 h 12 min until full");
+  await expect(island(page)).toContainText("64%");
+});
+
 test("media steps aside for a notification, then returns", async ({ page }) => {
   await page.evaluate(() => (window as never as { __mock: { publishMedia(p: boolean): void } }).__mock.publishMedia(true));
   await expect(island(page)).toHaveAttribute("data-view", "media");
@@ -359,6 +375,20 @@ test.describe("panel", () => {
     await page.getByLabel("Message").fill("and one more thing");
     await page.getByRole("button", { name: "Send" }).click();
     await expect(page.locator(".log")).toContainText("Follow-up received: and one more thing");
+  });
+
+  test("an update can be checked for and installed from the app", async ({ page }) => {
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await page.getByRole("button", { name: "Updates", exact: true }).click();
+    await expect(page.getByText("You are on the latest version.")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Update now" })).toHaveCount(0);
+
+    await page.evaluate(() => (window as never as { __mock: { setUpdate(s: unknown): void } }).__mock.setUpdate({ available: true, latest: "v0.9.0", notes: "- Talking to it", message: "Version 0.9.0 is ready to install." }));
+    await page.getByRole("button", { name: "Check for updates" }).click();
+    await expect(page.getByText("Version 0.9.0 is ready to install.")).toBeVisible();
+    await expect(page.locator(".update-notes li")).toHaveText("Talking to it");
+    await page.getByRole("button", { name: "Update now" }).click();
+    expect(await page.evaluate(() => (window as never as { __mock: { updateInstalled(): boolean } }).__mock.updateInstalled())).toBe(true);
   });
 
   test("how much the app may see is set in Settings", async ({ page }) => {

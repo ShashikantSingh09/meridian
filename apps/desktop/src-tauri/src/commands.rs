@@ -49,47 +49,9 @@ pub fn island_set_interactive(app: AppHandle, core: State<'_, Core>, on: bool) {
 
 // â”€â”€ About â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-/// Set when a release is built. A build without them has no update channel and
-/// says so, rather than pretending to check.
-pub const UPDATE_KEY: Option<&str> = option_env!("MERIDIAN_UPDATE_PUBKEY");
-const UPDATE_URL: Option<&str> = option_env!("MERIDIAN_UPDATE_URL");
-
-#[derive(Serialize)]
-pub struct UpdateStatus {
-    available: bool,
-    message: String,
-}
-
-fn updater(app: &AppHandle) -> Result<Option<tauri_plugin_updater::Updater>, String> {
-    use tauri_plugin_updater::UpdaterExt;
-    let (Some(_), Some(url)) = (UPDATE_KEY, UPDATE_URL) else { return Ok(None) };
-    let url = url.parse().map_err(|_| "The update address is not valid.")?;
-    app.updater_builder().endpoints(vec![url]).map_err(|e| e.to_string())?.build().map(Some).map_err(|e| e.to_string())
-}
-
 #[tauri::command]
 pub fn app_version(app: AppHandle) -> String {
     app.package_info().version.to_string()
-}
-
-#[tauri::command]
-pub async fn update_check(app: AppHandle) -> Result<UpdateStatus, String> {
-    let Some(updater) = updater(&app)? else {
-        return Ok(UpdateStatus { available: false, message: "This build does not update itself.".into() });
-    };
-    Ok(match updater.check().await.map_err(|e| e.to_string())? {
-        Some(update) => UpdateStatus { available: true, message: format!("Version {} is ready to install.", update.version) },
-        None => UpdateStatus { available: false, message: "Up to date.".into() },
-    })
-}
-
-/// Only ever from a click. Installing restarts the app, which would end a running agent.
-#[tauri::command]
-pub async fn update_install(app: AppHandle) -> Result<(), String> {
-    let update = updater(&app)?.ok_or("This build does not update itself.")?;
-    let update = update.check().await.map_err(|e| e.to_string())?.ok_or("Already up to date.")?;
-    update.download_and_install(|_, _| {}, || {}).await.map_err(|e| e.to_string())?;
-    app.restart()
 }
 
 #[tauri::command]

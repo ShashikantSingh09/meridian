@@ -16,7 +16,7 @@ export type IslandView =
   | "screen"
   | "media"
   | "live"
-  | "error";
+  | "error" | "level" | "voice";
 
 export interface SessionSummary {
   id: string;
@@ -73,6 +73,10 @@ export interface Snapshot {
   suggestions: Suggestion[];
   errors: IslandError[];
   live: LiveActivity[];
+  /** The volume, brightness or battery, just after it changed. */
+  level?: boolean;
+  /** A spoken conversation is going on. */
+  voice?: boolean;
 }
 
 const ACTIVE: ReadonlySet<SessionStatus> = new Set(["starting", "running", "waiting"]);
@@ -93,8 +97,11 @@ export function deriveView(s: Snapshot): IslandView {
   if (s.listening) return "listening";
   if (s.capturing) return "screen";
   if (waitingApproval(s.sessions)) return "working";
+  if (s.voice) return "voice";
   if (s.errors.length > 0) return "error";
   if (s.notices.length > 0) return "notification";
+  // The user has just pressed a key, so it shows at once, and only for a moment.
+  if (s.level) return "level";
   // Boarding or a meeting about to start matters more than work that can carry on.
   if (s.live[0]?.urgent) return "live";
   const active = activeSessions(s.sessions);
@@ -142,6 +149,8 @@ const SIZES: Record<IslandView, Geometry> = {
   screen: { w: 264, ...BAR },
   media: { w: 340, ...BAR },
   live: { w: 300, ...BAR },
+  level: { w: 300, ...BAR },
+  voice: { w: 440, h: 96, r: 26 },
   error: { w: 392, h: 58, r: 21 },
 };
 
@@ -150,6 +159,8 @@ const GREETING: Geometry = { w: 224, h: 40, r: 17 };
 const LIVE_OPEN: Geometry = { w: 408, h: 148, r: 28 };
 const LIVE_OPEN_SHORT: Geometry = { w: 408, h: 122, r: 28 };
 const MEDIA_OPEN: Geometry = { w: 388, h: 160, r: 28 };
+const BATTERY: Geometry = { w: 340, ...BAR };
+const BATTERY_OPEN: Geometry = { w: 408, h: 104, r: 28 };
 const APPROVAL: Geometry = { w: 430, h: 132, r: 26 };
 const PLAN: Geometry = { w: 470, h: 320, r: 28 };
 /** Room for a question, plus this much per option. */
@@ -179,6 +190,10 @@ export interface GeometryContext {
   tab?: string;
   /** The player was clicked open. */
   mediaOpen?: boolean;
+  /** The words on show need a second line. */
+  voiceLong?: boolean;
+  /** The level showing is the battery, which has more to say. */
+  battery?: boolean;
   /** Says hello once, just after the app starts. */
   greeting?: boolean;
   /** The live activity has a route or steps, which need a row of their own. */
@@ -199,6 +214,8 @@ export function geometryFor(view: IslandView, ctx: GeometryContext): Geometry {
   if (view === "working" && ctx.approval) return APPROVAL;
   if (view === "working" && ctx.hovered) return WORKING_HOVER;
   if (view === "media" && ctx.mediaOpen) return MEDIA_OPEN;
+  if (view === "voice" && ctx.voiceLong) return { ...SIZES.voice, h: 118 };
+  if (view === "level" && ctx.battery) return ctx.hovered ? BATTERY_OPEN : BATTERY;
   if (view === "live" && ctx.hovered) return ctx.liveRich ? LIVE_OPEN : LIVE_OPEN_SHORT;
   if (view === "notification" && ctx.actions) return REMINDER;
   if (view === "multitask") {
@@ -229,6 +246,8 @@ export function stateToken(view: IslandView, s: Snapshot): string {
     case "screen":
       return "--state-context";
     case "media":
+    case "level":
+    case "voice":
       return "--state-listening";
     case "live":
       return s.live[0]?.tone ?? "--state-working";

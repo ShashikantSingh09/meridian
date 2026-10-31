@@ -16,6 +16,7 @@ import {
   ContextualView,
   ErrorView,
   IdleView,
+  LevelView,
   ListeningView,
   LiveView,
   MediaView,
@@ -23,11 +24,14 @@ import {
   NotificationView,
   ScreenView,
   ThinkingView,
+  VoiceView,
   WorkingView,
 } from "./views";
 
 /** What the shape grows out of when the app starts: a dot at the screen's edge. */
 const BIRTH = { w: 18, h: 4 };
+/** About what fits on one line of the voice view. */
+const VOICE_LINE = 52;
 /** Views with a light running round the edge, because something is under way. */
 const LIT: ReadonlySet<IslandView> = new Set(["listening", "thinking", "working", "multitask", "error", "notification"]);
 
@@ -48,9 +52,11 @@ function useSnapshot(): Snapshot {
   const suggestions = useApp((s) => s.suggestions);
   const errors = useApp((s) => s.errors);
   const live = useApp((s) => s.live);
+  const level = useApp((s) => s.level !== null);
+  const voice = useApp((s) => s.voice !== null);
   return useMemo(
-    () => ({ panelOpen, listening, capturing, mediaPlaying, chatPending, sessions, notices, suggestions, errors, live }),
-    [panelOpen, listening, capturing, mediaPlaying, chatPending, sessions, notices, suggestions, errors, live],
+    () => ({ panelOpen, listening, capturing, mediaPlaying, chatPending, sessions, notices, suggestions, errors, live, level, voice }),
+    [panelOpen, listening, capturing, mediaPlaying, chatPending, sessions, notices, suggestions, errors, live, level, voice],
   );
 }
 
@@ -74,6 +80,10 @@ function CompactContent({ view, reduced, hovered, sliver, mediaOpen }: { view: I
       return <MediaView open={mediaOpen} />;
     case "live":
       return <LiveView hovered={hovered} />;
+    case "level":
+      return <LevelView hovered={hovered} reduced={reduced} />;
+    case "voice":
+      return <VoiceView reduced={reduced} />;
     case "error":
       return <ErrorView reduced={reduced} />;
     default:
@@ -93,6 +103,8 @@ export function Island() {
   const mediaOpen = useApp((s) => s.mediaOpen);
   const greeting = useApp((s) => s.greeting);
   const artTint = useApp((s) => s.artTint);
+  const battery = useApp((s) => s.level?.kind === "battery");
+  const voiceLong = useApp((s) => ((s.voice?.words.length ?? 0) + (s.voice?.ahead.length ?? 0)) > VOICE_LINE);
   const view = deriveView(snapshot);
 
   useEffect(() => reportView(view), [view]);
@@ -107,6 +119,8 @@ export function Island() {
     actions: (snapshot.notices[0]?.actions?.length ?? 0) > 0 || snapshot.notices[0]?.eventId !== undefined,
     tab,
     mediaOpen,
+    battery,
+    voiceLong,
     greeting,
     liveRich: Boolean(snapshot.live[0]?.route || snapshot.live[0]?.steps),
   });

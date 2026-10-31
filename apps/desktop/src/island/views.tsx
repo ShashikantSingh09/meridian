@@ -1,7 +1,7 @@
 // What sits inside the island for each compact state. The face leads in every one of
 // them; text only says what the face cannot.
 
-import type { Approval } from "../lib/types";
+import type { Approval, Level } from "../lib/types";
 import { useEffect, useMemo, useState, useLayoutEffect, useRef } from "react";
 import { Markdown } from "../panel/Markdown";
 import { Icon } from "../lib/icons";
@@ -29,6 +29,8 @@ import { activeSessions, MULTITASK_MAX_ROWS, waitingApproval } from "./machine";
 import { AgentMark, Bars, Sparks, Transport } from "./marks";
 import { MeridianLine } from "./MeridianLine";
 import { Progress } from "./Progress";
+import { story, type LevelStory } from "../lib/levels";
+import { endConversation, voiceLevel, type VoiceState } from "../lib/voice";
 import { useMicLevel } from "./useMicLevel";
 
 /** With nothing to do and no pointer, the face gets drowsy, then falls asleep. */
@@ -445,6 +447,134 @@ export function MediaView({ open }: { open: boolean }) {
       </div>
       <Progress />
       <Transport track={track} />
+    </div>
+  );
+}
+
+function LevelIcon({ level, story, reduced }: { level: Level; story: LevelStory; reduced: boolean }) {
+  if (level.kind === "battery") {
+    const fill = Math.max(1, (level.percent / 100) * 10);
+    return (
+      <span className="level-icon" data-zap={Boolean(story.zap) && !reduced} style={{ color: story.tone }}>
+        <svg width="21" height="21" viewBox="0 0 20 20" aria-hidden="true">
+          {story.bolt ? (
+            <path d="M11.2 2.2 4.6 11.3h4.5l-.6 6.5 6.9-9.6h-4.7z" fill="currentColor" />
+          ) : (
+            <>
+              <rect x="2.5" y="6" width="13" height="8" rx="2.4" fill="none" stroke="currentColor" strokeWidth="1.5" />
+              <rect x="4" y="7.6" width={fill} height="4.8" rx="1.2" fill="currentColor" />
+              <path d="M17 8.8v2.4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+            </>
+          )}
+        </svg>
+      </span>
+    );
+  }
+  if (level.kind === "brightness") {
+    return (
+      <span className="level-icon" style={{ color: story.tone }}>
+        <svg width="21" height="21" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" aria-hidden="true">
+          <circle cx="10" cy="10" r={2.2 + (level.percent / 100) * 1.6} fill="currentColor" />
+          <path opacity={0.35 + (level.percent / 100) * 0.65} d="M10 2.6v1.8M10 15.6v1.8M2.6 10h1.8M15.6 10h1.8M4.8 4.8l1.3 1.3M13.9 13.9l1.3 1.3M15.2 4.8l-1.3 1.3M6.1 13.9l-1.3 1.3" />
+        </svg>
+      </span>
+    );
+  }
+  return (
+    <span className="level-icon" style={{ color: story.tone }}>
+      <svg width="21" height="21" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M3.5 7.6v4.8h3l4 3.4V4.2l-4 3.4Z" fill="currentColor" />
+        {level.muted ? <path d="m13.4 7.8 4.2 4.4M17.6 7.8l-4.2 4.4" /> : level.percent > 0 && <path d="M13.4 7.4a3.6 3.6 0 0 1 0 5.2" />}
+        {!level.muted && level.percent > 50 && <path d="M15.6 5.2a6.8 6.8 0 0 1 0 9.6" />}
+      </svg>
+    </span>
+  );
+}
+
+const VOICE_WORDS = { listening: "Listening", pause: "Still with you", thinking: "Thinking", speaking: "Speaking" };
+const VOICE_MOODS: Record<VoiceState["phase"], Mood> = { listening: "needs", pause: "curious", thinking: "curious", speaking: "rest" };
+const WAVE_BARS = 26;
+
+/** Bars that follow the real sound, so it is plain the app can hear you. */
+function Wave({ tone, reduced }: { tone: string; reduced: boolean }) {
+  const box = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (reduced) return;
+    const heights = new Array<number>(WAVE_BARS).fill(0.08);
+    let frame = 0;
+    const draw = () => {
+      heights.push(Math.max(0.08, voiceLevel()));
+      heights.shift();
+      box.current?.childNodes.forEach((bar, i) => ((bar as HTMLElement).style.scale = `1 ${heights[i]}`));
+      frame = requestAnimationFrame(draw);
+    };
+    frame = requestAnimationFrame(draw);
+    return () => cancelAnimationFrame(frame);
+  }, [reduced]);
+  return (
+    <span ref={box} className="voice-wave" aria-hidden="true">
+      {Array.from({ length: WAVE_BARS }, (_, i) => <i key={i} style={{ background: tone }} />)}
+    </span>
+  );
+}
+
+export function VoiceView({ reduced }: { reduced: boolean }) {
+  const voice = useApp((s) => s.voice);
+  if (!voice) return null;
+  const hearing = voice.phase === "listening" || voice.phase === "pause";
+  return (
+    <div className="voice" data-phase={voice.phase}>
+      <div className="row voice-head">
+        <Mine mood={VOICE_MOODS[voice.phase]} scale={0.56} reduced={reduced} />
+        {voice.phase === "thinking" ? (
+          <span className="voice-dots grow" aria-hidden="true"><i /><i /><i /></span>
+        ) : (
+          <Wave tone={hearing ? "#5ac8fa" : "#fff"} reduced={reduced} />
+        )}
+        <span className="meta">{VOICE_WORDS[voice.phase]}</span>
+        {iconButton("Stop talking", "close", endConversation)}
+      </div>
+      <p className="voice-words" aria-live="polite">
+        {voice.words || (hearing ? <span className="voice-ahead">Go on, I am listening.</span> : "")}
+        <span className="voice-ahead">{voice.ahead}</span>
+        {hearing && voice.words && <i className="voice-caret" />}
+      </p>
+    </div>
+  );
+}
+
+/** The volume, brightness or battery, for a moment after it changes. */
+export function LevelView({ hovered, reduced }: { hovered: boolean; reduced: boolean }) {
+  const level = useApp((s) => s.level);
+  const before = useApp((s) => s.levelBefore);
+  if (!level) return null;
+  const told = story(level, before);
+  const open = hovered && level.kind === "battery";
+  return (
+    <div className="level" data-shake={Boolean(told.shake) && !reduced}>
+      {told.glow && <span className="level-glow" style={{ "--tone": told.tone } as React.CSSProperties} aria-hidden="true" />}
+      <div className="level-row">
+        <Mine mood={told.mood} scale={0.56} reduced={reduced} />
+        <LevelIcon level={level} story={told} reduced={reduced} />
+        {told.title ? (
+          <span className="stacked grow">
+            <span className="label truncate">{told.title}</span>
+            <span className="meta truncate">{told.detail}</span>
+          </span>
+        ) : (
+          <span className="level-track"><i style={{ width: `${told.percent}%`, background: told.tone }} /></span>
+        )}
+        <span className="level-number tabular" style={{ color: level.kind === "battery" ? told.tone : undefined }}>{told.number}</span>
+      </div>
+      {open && (
+        <div className="level-more">
+          <span className="level-track"><i style={{ width: `${told.percent}%`, background: told.tone }} /></span>
+          <div className="row">
+            <span className="meta grow">{told.left}</span>
+            <span className="meta">{told.right}</span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

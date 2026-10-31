@@ -81,10 +81,6 @@ jobs:
       - name: Use the build secrets that are set
         shell: pwsh
         env:
-          MERIDIAN_UPDATE_PUBKEY: ${{ secrets.MERIDIAN_UPDATE_PUBKEY }}
-          MERIDIAN_UPDATE_URL: ${{ secrets.MERIDIAN_UPDATE_URL }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           MERIDIAN_GOOGLE_CLIENT_ID: ${{ secrets.MERIDIAN_GOOGLE_CLIENT_ID }}
           MERIDIAN_GOOGLE_CLIENT_SECRET: ${{ secrets.MERIDIAN_GOOGLE_CLIENT_SECRET }}
           MERIDIAN_MICROSOFT_CLIENT_ID: ${{ secrets.MERIDIAN_MICROSOFT_CLIENT_ID }}
@@ -99,8 +95,7 @@ jobs:
           MERIDIAN_CLIENT_BOX: ${{ secrets.MERIDIAN_CLIENT_BOX }}
           MERIDIAN_SECRET_BOX: ${{ secrets.MERIDIAN_SECRET_BOX }}
         run: |
-          $names = 'MERIDIAN_UPDATE_PUBKEY', 'MERIDIAN_UPDATE_URL', 'TAURI_SIGNING_PRIVATE_KEY', 'TAURI_SIGNING_PRIVATE_KEY_PASSWORD',
-            'MERIDIAN_GOOGLE_CLIENT_ID', 'MERIDIAN_GOOGLE_CLIENT_SECRET', 'MERIDIAN_MICROSOFT_CLIENT_ID',
+          $names = 'MERIDIAN_GOOGLE_CLIENT_ID', 'MERIDIAN_GOOGLE_CLIENT_SECRET', 'MERIDIAN_MICROSOFT_CLIENT_ID',
             'MERIDIAN_CLIENT_GITHUB', 'MERIDIAN_SECRET_GITHUB', 'MERIDIAN_CLIENT_SLACK', 'MERIDIAN_SECRET_SLACK',
             'MERIDIAN_CLIENT_ASANA', 'MERIDIAN_SECRET_ASANA', 'MERIDIAN_CLIENT_HUBSPOT', 'MERIDIAN_SECRET_HUBSPOT',
             'MERIDIAN_CLIENT_BOX', 'MERIDIAN_SECRET_BOX'
@@ -113,12 +108,8 @@ jobs:
           }
 
       - name: Build the installers
-        shell: pwsh
         working-directory: apps/desktop
-        run: |
-          $extra = @()
-          if ($env:TAURI_SIGNING_PRIVATE_KEY) { $extra = '--config', '{\"bundle\":{\"createUpdaterArtifacts\":true}}' }
-          npx tauri build --bundles nsis,msi @extra
+        run: npx tauri build --bundles nsis,msi
 
       - name: Collect the release files
         shell: pwsh
@@ -128,12 +119,6 @@ jobs:
           Copy-Item "target/release/bundle/nsis/Meridian_${v}_x64-setup.exe" "release/Meridian-$v-setup.exe"
           Copy-Item "target/release/bundle/msi/Meridian_${v}_x64_en-US.msi" "release/Meridian-$v.msi"
           Copy-Item target/release/meridian.exe "release/Meridian-$v-portable.exe"
-          if ($env:TAURI_SIGNING_PRIVATE_KEY) {
-            $signature = (Get-Content "target/release/bundle/nsis/Meridian_${v}_x64-setup.exe.sig" -Raw).Trim()
-            $url = "https://github.com/${{ github.repository }}/releases/download/v$v/Meridian-$v-setup.exe"
-            @{ version = $v; platforms = @{ 'windows-x86_64' = @{ signature = $signature; url = $url } } } |
-              ConvertTo-Json -Depth 4 | Set-Content release/latest.json
-          }
           Get-ChildItem release -File | ForEach-Object { "$((Get-FileHash $_ -Algorithm SHA256).Hash.ToLower())  $($_.Name)" } |
             Set-Content release/SHA256SUMS.txt
           Get-ChildItem release | Format-Table Name, Length

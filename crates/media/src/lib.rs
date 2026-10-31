@@ -8,6 +8,7 @@
 //! listen for the few that publish nothing at all. See `audio`.
 
 mod audio;
+pub mod levels;
 pub use audio::audible_now;
 
 use std::collections::HashMap;

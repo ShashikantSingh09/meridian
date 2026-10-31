@@ -1,5 +1,38 @@
 # Development ledger
 
+## 2026-10-31: Voice, levels, and updating from inside the app
+
+### Completed
+
+- **Volume, brightness and charging** (D50). Approved from the board, and built as one display.
+- **Voice** (D51). Hold, tap or tap twice on Ctrl Alt V, or the microphone in Chat. Speaks through ElevenLabs, OpenAI, Cartesia, Deepgram,
+  Kokoro, Piper or the Windows voices. Hears on this PC, or through ElevenLabs or Deepgram.
+- **Updates** (D52). Settings has an Updates page that checks and installs from the private releases through `gh`. The updater plugin and
+  its signing setup are gone.
+
+### Found by testing
+
+- **The app thought it had finished talking before it started.** The call that speaks ended before any audio arrived, so the microphone
+  would have reopened over its own voice. The browser stand-in cannot show this. It took counting bytes on the real app: 0 when the call
+  ended, then 6.7 seconds of audio. An empty last message now marks the end, and a spoken line takes 6.87 s for 6.73 s of audio.
+- **A detached install script** would have opened a console window. Reading the code caught it, before any installed copy could run it.
+- Chromium's fake microphone beeps about every 500 ms, so a turn never ended. The test now uses a real recording.
+- `gh release view` with no tag says "release not found". The latest-release API works.
+
+### Not proved
+
+The local engine has never run. Loading its downloaded DLL here was refused by a safety check, so Kokoro, Piper and local hearing are
+unproven. No cloud voice has been used. See `docs/KNOWN_ISSUES.md`.
+
+### Proved on the real app
+
+| Check | Result |
+|---|---|
+| Volume key | The change callback fired on a real volume change |
+| Windows voice | 6.73 s of 16 kHz audio through the real channel, with nothing played aloud |
+| Updates | Reads the real latest release through `gh` |
+| Tests | 533 Rust, 65 unit, 61 UI |
+
 ## 2026-10-31: Chat that really continues, and eyes with feelings
 
 ### Completed

@@ -262,6 +262,8 @@ and nothing needs that yet. History is plain text on disk, like Claude Code's ow
 
 ## D33. Updates install on a click, from a channel set at build time
 
+Replaced by D52. Installing only on a click still holds.
+
 `tauri-plugin-updater` verifies an Ed25519 signature. The public key and address come from `MERIDIAN_UPDATE_PUBKEY` and
 `MERIDIAN_UPDATE_URL` at build time. A build without them says it does not update itself, rather than pretending to check.
 Nothing installs on idle, because a restart ends running agents. See `docs/development/RELEASING.md`.
@@ -408,8 +410,9 @@ and not one every frame.
 
 ## D48. Designs held for review
 
-Voice, charging, volume and brightness, and the next features from Coucou are on the design canvas, and none of them are built. A first
-volume display was started and taken out again when the owner asked to review it first.
+Voice, charging, volume and brightness, and the next features from Coucou were put on the design canvas before any were built. A first
+volume display was started and taken out again when the owner asked to review it first. The owner has since approved voice, voice setup,
+and the volume, brightness and charging display (D50, D51). The Coucou board is still waiting and stays unbuilt.
 
 ## D49. Claude Code is seen with no setup
 
@@ -422,3 +425,44 @@ So the app now watches those records, every 2 seconds. Hooks remain, because onl
 left to them. Records are checked against a live process, because one can outlive a crash, and runs started by tools are skipped, which
 includes this app's own. Key files beside the records are never opened. These are Claude Code's own files and not a promised format,
 so if they change, sessions simply stop showing, and following still works.
+
+## D50. Volume, brightness and charging are one display
+
+Built as one display because they behave as one: something changes, it shows for a moment, and it leaves. A tap of the volume key must
+not wait for a poll, so volume comes from Windows' own change callback and brightness from its WMI event. Battery has no event worth
+using, so it is read every 2 seconds. That is cheap, and only a change that means something is shown: plugging in, unplugging, and
+crossing 20, 10 or 5 percent. Everything else stays quiet, so a draining battery does not keep waking the island.
+
+The choice of what is worth showing is a pure function with tests, `worth_showing` in `crates/media/src/levels.rs`.
+
+## D51. Voice keeps a single audio format, and the choice of voice stays with the user
+
+Every voice, cloud or local, ends as raw 16-bit audio at a known rate, so playback has one path and adding a voice is one match arm. The
+default is the Windows voice, because it needs no key and no download. Hearing defaults to the local engine, because a microphone should
+not leave the PC unless the user chooses a cloud service, and Local only blocks cloud voices and hearing as it does cloud chat.
+
+The local engine and its models are not in the installer. They would add about 350 MB that many people never use. They download on
+request, from sherpa-onnx's own releases, and each must match a checksum pinned in `crates/voice/src/pack_list.rs`. Unpacking happens
+beside the final folder, so a half-finished pack never looks installed.
+
+A turn ends on meaning, not only silence. A sentence that sounds finished ends after 750 ms, and one that trails off gets 1,900 ms. Speech
+is cut off only after 200 ms of the user talking over it, so a cough does not stop a reply.
+
+Two items from the board are left out. Wake by name needs a microphone that is always open, which goes against the rule that the island
+always shows when it is listening. The Windows speech recognizer is below the quality the rest of the feature needs.
+
+The call that speaks ends before its audio arrives, because audio crosses over a separate channel. Waiting on the call made the app
+believe it had finished, and reopened the microphone over its own voice. An empty last message on the channel now means all the audio is
+in. Only a run on the real app showed this. The browser stand-in has no such gap.
+
+## D52. Updates come from the private repository through the GitHub CLI
+
+The owner chose to keep everything private. Release files in a private repository need a login, so `tauri-plugin-updater`, which fetches a
+public address, cannot reach them. D33's plugin, its signing keys and the `latest.json` feed were removed, because they could never run.
+
+Settings, Updates now uses the owner's existing `gh` sign-in, with no token stored by the app. Before installing, the setup file must
+match `SHA256SUMS.txt` from the same release. That catches a damaged download only. The real protection is that the release came over
+GitHub's TLS from a repository only the owner can write to.
+
+This cannot reach customers. For them, restore the plugin and its signature check on a public host. The removed code is in the git history
+before this decision.

@@ -24,6 +24,10 @@ const MARKS = {
   mistral: "logos:mistral-ai-icon",
   ollama: "logos:ollama",
   lmstudio: "simple-icons:lmstudio",
+  elevenlabs: "logos:elevenlabs-icon",
+  cartesia: "logos:cartesia-icon",
+  deepgram: "logos:deepgram-icon",
+  windows: "logos:microsoft-windows-icon",
   vllm: "simple-icons:vllm",
   // Providers
   gmail: "logos:google-gmail",

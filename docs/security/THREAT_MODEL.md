@@ -9,7 +9,9 @@ Scope is M3. Anything that reads more of the desktop must extend this before it 
 | API keys | Windows Credential Manager only. No command returns one to the webview. Logged nowhere. |
 | Chat text | Sent only to the provider the user picked. |
 | Prompts to agents | Sent over stdin, so they never appear in a process list. |
-| Microphone | Opens only on a click, only while the listening view is mounted. A dot shows while it is open. Levels only: audio is neither recorded nor sent. |
+| Microphone | Opens only on a click or while the voice key is used, never on its own. The island shows Listening for as long as it is open, with a stop button. Audio stays in memory and is never saved. With local hearing it stays on this PC. With a cloud service, the recorded turn is sent to that service at the end of the turn. |
+| Voice keys | Windows Credential Manager, like API keys. No command returns one to the webview. |
+| Spoken replies | With a cloud voice, the reply text goes to that service. Local only blocks every cloud voice and cloud hearing. |
 | Screen | Read only on request or in opt-in contextual mode, on this PC. Shared only from a preview the user approves. Frames are held in memory and dropped on send, discard or at once in contextual mode. |
 | Excluded windows | Password managers, private browsing and sign-in windows can never be captured, whatever the user's own list says. Refused before any pixel is read. |
 | Clipboard, keystrokes | Not read. |
@@ -61,6 +63,16 @@ scopes. The DNS-rebinding case is not covered: a public name resolving to a priv
 **Mail is untrusted.** Senders are not authenticated, so a forged message can create an event and a link. Links open only on
 a click, only for http and https, and each button shows its real host. Extraction uses no model, so mail cannot instruct
 anything.
+
+**Downloaded speech packs are code the app loads.** The local engine is a DLL from sherpa-onnx's releases, loaded into the app's own
+process. It downloads only when asked for, over TLS, and must match a SHA-256 pinned in the source, so a changed release fails instead of
+running. This trusts that the pinned build was clean, and the app does not sign or sandbox it. A same-user process could replace the
+unpacked DLL, which is outside this model. Packs are unpacked with Windows' own `tar`.
+
+**Updates run an installer.** An update is a program run with the user's rights. It comes through `gh` from a private repository, and
+must match the release's `SHA256SUMS.txt`. Both come from the same place, so the checksum proves the download is whole and not who made
+it. Anyone able to publish to the repository can therefore reach every PC that updates. This is acceptable for one owner. Customers need
+a signed update, see `docs/DECISIONS.md`, D52.
 
 ## Credentials of other tools
 

@@ -171,3 +171,20 @@ fn reads_album_art() {
     let hold = std::env::var("MERIDIAN_HOLD_SECS").ok().and_then(|s| s.parse().ok()).unwrap_or(0);
     std::thread::sleep(Duration::from_secs(hold));
 }
+
+/// Moves the volume by one step and straight back, which is too small to notice.
+#[test]
+#[ignore = "changes the system volume for a moment"]
+fn hears_the_volume_change() {
+    let heard = Arc::new(Mutex::new(Vec::new()));
+    let sink = heard.clone();
+    media::levels::watch(move |level| sink.lock().unwrap().push(level));
+    std::thread::sleep(Duration::from_millis(600));
+
+    let before = media::levels::volume_now().unwrap();
+    let nudged = if before > 0.5 { before - 0.01 } else { before + 0.01 };
+    media::levels::set_volume(nudged).unwrap();
+    wait_for(|| !heard.lock().unwrap().is_empty(), "the change to be reported");
+    media::levels::set_volume(before).unwrap();
+    assert!(matches!(heard.lock().unwrap()[0], media::levels::Level::Volume { .. }));
+}

@@ -19,13 +19,13 @@ import {
   sendChat,
   setAgentCwd,
   setAgentMode,
-  setListening,
   shareCapture,
   openSettings,
   useApp,
 } from "../lib/store";
 import type { AgentId } from "../lib/types";
 import { Face } from "../island/faces";
+import { startVoice } from "../lib/voice";
 import { LogLine } from "./LogLine";
 import { LookButton, LookChips, lookGreeting, LookPill, seenName } from "./Look";
 import { Markdown } from "./Markdown";
@@ -200,6 +200,9 @@ function AgentChat({ agent }: { agent: AgentId }) {
       )}
 
       <form className="composer" onSubmit={submit}>
+        <button type="button" className="round" aria-label="Talk" title="Talk. Or hold Ctrl Alt V anywhere." onClick={() => void startVoice("turn")}>
+          <Icon name="mic" size={14} />
+        </button>
         <LookButton />
         <button type="button" className="round" aria-label="Reference a file" title="Reference a file" onClick={() => void attach()}>
           <Icon name="plus" size={14} />
@@ -302,7 +305,7 @@ function ApiChat() {
       </div>
 
       <form className="composer" onSubmit={submit}>
-        <button type="button" className="round" aria-label="Show microphone level" title="Microphone level preview. Speech to text arrives with voice." onClick={() => setListening(true)}>
+        <button type="button" className="round" aria-label="Talk" title="Talk. Or hold Ctrl Alt V anywhere." onClick={() => void startVoice("turn")}>
           <Icon name="mic" size={14} />
         </button>
         <LookButton />

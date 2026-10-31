@@ -27,8 +27,12 @@ import {
   startSession,
   updateSettings,
 } from "./lib/store";
+import { bridge } from "./lib/bridge";
+import { endConversation, say, startVoice, wireVoice } from "./lib/voice";
 
 createRoot(document.getElementById("root")!).render(<Island />);
+
+wireVoice();
 
 void boot();
 
@@ -42,7 +46,11 @@ if (import.meta.env.DEV) Object.assign(window, {
     answerApproval,
     cancelSession,
     captureScreen,
-  feel,
+    feel,
+    bridge,
+    say,
+    startVoice,
+    endConversation,
     closePanel,
     discardCapture,
     dismissError,

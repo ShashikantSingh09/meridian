@@ -156,6 +156,10 @@ export interface Settings {
   showClock: boolean;
   animationSpeed: number;
   agentDefaultDir: string | null;
+  voiceProvider: string;
+  voiceId: string | null;
+  voiceHearing: string;
+  voiceInterrupt: boolean;
   screenMode: "off" | "ondemand" | "contextual";
   screenIntervalSecs: number;
   screenExclusions: string[];
@@ -224,6 +228,17 @@ export interface MediaSnapshot {
   current: Track | null;
   sessions: Track[];
 }
+
+export interface VoiceInfo {
+  id: string;
+  name: string;
+  note: string;
+}
+
+export type Level =
+  | { kind: "volume"; percent: number; muted: boolean }
+  | { kind: "brightness"; percent: number }
+  | { kind: "battery"; percent: number; plugged: boolean; saver: boolean; secondsLeft: number | null; secondsToFull: number | null; watts: number | null; health: number | null };
 
 export type MediaAction =
   | { action: "toggle" | "next" | "previous" | "refresh" }
@@ -334,6 +349,10 @@ export const defaultSettings: Settings = {
   showClock: true,
   animationSpeed: 1,
   agentDefaultDir: null,
+  voiceProvider: "windows",
+  voiceId: null,
+  voiceHearing: "local",
+  voiceInterrupt: true,
   screenMode: "ondemand",
   screenIntervalSecs: 20,
   screenExclusions: [],

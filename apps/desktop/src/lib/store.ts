@@ -28,12 +28,14 @@ import type {
   ScreenSuggestion,
   Settings,
   Track,
+  Level,
 } from "./types";
 import type { Mood } from "../island/faces";
+import type { VoiceState } from "./voice";
 import { defaultSettings } from "./types";
 
 export type Tab = "home" | "chat" | "agents" | "media" | "day" | "inbox" | "settings";
-export type SettingsSection = "general" | "island" | "screen" | "models" | "providers" | "agents" | "privacy" | "about";
+export type SettingsSection = "general" | "island" | "voice" | "screen" | "updates" | "models" | "providers" | "agents" | "privacy" | "about";
 
 export interface LogEntry {
   kind: "user" | "text" | "activity" | "system" | "diff" | "output";
@@ -154,6 +156,12 @@ export interface AppState {
   greeting: boolean;
   /** How the face feels about something that just happened. It passes. */
   feeling: Mood | null;
+  /** A spoken conversation, while there is one. */
+  voice: VoiceState | null;
+  /** The volume, brightness or battery, for a moment after it changes. */
+  level: Level | null;
+  /** The last one of the same kind, so a key press can be told up from down. */
+  levelBefore: Level | null;
   /** The colour of the album, to light the island with. */
   artTint: string | null;
   islandView: IslandView;
@@ -205,11 +213,14 @@ let state: AppState = {
   mediaOpen: false,
   greeting: false,
   feeling: null,
+  voice: null,
+  level: null,
+  levelBefore: null,
   artTint: null,
   islandView: "idle",
   watching: false,
   version: "",
-  update: { available: false, message: "" },
+  update: { current: "", latest: null, available: false, notes: "", published: null, message: "" },
 };
 
 const listeners = new Set<() => void>();
@@ -277,6 +288,7 @@ function reportContext() {
   reported = key;
   void bridge.activityContext(agent, media, screen);
 }
+
 
 export const getState = () => state;
 
@@ -423,7 +435,10 @@ function patchLastMessage(fn: (text: string) => string) {
   set({ chat: { ...state.chat, messages } });
 }
 
-export async function sendChat(text: string, images: string[] = []) {
+/** Told to the AI on a spoken turn, and kept out of what the user sees. */
+const SPOKEN = "\n\n(This is a spoken conversation. Reply in one or two short, plain sentences, with no lists or formatting.)";
+
+export async function sendChat(text: string, images: string[] = [], spoken = false) {
   const provider = usableProvider();
   if (!provider) {
     pushError({ title: "No AI provider ready", body: "Add a key or start a local server in Settings, AI models." });
@@ -445,6 +460,7 @@ export async function sendChat(text: string, images: string[] = []) {
   const system: ChatMessage[] = state.settings.systemPrompt
     ? [{ role: "system", content: state.settings.systemPrompt }]
     : [];
+  if (spoken) system.push({ role: "system", content: SPOKEN.trim() });
   set({
     chatPending: true,
     chat: {
@@ -515,9 +531,10 @@ export const newAgentConversation = () => set({ agentChat: { ...state.agentChat,
 export const selectAgentConversation = (sessionId: string) =>
   set({ agentChat: { ...state.agentChat, sessionId } });
 
-export async function sendAgentChat(text: string, images: string[] = []) {
+export async function sendAgentChat(said: string, images: string[] = [], spoken = false) {
   const { agent, mode, cwd, sessionId } = state.agentChat;
   if (!agent) return;
+  const text = spoken ? said + SPOKEN : said;
   const earlier = state.sessions.find((s) => s.id === sessionId);
   // History saved before ids were kept cannot be resumed, so that chat starts afresh.
   if (sessionId && !(earlier?.restored && !earlier.nativeId)) return sendToSession(sessionId, text, images);
@@ -681,7 +698,7 @@ export async function startSession(
       agent: agent?.name ?? request.agent,
       surface,
       mode,
-      title: request.prompt.slice(0, 48),
+      title: request.prompt.replace(SPOKEN, "").slice(0, 48),
       project: mode === "general" ? "General" : projectName(request.cwd),
       cwd: request.cwd,
       prompt: request.prompt,
@@ -692,7 +709,7 @@ export async function startSession(
       endedAt: null,
       approval: null,
       usage: null,
-      log: [{ kind: "user", text: request.prompt }],
+      log: [{ kind: "user", text: request.prompt.replace(SPOKEN, "") }],
       queued: [],
     };
     set({ sessions: [session, ...state.sessions] });
@@ -719,7 +736,7 @@ export function answerApproval(sessionId: string, approvalId: string, allow: boo
 
 export async function sendToSession(id: string, text: string, images: string[] = []) {
   const session = state.sessions.find((s) => s.id === id);
-  patchSession(id, (s) => ({ ...s, log: appendLog(s, "user", text) }));
+  patchSession(id, (s) => ({ ...s, log: appendLog(s, "user", text.replace(SPOKEN, "")) }));
   try {
     // A conversation from before a restart exists only here until the app is told about it.
     if (session?.restored && session.nativeId) {
@@ -994,6 +1011,8 @@ function tintOf(src: string, done: (tint: string) => void) {
   image.src = src;
 }
 
+export const setVoice = (voice: VoiceState | null) => set({ voice });
+
 let feelingTimer: ReturnType<typeof setTimeout> | undefined;
 
 /** Shows a feeling on the face for a moment. */
@@ -1001,6 +1020,24 @@ export function feel(feeling: Mood, ms = 1800) {
   clearTimeout(feelingTimer);
   set({ feeling });
   feelingTimer = setTimeout(() => set({ feeling: null }), ms);
+}
+
+const LEVEL_MS = { volume: 1700, brightness: 1700, battery: 4500 };
+let levelTimer: ReturnType<typeof setTimeout> | undefined;
+const lastLevels = new Map<Level["kind"], Level>();
+
+function hideLevel() {
+  // Hovering the battery opens it, so it stays for as long as the pointer does.
+  if (state.hovered && state.level?.kind === "battery") levelTimer = setTimeout(hideLevel, 600);
+  else set({ level: null });
+}
+
+function onLevel(level: Level) {
+  const levelBefore = lastLevels.get(level.kind) ?? null;
+  lastLevels.set(level.kind, level);
+  clearTimeout(levelTimer);
+  set({ level, levelBefore });
+  levelTimer = setTimeout(hideLevel, LEVEL_MS[level.kind]);
 }
 
 function onMedia(snapshot: MediaSnapshot) {
@@ -1155,12 +1192,29 @@ const clear: Partial<AppState> = {
   notices: [],
   suggestions: [],
   errors: [],
+  level: null,
+  levelBefore: null,
+  voice: null,
 };
+
+export async function checkForUpdates() {
+  set({ update: await bridge.checkUpdate() });
+}
 
 export const PREVIEWS: Preview[] = [
   { name: "idle", apply: () => clear },
   { name: "listening", apply: () => ({ ...clear, listening: true }) },
   { name: "thinking", apply: () => ({ ...clear, chatPending: true }) },
+  { name: "volume up", apply: () => ({ ...clear, level: { kind: "volume", percent: 62, muted: false }, levelBefore: { kind: "volume", percent: 50, muted: false } }) },
+  { name: "volume down", apply: () => ({ ...clear, level: { kind: "volume", percent: 38, muted: false }, levelBefore: { kind: "volume", percent: 50, muted: false } }) },
+  { name: "muted", apply: () => ({ ...clear, level: { kind: "volume", percent: 62, muted: true }, levelBefore: null }) },
+  { name: "brightness", apply: () => ({ ...clear, level: { kind: "brightness", percent: 40 }, levelBefore: { kind: "brightness", percent: 60 } }) },
+  { name: "charging", apply: () => ({ ...clear, level: { kind: "battery", percent: 64, plugged: true, saver: false, secondsLeft: null, secondsToFull: 4320, watts: 65, health: 92 }, levelBefore: { kind: "battery", percent: 64, plugged: false, saver: false, secondsLeft: null, secondsToFull: null, watts: null, health: null } }) },
+  { name: "battery low", apply: () => ({ ...clear, level: { kind: "battery", percent: 20, plugged: false, saver: false, secondsLeft: 2100, secondsToFull: null, watts: null, health: 92 }, levelBefore: null }) },
+  { name: "voice listening", apply: () => ({ ...clear, voice: { phase: "listening", mode: "hold", words: "Can you check if my flight on Monday", ahead: "" } }) },
+  { name: "voice pause", apply: () => ({ ...clear, voice: { phase: "pause", mode: "hold", words: "Can you check if my flight on Monday, the one to Mumbai,", ahead: "" } }) },
+  { name: "voice thinking", apply: () => ({ ...clear, voice: { phase: "thinking", mode: "turn", words: "Let me look.", ahead: "" } }) },
+  { name: "voice speaking", apply: () => ({ ...clear, voice: { phase: "speaking", mode: "turn", words: "Your flight to Mumbai leaves Monday at 7:40 from gate 22.", ahead: " It is on time, and you should leave by 5." } }) },
   { name: "question", apply: () => ({ ...clear, sessions: [{ ...previewSession("p1", "Claude Code", "dock-agent", "Waiting"), approval: { id: "pq", tool: "AskUserQuestion", summary: "Which database should this use?", questions: [{ text: "Which database should this use?", options: ["SQLite", "Postgres", "Keep it in memory"], multi: false }] } }] }) },
   { name: "plan", apply: () => ({ ...clear, sessions: [{ ...previewSession("p1", "Claude Code", "dock-agent", "Waiting"), approval: { id: "pp", tool: "ExitPlanMode", summary: "Add a settings page", plan: "## Add a settings page\n\n1. Create `Settings.tsx`\n2. Save choices with **updateSettings**\n3. Add it to the dock\n\nThis touches three files and needs no new packages." } }] }) },
   { name: "working", apply: () => ({ ...clear, sessions: [previewSession("p1", "Claude Code", "dock-agent", "Editing island/machine.ts")] }) },
@@ -1226,6 +1280,9 @@ export function showPreview(name: string | null) {
       errors: state.errors,
       media: state.media,
       live: state.live,
+      level: state.level,
+      levelBefore: state.levelBefore,
+      voice: state.voice,
     };
     set({ ...preview.apply(), preview: preview.name });
   } else {
@@ -1254,11 +1311,11 @@ export async function boot() {
   void bridge.builtInClients().then((builtInClients) => set({ builtInClients }));
   void bridge.watchStatus().then((watching) => set({ watching }));
   void bridge.appVersion().then((version) => set({ version }));
-  if (settings.localOnly) set({ update: { available: false, message: "Update checks are off in local-only mode." } });
+  if (settings.localOnly) set({ update: { ...state.update, available: false, message: "Update checks are off in local-only mode." } });
   else
     void bridge.checkUpdate().then(
       (update) => set({ update }),
-      () => set({ update: { available: false, message: "Could not check for updates." } }),
+      () => set({ update: { ...state.update, available: false, message: "Could not check for updates." } }),
     );
   setInterval(fetchInBackground, FETCH_EVERY_MS);
   for (const a of agents) if (a.installed) void refreshAuth(a.id);
@@ -1276,6 +1333,7 @@ export async function boot() {
     }),
     bridge.onOpenTab((tab) => openPanel(tab as Tab)),
     bridge.onMedia(onMedia),
+    bridge.onLevel(onLevel),
     bridge.onReminders(onReminders),
     bridge.onActivityChanged(() => void refreshActivity()),
     bridge.onSettingsChanged((changed) => {

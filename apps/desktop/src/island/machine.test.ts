@@ -29,6 +29,15 @@ const notice = { id: "n", tone: "success" as const, title: "Done", body: "" };
 const suggestion = { id: "c", title: "Explain error", body: "" };
 const error = { id: "e", title: "Failed", body: "" };
 
+describe("volume, brightness and the battery", () => {
+  it("shows at once, but never over something that needs an answer", () => {
+    expect(deriveView({ ...base, level: true })).toBe("level");
+    expect(deriveView({ ...base, level: true, mediaPlaying: true })).toBe("level");
+    expect(deriveView({ ...base, level: true, listening: true })).toBe("listening");
+    expect(deriveView({ ...base, level: true, panelOpen: true })).toBe("expanded");
+  });
+});
+
 describe("deriveView", () => {
   it("is idle with nothing going on", () => {
     expect(deriveView(base)).toBe("idle");
@@ -78,6 +87,15 @@ describe("deriveView", () => {
   it("never interrupts active work with a contextual suggestion", () => {
     expect(deriveView({ ...base, suggestions: [suggestion] })).toBe("contextual");
     expect(deriveView({ ...base, suggestions: [suggestion], sessions: [session()] })).toBe("working");
+  });
+});
+
+describe("volume, brightness and the battery", () => {
+  it("shows at once, but never over something that needs an answer", () => {
+    expect(deriveView({ ...base, level: true })).toBe("level");
+    expect(deriveView({ ...base, level: true, mediaPlaying: true })).toBe("level");
+    expect(deriveView({ ...base, level: true, listening: true })).toBe("listening");
+    expect(deriveView({ ...base, level: true, panelOpen: true })).toBe("expanded");
   });
 });
 

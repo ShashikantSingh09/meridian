@@ -1,11 +1,13 @@
 import { FollowSwitch } from "./Follow";
+import { Markdown } from "./Markdown";
 import { ScreenSection } from "./Screen";
+import { VoiceSection } from "./Voice";
 import { spring } from "@meridian/design-system/motion";
 import { motion } from "motion/react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Face, FACES, type Mood } from "../island/faces";
 import { bridge } from "../lib/bridge";
-import { clearHistory, feel, PREVIEWS, refreshAuth, setSettingsSection, showPreview, updateSettings, useApp, type SettingsSection } from "../lib/store";
+import { checkForUpdates, clearHistory, feel, PREVIEWS, refreshAuth, setSettingsSection, showPreview, updateSettings, useApp, type SettingsSection } from "../lib/store";
 import type { AgentInfo, Settings } from "../lib/types";
 import { Integrations } from "./Integrations";
 import { Providers } from "./Providers";
@@ -234,9 +236,63 @@ function Privacy() {
   );
 }
 
-function About() {
+/** Check for a new version and install it, right here. */
+function UpdatesSection() {
   const version = useApp((s) => s.version);
   const update = useApp((s) => s.update);
+  const [busy, setBusy] = useState<"checking" | "installing" | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+
+  const check = async () => {
+    setBusy("checking");
+    setProblem(null);
+    await checkForUpdates();
+    setBusy(null);
+  };
+
+  const install = async () => {
+    setBusy("installing");
+    setProblem(null);
+    try {
+      await bridge.installUpdate();
+    } catch (err) {
+      setProblem(String(err));
+      setBusy(null);
+    }
+  };
+
+  useEffect(() => {
+    void check();
+  }, []);
+
+  const when = update.published ? new Date(update.published).toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" }) : null;
+  return (
+    <section className="stack-lg">
+      <h1>Updates</h1>
+      <div className="update-card">
+        <div className="row">
+          <span className="stacked grow">
+            <span className="label">Meridian {version}</span>
+            <span className="meta" role="status">{busy === "checking" ? "Checking" : busy === "installing" ? "Downloading and checking the update. Meridian will restart by itself." : update.message}</span>
+          </span>
+          <button className="ghost" disabled={busy !== null} onClick={() => void check()}>Check for updates</button>
+          {update.available && <button className="solid" disabled={busy !== null} onClick={() => void install()}>Update now</button>}
+        </div>
+        {problem && <p className="meta bad" role="alert">{problem}</p>}
+        {update.available && update.notes && (
+          <>
+            <h2>What is new in {update.latest?.replace(/^v/, "")}{when ? `, ${when}` : ""}</h2>
+            <div className="update-notes"><Markdown text={update.notes} /></div>
+          </>
+        )}
+      </div>
+      <p className="meta">Updating ends any agent running here, so nothing installs until you press Update now. Downloads come from your private GitHub releases through the GitHub command line, and each one is checked against its published checksum.</p>
+    </section>
+  );
+}
+
+function About() {
+  const version = useApp((s) => s.version);
   return (
     <section className="stack-lg">
       <h1>About Meridian</h1>
@@ -244,9 +300,7 @@ function About() {
         <div className="setting">
           <span className="stacked grow">
             <span className="label">Version {version}</span>
-            <span className="meta" role="status">{update.message}</span>
           </span>
-          {update.available && <button className="solid" onClick={() => void bridge.installUpdate()}>Install and restart</button>}
           <button className="ghost" onClick={() => void bridge.openLogs()}>Open logs</button>
         </div>
       </div>
@@ -258,11 +312,13 @@ function About() {
 const SECTIONS: { id: SettingsSection; label: string; page: () => React.JSX.Element }[] = [
   { id: "general", label: "General", page: General },
   { id: "island", label: "Island", page: IslandSection },
+  { id: "voice", label: "Voice", page: VoiceSection },
   { id: "screen", label: "Screen", page: ScreenSection },
   { id: "models", label: "AI models", page: Providers },
   { id: "providers", label: "Providers", page: Integrations },
   { id: "agents", label: "Coding agents", page: AgentsSection },
   { id: "privacy", label: "Privacy", page: Privacy },
+  { id: "updates", label: "Updates", page: UpdatesSection },
   { id: "about", label: "About", page: About },
 ];
 
