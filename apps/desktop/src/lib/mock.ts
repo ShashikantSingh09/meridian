@@ -24,6 +24,7 @@ import type {
   Settings,
   SettingsChange,
   Level,
+  WakeStatus,
 } from "./types";
 import { defaultSettings } from "./types";
 
@@ -45,6 +46,8 @@ const voicePacks = new Set<string>();
 const voiceKeys = new Set<string>();
 let heardWords = "";
 const spokenWords: string[] = [];
+let wakeState: ((status: WakeStatus) => void) | null = null;
+let wakeHeard: ((heard: { word: string; test: boolean }) => void) | null = null;
 let updateStatus = { current: "0.3.0", latest: "v0.3.0", available: false, notes: "", published: null as string | null, message: "You are on the latest version." };
 let updateInstalled = false;
 let failInstalling: (why: Error) => void = () => {};
@@ -232,6 +235,10 @@ export const mock = {
   voiceRemove: async (id: string) => void voicePacks.delete(id),
   voiceSpeak: async (text: string) => void spokenWords.push(text),
   voiceHeard: async () => heardWords,
+  onWakeState: (handler: (status: WakeStatus) => void) => void (wakeState = handler),
+  onWakeHeard: (handler: (heard: { word: string; test: boolean }) => void) => void (wakeHeard = handler),
+  setWakeState: (status: WakeStatus) => wakeState?.(status),
+  hearWake: (word: string, test = false) => wakeHeard?.({ word, test }),
   setPacks: (ids: string[]) => {
     voicePacks.clear();
     ids.forEach((id) => voicePacks.add(id));

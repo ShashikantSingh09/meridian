@@ -17,10 +17,19 @@ tokio.workspace = true
 windows = { version = "0.62", features = [
   "Foundation",
   "Foundation_Collections",
+  "Globalization",
   "Media_Core",
+  "Media_SpeechRecognition",
   "Media_SpeechSynthesis",
   "Storage_Streams",
+  "System_UserProfile",
+  "Win32_System_Com",
+  "Win32_System_Power",
+  "Win32_System_StationsAndDesktops",
 ] }
+windows-collections = "0.3"
+windows-registry = "0.6"
 
 [dev-dependencies]
+windows = { version = "0.62", features = ["Devices_Enumeration", "Media_Devices"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

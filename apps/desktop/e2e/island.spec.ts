@@ -698,6 +698,47 @@ test.describe("panel", () => {
     await expect(page.getByRole("button", { name: "Update now" })).toHaveCount(0);
   });
 
+  test("wake words are off until turned on, and can be set up and tried", async ({ page }) => {
+    const mock = (call: string) => page.evaluate((c) => new Function("m", `m.${c}`)((window as never as { __mock: unknown }).__mock), call);
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await page.getByRole("button", { name: "Wake words", exact: true }).click();
+    await expect(page.getByRole("switch", { name: /Listen for wake words/ })).not.toBeChecked();
+
+    const add = page.getByRole("button", { name: "Add", exact: true });
+    await page.getByLabel("Add a wake word").fill("Suno Mira");
+    await add.click();
+    await expect(page.getByRole("switch", { name: "Suno Mira" })).toBeChecked();
+    await page.getByRole("button", { name: "Remove Okay Meridian" }).click();
+    await expect(page.getByRole("switch", { name: "Okay Meridian" })).toHaveCount(0);
+
+    await page.getByLabel("Add a wake word").fill("सुनो मीरा");
+    await expect(page.getByText("Use English letters")).toBeVisible();
+    await expect(add).toBeDisabled();
+    await page.getByLabel("Add a wake word").fill("suno mira");
+    await expect(add).toBeDisabled();
+
+    await page.getByRole("button", { name: "Test", exact: true }).click();
+    await expect(page.getByText("Getting ready.")).toBeVisible();
+    await mock('setWakeState({ state: "listening", why: "" })');
+    await expect(page.getByText("Say Hey Meridian now.")).toBeVisible();
+    await mock('hearWake("Hey Meridian", true)');
+    await expect(page.getByText("Heard Hey Meridian.")).toBeVisible();
+    await expect(island(page)).toHaveAttribute("data-view", "expanded");
+  });
+
+  test("the island shows a dot only while the microphone is open for wake words, and says why it is not", async ({ page }) => {
+    const set = (state: string, why: string) => page.evaluate(([s, w]) => (window as never as { __mock: { setWakeState(v: unknown): void } }).__mock.setWakeState({ state: s, why: w }), [state, why]);
+    const dot = page.getByRole("img", { name: "Listening for a wake word" });
+    await expect(dot).toHaveCount(0);
+    await set("listening", "");
+    await expect(dot).toBeVisible();
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await page.getByRole("button", { name: "Wake words", exact: true }).click();
+    await set("paused", "Paused while another app is using the microphone.");
+    await expect(dot).toHaveCount(0);
+    await expect(page.getByText("Paused while another app is using the microphone.")).toBeVisible();
+  });
+
   test("how much the app may see is set in Settings", async ({ page }) => {
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page.getByRole("button", { name: "Screen", exact: true }).click();

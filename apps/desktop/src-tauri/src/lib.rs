@@ -20,6 +20,7 @@ mod secrets;
 mod settings;
 mod update;
 mod voice;
+mod wake;
 mod watch;
 
 use commands::Core;
@@ -139,6 +140,7 @@ fn setup(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     app.manage(links::state(app)?);
     app.manage(following::state(app)?);
     app.manage(voice::state(app)?);
+    app.manage(wake::Wake::default());
     let path = settings::path(&handle).ok_or("no config directory")?;
     let settings = settings::load(&path);
     let placement = (settings.island_monitor.clone(), settings.island_align.clone());
@@ -178,6 +180,7 @@ fn setup(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     watch::spawn(handle.clone());
     following::resume(&handle);
     following::watch_running(&handle);
+    wake::spawn(handle.clone());
     life::spawn(handle);
 
     build_tray(app)?;
@@ -256,6 +259,9 @@ pub fn run() {
             voice::voice_hear_start,
             voice::voice_hear,
             voice::voice_hear_end,
+            wake::wake_status,
+            wake::wake_talking,
+            wake::wake_test,
             following::running_refresh,
             following::watch_preview,
             following::watch_status,

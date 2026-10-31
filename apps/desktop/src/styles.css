@@ -1145,6 +1145,25 @@ textarea::placeholder {
   border: 0;
 }
 
+.setting .wake-remove {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  min-height: 0;
+  padding: 0;
+  background: none;
+}
+
+.wake-word input:not([role="switch"]) {
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+}
+
 .setting legend {
   float: left;
   padding: 0;
@@ -1277,6 +1296,19 @@ textarea::placeholder {
 .island-rim {
   stroke-width: 1;
   opacity: 0.16;
+}
+
+/* Still on purpose: anything that moves redraws the whole window, and this stays for hours. */
+.wake-dot {
+  position: absolute;
+  left: 50%;
+  bottom: 3px;
+  width: 5px;
+  height: 5px;
+  margin-left: -2.5px;
+  border-radius: 50%;
+  background: #64d2ff;
+  pointer-events: none;
 }
 
 .island-comet {

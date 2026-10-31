@@ -29,13 +29,14 @@ import type {
   Settings,
   Track,
   Level,
+  WakeStatus,
 } from "./types";
 import type { Mood } from "../island/faces";
 import type { VoiceState } from "./voice";
 import { defaultSettings } from "./types";
 
 export type Tab = "home" | "chat" | "agents" | "media" | "day" | "inbox" | "settings";
-export type SettingsSection = "general" | "island" | "voice" | "screen" | "updates" | "models" | "providers" | "agents" | "privacy" | "about";
+export type SettingsSection = "general" | "island" | "voice" | "wake" | "screen" | "updates" | "models" | "providers" | "agents" | "privacy" | "about";
 
 export interface LogEntry {
   kind: "user" | "text" | "activity" | "system" | "diff" | "output";
@@ -157,6 +158,8 @@ export interface AppState {
   feeling: Mood | null;
   /** A spoken conversation, while there is one. */
   voice: VoiceState | null;
+  wake: WakeStatus;
+  wakeTest: { phase: "idle" | "waiting" | "heard" | "missed"; word: string };
   /** The volume, brightness or battery, for a moment after it changes. */
   level: Level | null;
   /** The last one of the same kind, so a key press can be told up from down. */
@@ -180,6 +183,8 @@ export interface AppState {
 const LOG_LIMIT = 500;
 const NOTICE_MS = 6000;
 const GREETING_MS = 2600;
+/** A little longer than the core listens, so a late match still lands. */
+const WAKE_TEST_MS = 11_000;
 const HOVER_IN_MS = 180;
 const HOVER_OUT_MS = 240;
 const ANSWER_GAP_MS = 400;
@@ -224,6 +229,8 @@ let state: AppState = {
   greeting: false,
   feeling: null,
   voice: null,
+  wake: { state: "off", why: "" },
+  wakeTest: { phase: "idle", word: "" },
   level: null,
   levelBefore: null,
   artTint: null,
@@ -1112,8 +1119,28 @@ function tintOf(src: string, done: (tint: string) => void) {
 
 export function setVoice(voice: VoiceState | null) {
   // The panel steps aside for a conversation, so its window must not catch clicks meanwhile.
-  if (state.panelOpen && !voice !== !state.voice) void bridge.setInteractive(!voice);
+  if (!voice !== !state.voice) {
+    void bridge.wakeTalking(!!voice);
+    if (state.panelOpen) void bridge.setInteractive(!voice);
+  }
   set({ voice });
+}
+
+export const setWake = (wake: WakeStatus) => set({ wake });
+
+let wakeTestEnds: ReturnType<typeof setTimeout> | undefined;
+
+/** Listens for a few seconds whether or not the switch is on, and starts no conversation. */
+export function testWake() {
+  clearTimeout(wakeTestEnds);
+  set({ wakeTest: { phase: "waiting", word: "" } });
+  void bridge.wakeTest();
+  wakeTestEnds = setTimeout(() => set({ wakeTest: { phase: "missed", word: "" } }), WAKE_TEST_MS);
+}
+
+export function wakeTestHeard(word: string) {
+  clearTimeout(wakeTestEnds);
+  set({ wakeTest: { phase: "heard", word } });
 }
 
 let feelingTimer: ReturnType<typeof setTimeout> | undefined;

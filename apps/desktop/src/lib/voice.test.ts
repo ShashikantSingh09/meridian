@@ -1,6 +1,6 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { bridge } from "./bridge";
-import { answerApproval, openPanel, pickEngine, pushError, sendAgentChat, sendChat } from "./store";
+import { answerApproval, openPanel, pickEngine, pushError, sendAgentChat, sendChat, wakeTestHeard } from "./store";
 import { endConversation, wireVoice } from "./voice";
 
 // The real conversation logic, with no microphone and no sound: the browser's audio, the bridge and
@@ -11,18 +11,23 @@ type Session = { id: string; agent: string; status: string; log: { kind: string;
 const h = vi.hoisted(() => ({
   app: {
     voice: null as { phase: string; mode: string } | null,
-    settings: { voiceInterrupt: true },
+    settings: { voiceInterrupt: true, wakeAfter: "turn" },
     chat: { messages: [] as { role: string; content: string }[] },
     chatPending: false,
     agentChat: { agent: null as string | null, sessionId: null as string | null },
     sessions: [] as Session[],
   },
   key: (_down: boolean): Promise<void> => Promise.resolve(),
+  wake: (_heard: { word: string; test: boolean }) => {},
 }));
 
 vi.mock("./bridge", () => ({
   bridge: {
     onVoiceKey: (handler: (down: boolean) => Promise<void>) => void (h.key = handler),
+    onWakeState: vi.fn(async () => {}),
+    onWakeHeard: (handler: (heard: { word: string; test: boolean }) => void) => void (h.wake = handler),
+    wakeStatus: vi.fn(async () => ({ state: "off", why: "" })),
+    wakeTalking: vi.fn(async () => {}),
     voiceHearStart: vi.fn(async () => {}),
     voiceHearEnd: vi.fn(async () => ""),
     voiceSpeak: vi.fn(async () => {}),
@@ -41,6 +46,8 @@ vi.mock("./store", () => ({
   sendAgentChat: vi.fn(async () => {}),
   sendChat: vi.fn(async () => {}),
   setVoice: (voice: typeof h.app.voice) => void (h.app.voice = voice),
+  setWake: vi.fn(),
+  wakeTestHeard: vi.fn(),
 }));
 
 const track = { stop: vi.fn() };
@@ -157,6 +164,24 @@ describe("when something fails", () => {
     await holdAndSay("hello");
     await vi.waitFor(() => expect(h.app.voice).toBeNull());
     expect(sendAgentChat).toHaveBeenCalledOnce();
+  });
+});
+
+describe("a wake word", () => {
+  it("starts a conversation as the setting says, and answers to its name", async () => {
+    h.app.settings.wakeAfter = "conversation";
+    h.wake({ word: "Hey Meridian", test: false });
+    micOpens();
+    await settled();
+    expect(h.app.voice).toMatchObject({ phase: "listening", mode: "conversation", woken: true });
+    h.app.settings.wakeAfter = "turn";
+  });
+
+  it("starts nothing during a test, and reports what it heard", async () => {
+    h.wake({ word: "Hey Meridian", test: true });
+    await settled();
+    expect(getUserMedia).not.toHaveBeenCalled();
+    expect(wakeTestHeard).toHaveBeenCalledWith("Hey Meridian");
   });
 });
 

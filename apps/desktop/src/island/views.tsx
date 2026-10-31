@@ -544,7 +544,7 @@ export function VoiceView({ reduced }: { reduced: boolean }) {
         {iconButton("Stop talking", "close", endConversation)}
       </div>
       <p className="voice-words" aria-live="polite">
-        {voice.words || (hearing ? <span className="voice-ahead">Go on, I am listening.</span> : "")}
+        {voice.words || (hearing ? <span className="voice-ahead">{voice.woken ? "Yes?" : "Go on, I am listening."}</span> : "")}
         <span className="voice-ahead">{voice.ahead}</span>
         {hearing && voice.words && <i className="voice-caret" />}
       </p>

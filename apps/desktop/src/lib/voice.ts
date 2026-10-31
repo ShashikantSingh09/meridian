@@ -1,9 +1,10 @@
 // A spoken conversation: the microphone, whose turn it is, and the voice. The microphone opens
-// only for a conversation the user started, the island shows it for as long as it is open, and
-// audio goes no further than the hearing the user chose. Nothing is ever recorded to disk.
+// only for a conversation the user started, by key, by button or by a wake word they turned on.
+// The island shows it for as long as it is open, audio goes no further than the hearing the user
+// chose, and nothing is ever recorded to disk.
 
 import { bridge } from "./bridge";
-import { answerApproval, feel, getState, openPanel, openSettings, pickEngine, pushError, sendAgentChat, sendChat, setVoice } from "./store";
+import { answerApproval, feel, getState, openPanel, openSettings, pickEngine, pushError, sendAgentChat, sendChat, setVoice, setWake, wakeTestHeard } from "./store";
 import { filler, isGoodbye, sentences, silenceFor, speakable, yesOrNo } from "./turns";
 
 export type VoiceMode = "hold" | "turn" | "conversation";
@@ -16,6 +17,8 @@ export interface VoiceState {
   words: string;
   /** What will be said next. */
   ahead: string;
+  /** Started by its name, so it answers to that. */
+  woken?: boolean;
 }
 
 const CHUNK_MS = 100;
@@ -164,7 +167,7 @@ async function speak(text: string) {
   }
 }
 
-async function listen(mode: VoiceMode) {
+async function listen(mode: VoiceMode, woken = false) {
   if (!session) return;
   Object.assign(session, { mode, heardSpeech: false, quietMs: 0, waitedMs: 0, loudMs: 0 });
   try {
@@ -173,7 +176,7 @@ async function listen(mode: VoiceMode) {
     return failed("Voice is not set up yet", err);
   }
   // It may have been stopped in the meantime, and then nothing is listening.
-  if (session) setVoice({ phase: "listening", mode, words: "", ahead: "" });
+  if (session) setVoice({ phase: "listening", mode, words: "", ahead: "", woken });
 }
 
 function onAudio(chunk: Int16Array) {
@@ -351,8 +354,8 @@ async function followReply(turn: number, spoken = 0, answered: string | null = n
   else endConversation();
 }
 
-/** Starts a conversation by hand, as the hotkey does. */
-export async function startVoice(mode: VoiceMode) {
+/** Starts a conversation, as the hotkey does. `woken` means it was called by name. */
+export async function startVoice(mode: VoiceMode, woken = false) {
   if (opening) return;
   if (session) {
     if (getState().voice?.phase === "speaking") await interrupted();
@@ -361,7 +364,7 @@ export async function startVoice(mode: VoiceMode) {
   opening = true;
   try {
     await openMicrophone(mode);
-    await listen(mode);
+    await listen(mode, woken);
   } catch (err) {
     failed(/permission|notallowed|notfound/i.test(String(err)) ? "No microphone" : "Voice is not set up yet", err);
   } finally {
@@ -403,4 +406,9 @@ async function onKey(down: boolean) {
 
 export function wireVoice() {
   void bridge.onVoiceKey(onKey);
+  // A reload can end a conversation without saying so.
+  void bridge.wakeTalking(false);
+  void bridge.onWakeState(setWake);
+  void bridge.wakeStatus().then(setWake);
+  void bridge.onWakeHeard(({ word, test }) => (test ? wakeTestHeard(word) : void startVoice(getState().settings.wakeAfter, true)));
 }

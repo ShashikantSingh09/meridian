@@ -141,6 +141,17 @@ export interface AgentEnvelope {
   event: AgentEvent;
 }
 
+export interface WakeWord {
+  text: string;
+  on: boolean;
+}
+
+/** Whether the microphone is open for wake words, and if not, why. */
+export interface WakeStatus {
+  state: "off" | "listening" | "paused" | "failed";
+  why: string;
+}
+
 export interface Settings {
   motion: "system" | "full" | "reduced";
   ambient: boolean;
@@ -160,6 +171,13 @@ export interface Settings {
   voiceId: string | null;
   voiceHearing: string;
   voiceInterrupt: boolean;
+  wakeEnabled: boolean;
+  wakeWords: WakeWord[];
+  wakeSensitivity: "sure" | "balanced" | "easily";
+  wakeAfter: "turn" | "conversation";
+  wakeListen: "always" | "charger";
+  wakePauseCalls: boolean;
+  wakePauseLocked: boolean;
   screenMode: "off" | "ondemand" | "contextual";
   screenIntervalSecs: number;
   screenExclusions: string[];
@@ -353,6 +371,13 @@ export const defaultSettings: Settings = {
   voiceId: null,
   voiceHearing: "local",
   voiceInterrupt: true,
+  wakeEnabled: false,
+  wakeWords: [{ text: "Hey Meridian", on: true }, { text: "Okay Meridian", on: false }],
+  wakeSensitivity: "balanced",
+  wakeAfter: "turn",
+  wakeListen: "always",
+  wakePauseCalls: true,
+  wakePauseLocked: true,
   screenMode: "ondemand",
   screenIntervalSecs: 20,
   screenExclusions: [],

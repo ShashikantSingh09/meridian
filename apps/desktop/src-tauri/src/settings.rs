@@ -8,6 +8,12 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WakeWord {
+    pub text: String,
+    pub on: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
     pub motion: String,
@@ -50,6 +56,17 @@ pub struct Settings {
     /// "local", or the cloud service that hears.
     pub voice_hearing: String,
     pub voice_interrupt: bool,
+    /// Keeps the microphone open for wake words, heard only on this PC. Off until turned on.
+    pub wake_enabled: bool,
+    pub wake_words: Vec<WakeWord>,
+    /// "sure", "balanced" or "easily".
+    pub wake_sensitivity: String,
+    /// "turn" for one question, or "conversation" to keep talking.
+    pub wake_after: String,
+    /// "always" or "charger".
+    pub wake_listen: String,
+    pub wake_pause_calls: bool,
+    pub wake_pause_locked: bool,
 }
 
 impl Default for Settings {
@@ -85,6 +102,13 @@ impl Default for Settings {
             voice_id: None,
             voice_hearing: "local".into(),
             voice_interrupt: true,
+            wake_enabled: false,
+            wake_words: vec![WakeWord { text: "Hey Meridian".into(), on: true }, WakeWord { text: "Okay Meridian".into(), on: false }],
+            wake_sensitivity: "balanced".into(),
+            wake_after: "turn".into(),
+            wake_listen: "always".into(),
+            wake_pause_calls: true,
+            wake_pause_locked: true,
         }
     }
 }

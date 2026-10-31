@@ -30,6 +30,7 @@ import type {
   SettingsChange,
   Level,
   VoiceInfo,
+  WakeStatus,
 } from "./types";
 
 export const native = isTauri();
@@ -257,6 +258,17 @@ export const bridge = {
   voiceHearStart: () => (native ? invoke<void>("voice_hear_start") : Promise.resolve()),
   voiceHear: (pcm: Uint8Array) => (native ? invoke<string>("voice_hear", pcm) : mock.voiceHeard()),
   voiceHearEnd: () => (native ? invoke<string>("voice_hear_end") : mock.voiceHeard()),
+  wakeStatus: () => (native ? invoke<WakeStatus>("wake_status") : Promise.resolve<WakeStatus>({ state: "off", why: "" })),
+  wakeTalking: (on: boolean) => (native ? invoke<void>("wake_talking", { on }) : Promise.resolve()),
+  wakeTest: () => (native ? invoke<void>("wake_test") : Promise.resolve()),
+  onWakeState(handler: (status: WakeStatus) => void) {
+    if (!native) return Promise.resolve(mock.onWakeState(handler));
+    return listen<WakeStatus>("wake-state", (e) => handler(e.payload)).then(() => {});
+  },
+  onWakeHeard(handler: (heard: { word: string; test: boolean }) => void) {
+    if (!native) return Promise.resolve(mock.onWakeHeard(handler));
+    return listen<{ word: string; test: boolean }>("wake-heard", (e) => handler(e.payload)).then(() => {});
+  },
   onVoiceKey(handler: (down: boolean) => void) {
     if (!native) return Promise.resolve(() => {});
     return listen<boolean>("voice-key", (e) => handler(e.payload)).then((un) => un);

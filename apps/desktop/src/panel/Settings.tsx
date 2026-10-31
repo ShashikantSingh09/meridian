@@ -7,8 +7,9 @@ import { motion } from "motion/react";
 import { useState, useEffect } from "react";
 import { Face, FACES, type Mood } from "../island/faces";
 import { bridge } from "../lib/bridge";
-import { checkForUpdates, clearHistory, feel, installUpdate, PREVIEWS, refreshAuth, setSettingsSection, showPreview, updateSettings, useApp, type SettingsSection } from "../lib/store";
-import type { AgentInfo, Settings } from "../lib/types";
+import { checkForUpdates, clearHistory, feel, installUpdate, PREVIEWS, refreshAuth, setSettingsSection, showPreview, testWake, updateSettings, useApp, type SettingsSection } from "../lib/store";
+import { Icon } from "../lib/icons";
+import type { AgentInfo, Settings, WakeWord } from "../lib/types";
 import { Integrations } from "./Integrations";
 import { Providers } from "./Providers";
 
@@ -32,7 +33,7 @@ function Choice<K extends keyof Settings>({ name, label, options }: {
   );
 }
 
-type Flag = "ambient" | "autostart" | "localOnly" | "showClock" | "islandAutoHide" | "mediaEnabled" | "monitoringPaused" | "showNextMeeting" | "sounds";
+type Flag = "wakeEnabled" | "wakePauseCalls" | "wakePauseLocked" | "ambient" | "autostart" | "localOnly" | "showClock" | "islandAutoHide" | "mediaEnabled" | "monitoringPaused" | "showNextMeeting" | "sounds";
 
 function Toggle({ name, label, hint }: { name: Flag; label: string; hint: string }) {
   const value = useApp((s) => s.settings[name]);
@@ -221,8 +222,8 @@ function Privacy() {
       <Toggle name="monitoringPaused" label="Pause all monitoring" hint="Stops contextual awareness and background fetching at once. Also in the tray menu." />
       <p className="meta">
         Your screen is read only as set under Screen, always on this PC, and shared only from a preview you approve.
-        No keystrokes or clipboard are read. The microphone opens only while the listening view is on screen, shows a dot
-        while open, and nothing is recorded. Chat text goes only to the engine you pick. Providers are read with read-only
+        No keystrokes or clipboard are read. The microphone opens only while the listening view is on screen, or for wake
+        words if you turn them on. The island shows a dot for those, and nothing is recorded. Chat text goes only to the engine you pick. Providers are read with read-only
         tools, and what they return stays on this PC. No telemetry.
       </p>
       <div className="setting">
@@ -271,6 +272,84 @@ function UpdatesSection() {
   );
 }
 
+const MOST_WAKE_WORDS = 8;
+
+/** The switch for the always-on microphone, and what it listens for. */
+function WakeSection() {
+  const words = useApp((s) => s.settings.wakeWords);
+  const status = useApp((s) => s.wake);
+  const test = useApp((s) => s.wakeTest);
+  const [text, setText] = useState("");
+  const phrase = text.trim().replace(/\s+/g, " ");
+  const usable = /^[a-z' ]{1,40}$/i.test(phrase);
+  const taken = words.some((w) => w.text.toLowerCase() === phrase.toLowerCase());
+  const first = words.find((w) => w.on)?.text;
+  const save = (wakeWords: WakeWord[]) => void updateSettings({ wakeWords });
+  const add = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!usable || taken || words.length >= MOST_WAKE_WORDS) return;
+    save([...words, { text: phrase, on: true }]);
+    setText("");
+  };
+  const trying =
+    test.phase === "waiting"
+      ? status.state === "listening" ? `Say ${first} now.` : "Getting ready."
+      : test.phase === "heard"
+        ? `Heard ${test.word}.`
+        : test.phase === "missed"
+          ? "Did not hear it. Try again, or set How easily it wakes to Easily."
+          : first ? `Press Test, then say ${first}.` : "Turn on a wake word first.";
+
+  return (
+    <section className="stack-lg">
+      <div>
+        <h1>Wake words</h1>
+        <p className="meta">Say its name and it starts listening, with no keys to press.</p>
+      </div>
+      <div className="stack">
+        <Toggle name="wakeEnabled" label="Listen for wake words" hint="Keeps the microphone on. Off until you turn it on. The island shows a dot for as long as it is listening." />
+        {status.why && <p className="meta" role="status">{status.why}</p>}
+      </div>
+      <div className="stack">
+        {words.map((word) => (
+          <div className="setting toggle wake-word" key={word.text}>
+            <Icon name="mic" size={15} />
+            <span className="label grow">{word.text}</span>
+            <button className="ghost wake-remove" aria-label={`Remove ${word.text}`} title="Remove" onClick={() => save(words.filter((w) => w !== word))}>
+              <Icon name="close" size={13} />
+            </button>
+            <input type="checkbox" role="switch" aria-label={word.text} checked={word.on} onChange={(e) => save(words.map((w) => (w === word ? { ...w, on: e.target.checked } : w)))} />
+          </div>
+        ))}
+        <form className="setting wake-word" onSubmit={add}>
+          <Icon name="plus" size={15} />
+          <input className="grow" aria-label="Add a wake word" placeholder="Add a wake word, two or three words work best" maxLength={40} value={text} onChange={(e) => setText(e.target.value)} />
+          <button className="ghost" disabled={!usable || taken || words.length >= MOST_WAKE_WORDS}>Add</button>
+        </form>
+        {phrase && !usable && <p className="meta">Use English letters, even for a Hindi word, such as Suno Mira.</p>}
+      </div>
+      <div className="setting wake-word">
+        <span className="stacked grow">
+          <span className="label">Try it</span>
+          <span className="meta" role="status">{trying}</span>
+        </span>
+        <button className="ghost" disabled={!first || test.phase === "waiting"} onClick={testWake}>Test</button>
+      </div>
+      <div className="stack">
+        <Choice name="wakeSensitivity" label="How easily it wakes" options={[{ value: "sure", label: "Only when sure" }, { value: "balanced", label: "Balanced" }, { value: "easily", label: "Easily" }]} />
+        <Choice name="wakeAfter" label="After it wakes" options={[{ value: "turn", label: "One question" }, { value: "conversation", label: "Keep talking" }]} />
+        <Choice name="wakeListen" label="Listen" options={[{ value: "always", label: "Always" }, { value: "charger", label: "On charger" }]} />
+        <Toggle name="wakePauseCalls" label="Pause during calls" hint="While another app is using the microphone." />
+        <Toggle name="wakePauseLocked" label="Pause when the screen is locked" hint="Listening starts again when you unlock." />
+      </div>
+      <p className="meta">
+        Listening for its name happens on this PC, with the speech recognizer built into Windows, so there is nothing to download.
+        Nothing is saved or sent until it hears its name. After that, your words go to the hearing you chose under Voice.
+      </p>
+    </section>
+  );
+}
+
 function About() {
   const version = useApp((s) => s.version);
   return (
@@ -293,6 +372,7 @@ const SECTIONS: { id: SettingsSection; label: string; page: () => React.JSX.Elem
   { id: "general", label: "General", page: General },
   { id: "island", label: "Island", page: IslandSection },
   { id: "voice", label: "Voice", page: VoiceSection },
+  { id: "wake", label: "Wake words", page: WakeSection },
   { id: "screen", label: "Screen", page: ScreenSection },
   { id: "models", label: "AI models", page: Providers },
   { id: "providers", label: "Providers", page: Integrations },

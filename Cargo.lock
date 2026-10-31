@@ -4706,6 +4706,8 @@ dependencies = [
  "thiserror 2.0.21",
  "tokio",
  "windows",
+ "windows-collections",
+ "windows-registry",
 ]
 
 [[package]]

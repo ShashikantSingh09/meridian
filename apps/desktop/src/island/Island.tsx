@@ -98,6 +98,7 @@ export function Island() {
   const mediaOpen = useApp((s) => s.mediaOpen);
   const greeting = useApp((s) => s.greeting);
   const artTint = useApp((s) => s.artTint);
+  const wakeOn = useApp((s) => s.wake.state === "listening");
   const battery = useApp((s) => s.level?.kind === "battery");
   const voiceLong = useApp((s) => ((s.voice?.words.length ?? 0) + (s.voice?.ahead.length ?? 0)) > VOICE_LINE);
   const view = deriveView(snapshot);
@@ -193,6 +194,7 @@ export function Island() {
             {expanded ? <Panel /> : <CompactContent view={view} reduced={reduced} hovered={hovered} sliver={sliver} mediaOpen={mediaOpen} />}
           </motion.div>
         </AnimatePresence>
+        {wakeOn && <span className="wake-dot" role="img" aria-label="Listening for a wake word" title="Listening for a wake word" />}
       </motion.div>
     </motion.div>
   );
