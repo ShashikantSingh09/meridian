@@ -27,6 +27,10 @@ pub struct Core {
     /// The last capture, held in memory only until it is sent or discarded.
     pub frame: Mutex<Option<Frame>>,
     pub media: media::Controller,
+    /// What is playing, for the assistant to answer about.
+    pub now_playing: Arc<Mutex<Option<media::Track>>>,
+    /// Where the assistant's tools answer.
+    pub tools_url: String,
 }
 
 fn stringify(err: impl std::fmt::Display) -> String {
@@ -64,6 +68,11 @@ pub fn open_logs(app: AppHandle) -> Result<(), String> {
 // â”€â”€ Settings â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 #[tauri::command]
+pub fn open_sound_settings() -> Result<(), String> {
+    std::process::Command::new("explorer.exe").arg("ms-settings:sound").spawn().map(|_| ()).map_err(stringify)
+}
+
+#[tauri::command]
 pub fn settings_get(core: State<'_, Core>) -> Settings {
     core.settings.lock().unwrap().clone()
 }
@@ -73,6 +82,7 @@ pub fn settings_save(app: AppHandle, core: State<'_, Core>, settings: Settings) 
     let path = settings::path(&app).ok_or("No settings folder")?;
     settings::save(&path, &settings).map_err(stringify)?;
     let (monitor, align) = (settings.island_monitor.clone(), settings.island_align.clone());
+    core.sessions.set_assistant(crate::actions::setup(&core.tools_url, &settings));
     let previous = std::mem::replace(&mut *core.settings.lock().unwrap(), settings);
     if previous.island_monitor != monitor || previous.island_align != align {
         if let Some(win) = app.get_webview_window(island::LABEL) {

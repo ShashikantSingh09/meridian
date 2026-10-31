@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 
-mod approvals;
+pub mod approvals;
 mod claude;
 mod codex;
 mod detect;
@@ -55,7 +55,18 @@ pub struct Approval {
 pub struct Question {
     pub text: String,
     pub options: Vec<String>,
+    /// What each option means, in the same order. Empty text where the agent gave none.
+    pub details: Vec<String>,
     pub multi: bool,
+}
+
+/// One line of the agent's own to-do list.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Todo {
+    pub id: String,
+    pub text: String,
+    /// "pending", "in_progress" or "completed", as the agent says it.
+    pub status: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -68,12 +79,21 @@ pub enum AgentEvent {
     Approval { approval: Approval },
     ApprovalResolved { id: String },
     Usage { input: u64, output: u64, cost_usd: Option<f64> },
+    /// How much of the user's plan is used, as the agent reports it.
+    Limits { windows: Vec<LimitWindow> },
+    /// How full the conversation is. The two numbers arrive at different times.
+    Context { used: Option<u64>, size: Option<u64> },
     /// A session this app did not start, heard from for the first time.
     Watched { agent: String, cwd: String, title: Option<String> },
-    /// Lines an edit takes out and puts in, shown while it happens and never saved.
-    Diff { path: String, removed: Vec<String>, added: Vec<String> },
+    /// Lines an edit takes out and puts in, shown while it happens and never saved. Those are cut
+    /// short, so the two counts say how many lines really changed.
+    Diff { path: String, removed: Vec<String>, added: Vec<String>, lines_removed: usize, lines_added: usize },
     /// The end of what a command printed, on the same terms.
     Output { command: String, lines: Vec<String>, failed: bool },
+    /// The agent's own to-do list, whole, on the same terms.
+    Todos { items: Vec<Todo> },
+    /// One entry of that list, from the tools that report them one at a time.
+    TodoChanged { id: String, text: Option<String>, status: Option<String> },
 }
 
 impl AgentEvent {
@@ -84,6 +104,16 @@ impl AgentEvent {
     pub(crate) fn failed(message: impl Into<String>) -> Self {
         Self::Status { status: SessionStatus::Failed, message: Some(message.into()) }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LimitWindow {
+    /// "five_hour" or "seven_day", or another length the agent reports.
+    pub window: String,
+    pub used_percent: f64,
+    /// Seconds since 1970.
+    pub resets_at: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -99,7 +129,7 @@ pub struct StartRequest {
     pub cwd: String,
     pub prompt: String,
     pub model: Option<String>,
-    /// General assistant: no shell, no file edits, no connectors.
+    /// The assistant: the user's own tools from this app, none of their connectors, and everything else asks first.
     #[serde(default)]
     pub restricted: bool,
     /// Data URLs the user approved for sharing.
@@ -139,6 +169,17 @@ pub(crate) struct Launch {
     pub resume: Option<String>,
     pub restricted: bool,
     pub images: Vec<String>,
+    pub assistant: Option<AssistantSetup>,
+}
+
+/// What makes a general run the user's assistant, rather than a bare agent in a folder.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AssistantSetup {
+    pub tools_url: String,
+    pub server: String,
+    /// Tools that run without asking.
+    pub allowed: Vec<String>,
+    pub instructions: String,
 }
 
 /// A conversation from an earlier run of the app, which is enough to pick it up again.
@@ -180,6 +221,7 @@ pub struct Sessions {
     inner: Arc<Mutex<Inner>>,
     emit: Arc<dyn Fn(Envelope) + Send + Sync>,
     approvals: approvals::ApprovalServer,
+    assistant: Arc<Mutex<Option<AssistantSetup>>>,
 }
 
 fn locate(agent: AgentKind) -> Result<PathBuf, AgentError> {
@@ -194,7 +236,16 @@ impl Sessions {
     pub async fn new(emit: impl Fn(Envelope) + Send + Sync + 'static) -> std::io::Result<Self> {
         let emit: Arc<dyn Fn(Envelope) + Send + Sync> = Arc::new(emit);
         let approvals = approvals::ApprovalServer::start().await?;
-        Ok(Self { inner: Arc::default(), emit, approvals })
+        Ok(Self { inner: Arc::default(), emit, approvals, assistant: Arc::default() })
+    }
+
+    /// What general runs start with from now on. A conversation already open keeps what it had.
+    pub fn set_assistant(&self, setup: AssistantSetup) {
+        *self.assistant.lock().unwrap() = Some(setup);
+    }
+
+    fn assistant_for(&self, restricted: bool) -> Option<AssistantSetup> {
+        restricted.then(|| self.assistant.lock().unwrap().clone()).flatten()
     }
 
     pub fn start(&self, request: StartRequest) -> Result<String, AgentError> {
@@ -210,6 +261,7 @@ impl Sessions {
             resume: None,
             restricted: request.restricted,
             images: request.images,
+            assistant: self.assistant_for(request.restricted),
         };
         let record = Record {
             agent: request.agent,
@@ -302,6 +354,7 @@ impl Sessions {
                 resume: Some(record.native_id.clone().ok_or(AgentError::UnknownSession)?),
                 restricted: record.restricted,
                 images,
+                assistant: self.assistant_for(record.restricted),
             }
         };
         let agent = self.inner.lock().unwrap().records[id].agent;

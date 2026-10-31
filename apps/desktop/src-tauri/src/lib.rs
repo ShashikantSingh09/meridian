@@ -10,6 +10,7 @@ use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent}
 use tauri::{App, AppHandle, Emitter, Manager, WindowEvent};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
+mod actions;
 mod commands;
 mod following;
 mod island;
@@ -152,7 +153,10 @@ fn setup(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     }))?;
 
     let emitter = handle.clone();
+    let now_playing: Arc<Mutex<Option<media::Track>>> = Arc::default();
+    let playing = now_playing.clone();
     let media = media::watch(move |snapshot| {
+        *playing.lock().unwrap() = snapshot.current.clone();
         let _ = emitter.emit_to(island::LABEL, "media-state", snapshot);
     });
 
@@ -161,6 +165,8 @@ fn setup(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
         let _ = emitter.emit_to(island::LABEL, "level-change", level);
     });
 
+    let tools_url = tauri::async_runtime::block_on(actions::start(handle.clone()))?;
+    sessions.set_assistant(actions::setup(&tools_url, &settings.lock().unwrap()));
     let gate = Arc::new(island::Gate::default());
     app.manage(Core {
         settings,
@@ -169,6 +175,8 @@ fn setup(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
         chats: Mutex::new(HashMap::new()),
         frame: Mutex::new(None),
         media,
+        now_playing,
+        tools_url,
     });
 
     let win = app.get_webview_window(island::LABEL).ok_or("island window missing")?;
@@ -248,6 +256,7 @@ pub fn run() {
             update::update_check,
             update::update_install,
             commands::open_logs,
+            commands::open_sound_settings,
             voice::voice_status,
             voice::voice_list,
             voice::voice_key_set,

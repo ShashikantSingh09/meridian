@@ -137,7 +137,7 @@ mod tests {
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].session, "watch:a");
         assert_eq!(found[0].title.as_deref(), Some("Fix the cart"));
-        assert_eq!(found[0].activity.as_deref(), Some("Editing cart.ts"));
+        assert_eq!(found[0].activity.as_deref(), Some("Editing src/cart.ts"));
     }
 
     #[test]

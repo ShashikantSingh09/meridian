@@ -18,7 +18,7 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 
 use crate::approvals::{decision_body, read_request, respond, READ_TIMEOUT};
-use crate::claude::{code_change, command_output};
+use crate::claude::{code_change, command_output, keeps_list, task_created, todo_change};
 use crate::claude::tool_label;
 use crate::{AgentEvent, Approval, Envelope, Question, SessionStatus};
 
@@ -61,6 +61,7 @@ const TITLE_CHARS: usize = 64;
 const LABEL_CHARS: usize = 80;
 const FAILURE_CHARS: usize = 300;
 const PLAN_CHARS: usize = 6000;
+const REPLY_CHARS: usize = 4000;
 
 #[derive(Debug, thiserror::Error)]
 pub enum WatchError {
@@ -357,9 +358,11 @@ fn questions_of(input: &Value) -> Vec<Question> {
     let asked = input["questions"].as_array().into_iter().flatten();
     asked
         .filter_map(|q| {
+            let options: Vec<&Value> = q["options"].as_array()?.iter().filter(|o| o["label"].is_string()).collect();
             Some(Question {
                 text: q["question"].as_str()?.to_string(),
-                options: q["options"].as_array()?.iter().filter_map(|o| o["label"].as_str().map(str::to_string)).collect(),
+                options: options.iter().filter_map(|o| o["label"].as_str().map(str::to_string)).collect(),
+                details: options.iter().map(|o| o["description"].as_str().unwrap_or_default().to_string()).collect(),
                 multi: q["multiSelect"].as_bool().unwrap_or(false),
             })
         })
@@ -419,19 +422,31 @@ fn reply_body(tool: &str, input: &Value, reply: Reply) -> String {
 /// session fresh.
 fn events_for(name: &str, hook: &Value, running: bool) -> Vec<AgentEvent> {
     let tool = || tool_label(hook["tool_name"].as_str().unwrap_or("Tool"), &hook["tool_input"]);
+    // A helper's list is its own, and would replace the one on show.
+    let main_thread = hook["agent_id"].is_null();
     match name {
         "UserPromptSubmit" => vec![AgentEvent::status(SessionStatus::Running)],
         "PreToolUse" => {
-            let change = code_change(hook["tool_name"].as_str().unwrap_or_default(), &hook["tool_input"]);
-            [AgentEvent::status(SessionStatus::Running), AgentEvent::Activity { label: tool() }].into_iter().chain(change).collect()
+            let (name, input) = (hook["tool_name"].as_str().unwrap_or_default(), &hook["tool_input"]);
+            let step = (!keeps_list(name)).then(|| AgentEvent::Activity { label: tool() });
+            let list = todo_change(name, input).filter(|_| main_thread);
+            [AgentEvent::status(SessionStatus::Running)].into_iter().chain(step).chain(list).chain(code_change(name, input)).collect()
         }
-        "PostToolUse" => command_output(&hook["tool_input"], &hook["tool_response"]).into_iter().collect(),
+        "PostToolUse" => {
+            let printed = command_output(&hook["tool_input"], &hook["tool_response"]);
+            printed.into_iter().chain(task_created(&hook["tool_response"]).filter(|_| main_thread)).collect()
+        }
         // The error text can quote tool output, so only the call is named.
         "PostToolUseFailure" => vec![AgentEvent::Activity { label: format!("Failed: {}", tool()) }],
         "Notification" => {
             vec![AgentEvent::Activity { label: first_line(hook["message"].as_str().unwrap_or_default(), LABEL_CHARS) }]
         }
-        "Stop" => vec![AgentEvent::status(SessionStatus::Completed)],
+        "Stop" => {
+            // Goes no further than the screen: a terminal session is never written to a file.
+            let reply = hook["last_assistant_message"].as_str().map(str::trim).filter(|text| !text.is_empty());
+            let reply = reply.map(|text| AgentEvent::Text { text: text.chars().take(REPLY_CHARS).collect() });
+            reply.into_iter().chain([AgentEvent::status(SessionStatus::Completed)]).collect()
+        }
         "StopFailure" => {
             // On this event the last message is the API's error, not Claude's reply.
             let detail = ["last_assistant_message", "error_details", "error"]
@@ -667,11 +682,48 @@ mod tests {
     fn an_edit_shows_its_lines_and_a_command_shows_its_end() {
         let edit = json!({ "tool_name": "Edit", "tool_input": { "file_path": "C:\\a\\tax.ts", "old_string": "const VAT = 0.19", "new_string": "const VAT = 0.21" } });
         let events = events_for("PreToolUse", &edit, true);
-        assert!(events.contains(&AgentEvent::Diff { path: "tax.ts".into(), removed: vec!["const VAT = 0.19".into()], added: vec!["const VAT = 0.21".into()] }));
+        assert!(events.contains(&AgentEvent::Diff { path: "tax.ts".into(), removed: vec!["const VAT = 0.19".into()], added: vec!["const VAT = 0.21".into()], lines_removed: 1, lines_added: 1 }));
 
-        let run = json!({ "tool_input": { "command": "npm test" }, "tool_response": { "stdout": "a\nb\nc\nPASS 48" } });
+        let run = json!({ "tool_input": { "command": "npm test" }, "tool_response": { "stdout": "a\nb\nc\nd\n\nPASS 48\n\n" } });
         let events = events_for("PostToolUse", &run, true);
-        assert_eq!(events, [AgentEvent::Output { command: "npm test".into(), lines: vec!["b".into(), "c".into(), "PASS 48".into()], failed: false }]);
+        assert_eq!(events, [AgentEvent::Output { command: "npm test".into(), lines: vec!["b".into(), "c".into(), "d".into(), "PASS 48".into()], failed: false }]);
+    }
+
+    #[test]
+    fn a_to_do_list_is_shown_and_is_not_a_step() {
+        let write = json!({ "tool_name": "TodoWrite", "tool_input": { "todos": [{ "content": "Add a test", "status": "in_progress" }] } });
+        let items = vec![crate::Todo { id: "0".into(), text: "Add a test".into(), status: "in_progress".into() }];
+        assert_eq!(events_for("PreToolUse", &write, true), [AgentEvent::status(SessionStatus::Running), AgentEvent::Todos { items }]);
+
+        let mut helper = write.clone();
+        helper["agent_id"] = json!("a1");
+        assert_eq!(events_for("PreToolUse", &helper, true), [AgentEvent::status(SessionStatus::Running)]);
+    }
+
+    #[test]
+    fn a_terminal_reports_its_tasks_one_at_a_time() {
+        let made = json!({ "tool_name": "TaskCreate", "tool_input": { "subject": "Add a test" }, "tool_response": { "task": { "id": "1", "subject": "Add a test" } } });
+        assert_eq!(events_for("PostToolUse", &made, true), [AgentEvent::TodoChanged { id: "1".into(), text: Some("Add a test".into()), status: None }]);
+        assert_eq!(events_for("PreToolUse", &made, true), [AgentEvent::status(SessionStatus::Running)]);
+
+        let moved = json!({ "tool_name": "TaskUpdate", "tool_input": { "taskId": "1", "status": "completed" } });
+        assert_eq!(events_for("PreToolUse", &moved, true)[1], AgentEvent::TodoChanged { id: "1".into(), text: None, status: Some("completed".into()) });
+    }
+
+    #[test]
+    fn the_last_reply_comes_before_the_end_of_the_turn() {
+        let stop = json!({ "last_assistant_message": "  It now resizes once.\n" });
+        assert_eq!(events_for("Stop", &stop, true), [AgentEvent::Text { text: "It now resizes once.".into() }, AgentEvent::status(SessionStatus::Completed)]);
+        assert_eq!(events_for("Stop", &json!({ "last_assistant_message": " " }), true), [AgentEvent::status(SessionStatus::Completed)]);
+        assert_eq!(events_for("Stop", &json!({}), true), [AgentEvent::status(SessionStatus::Completed)]);
+    }
+
+    #[test]
+    fn a_question_keeps_what_its_options_mean() {
+        let asked = json!({ "questions": [{ "question": "Where?", "options": [{ "label": "Store", "description": "Stays simple" }, { "label": "Island" }] }] });
+        let question = &questions_of(&asked)[0];
+        assert_eq!(question.options, ["Store", "Island"]);
+        assert_eq!(question.details, ["Stays simple", ""]);
     }
 
     #[test]
@@ -1293,9 +1345,7 @@ mod tests {
         let mut failure = tool_event("PostToolUseFailure", "Bash", json!({ "command": "ls" }));
         failure["error"] = json!(secret);
         deliver(&watcher, failure).await;
-        let mut stop = event("Stop");
-        stop["last_assistant_message"] = json!(secret);
-        deliver(&watcher, stop).await;
+        deliver(&watcher, event("Stop")).await;
         let mystery = tool_event("PermissionRequest", "mcp__vault__put", json!({ "value": secret }));
         reply(&mut hook(&watcher, mystery).await).await;
 

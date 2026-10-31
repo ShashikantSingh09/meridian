@@ -56,6 +56,23 @@ pub struct Settings {
     /// "local", or the cloud service that hears.
     pub voice_hearing: String,
     pub voice_interrupt: bool,
+    /// What the assistant is called, and how it should come across.
+    pub assistant_name: String,
+    pub assistant_personality: String,
+    /// The microphone and output chosen for conversations. None follows Windows.
+    pub voice_microphone: Option<String>,
+    pub voice_output: Option<String>,
+    pub theme: String,
+    /// "theme", "windows" or "time".
+    pub theme_use: String,
+    pub theme_dark: String,
+    pub theme_light: String,
+    /// From clear to tinted, 0 to 100.
+    pub glass: u8,
+    pub custom_themes: Vec<serde_json::Value>,
+    pub assistant_calls_you: String,
+    /// "calm", "cheerful", "direct", "playful" or "own".
+    pub assistant_style: String,
     /// Keeps the microphone open for wake words, heard only on this PC. Off until turned on.
     pub wake_enabled: bool,
     pub wake_words: Vec<WakeWord>,
@@ -102,6 +119,18 @@ impl Default for Settings {
             voice_id: None,
             voice_hearing: "local".into(),
             voice_interrupt: true,
+            assistant_name: "Meridian".into(),
+            assistant_personality: String::new(),
+            voice_microphone: None,
+            voice_output: None,
+            theme: "midnight".into(),
+            theme_use: "theme".into(),
+            theme_dark: "midnight".into(),
+            theme_light: "daylight".into(),
+            glass: 58,
+            custom_themes: Vec::new(),
+            assistant_calls_you: String::new(),
+            assistant_style: "calm".into(),
             wake_enabled: false,
             wake_words: vec![WakeWord { text: "Hey Meridian".into(), on: true }, WakeWord { text: "Okay Meridian".into(), on: false }],
             wake_sensitivity: "balanced".into(),

@@ -158,11 +158,14 @@ if (mode === "engine") {
   pass("same conversation", (await state("a.sessionId")) === sid);
   pass("follow-up on the live process is faster", second.ms < first.ms, `${first.ms} -> ${second.ms} ms`);
 
-  await ev(`__meridian.sendAgentChat('Use a shell command to create a file named shell-test.txt here. If you cannot, say: no shell'); 'ok'`);
-  await sleep(600);
-  await until(`(() => { const a = __meridian.getState().agentChat; const s = __meridian.getState().sessions.find(x => x.id === a.sessionId); return s && s.status === 'completed' })()`, 60000, "no shell");
+  await ev(`__meridian.sendAgentChat('Use a shell command to create a file named shell-test.txt here.'); 'ok'`);
+  const asked = await until(`(() => { const a = __meridian.getState().agentChat; const s = __meridian.getState().sessions.find(x => x.id === a.sessionId); return s?.approval?.id })()`, 60000, "the question");
+  pass("the assistant asks before a command", !!asked);
   const cwd = await state("s.cwd");
-  pass("general mode has no shell", !fs.existsSync(path.join(cwd, "shell-test.txt")), cwd.split(/[\\/]/).slice(-2).join("/"));
+  pass("nothing ran before the answer", !fs.existsSync(path.join(cwd, "shell-test.txt")), cwd.split(/[\\/]/).slice(-2).join("/"));
+  await ev(`__meridian.answerApproval(${JSON.stringify(sid)}, ${JSON.stringify(asked)}, false); 'ok'`);
+  await until(`(() => { const a = __meridian.getState().agentChat; const s = __meridian.getState().sessions.find(x => x.id === a.sessionId); return s && s.status === 'completed' })()`, 60000, "after the no");
+  pass("a no stops the command", !fs.existsSync(path.join(cwd, "shell-test.txt")));
 
   await ev(`__meridian.sendAgentChat('Count from 1 to 400, one number per line, nothing else.'); 'ok'`);
   await until(`(() => { const a = __meridian.getState().agentChat; const s = __meridian.getState().sessions.find(x => x.id === a.sessionId); return s && s.status === 'running' && s.log.at(-1).kind === 'text' && s.log.at(-1).text.length > 40 })()`, 30000, "counting");

@@ -2247,6 +2247,7 @@ dependencies = [
  "tauri-plugin-single-instance",
  "tokio",
  "tokio-util",
+ "uuid",
  "voice",
  "webview2-com",
  "windows",

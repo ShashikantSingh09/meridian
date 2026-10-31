@@ -79,6 +79,27 @@ fn output() -> Result<(IAudioEndpointVolume, String)> {
     }
 }
 
+/// Sets the sound of the default output, and says where it ended up. `change` is in percent.
+pub fn change_volume(percent: Option<u8>, change: Option<i8>, muted: Option<bool>) -> Result<(u8, bool)> {
+    let _ = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
+    let (volume, _) = output()?;
+    unsafe {
+        let now = volume.GetMasterVolumeLevelScalar()?;
+        let wanted = percent.map(|p| f32::from(p) / 100.0).or(change.map(|c| now + f32::from(c) / 100.0));
+        if let Some(level) = wanted {
+            volume.SetMasterVolumeLevelScalar(level.clamp(0.0, 1.0), std::ptr::null())?;
+            // Choosing a volume means wanting to hear it.
+            if muted.is_none() {
+                volume.SetMute(false, std::ptr::null())?;
+            }
+        }
+        if let Some(muted) = muted {
+            volume.SetMute(muted, std::ptr::null())?;
+        }
+        Ok(((volume.GetMasterVolumeLevelScalar()? * 100.0).round() as u8, volume.GetMute()?.as_bool()))
+    }
+}
+
 fn watch_volume(report: Report) {
     let _ = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
     let callback: IAudioEndpointVolumeCallback = VolumeChanged(report).into();

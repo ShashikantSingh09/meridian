@@ -93,6 +93,11 @@ pub fn settings_json(url: &str) -> String {
 
 /// One line for the island saying what is being asked for.
 pub fn summarize(tool: &str, input: &Value) -> String {
+    match tool {
+        "mcp__meridian__read_screen" => return "Read what is on your screen".to_string(),
+        "mcp__meridian__start_agent" => return format!("Start an agent: {}", input["task"].as_str().unwrap_or_default()).chars().take(240).collect(),
+        _ => {}
+    }
     let text = match tool {
         "Bash" | "PowerShell" => input["command"].as_str(),
         "Edit" | "Write" | "MultiEdit" | "Read" | "NotebookEdit" => input["file_path"].as_str(),
@@ -168,6 +173,8 @@ async fn handle(mut socket: TcpStream, state: Arc<Mutex<State>>) {
     let id = uuid::Uuid::new_v4().to_string();
     let tool = payload["tool_name"].as_str().unwrap_or("Tool").to_string();
     let summary = summarize(&tool, &payload["tool_input"]);
+    // The app's own tools are named for the agent, so they are put in plain words here.
+    let tool = if tool.starts_with("mcp__meridian__") { "Action".to_string() } else { crate::claude::connector_tool(&tool).unwrap_or(tool) };
     let (tx, rx) = oneshot::channel();
     state.lock().unwrap().waiting.insert(id.clone(), tx);
     emit(AgentEvent::Approval { approval: Approval { id: id.clone(), tool, summary, ..Default::default() } });

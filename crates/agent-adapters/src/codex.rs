@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
 use crate::process::{spawn, Agent};
-use crate::{AgentEvent, Approval, Command, Emit, Launch, SessionStatus};
+use crate::{AgentEvent, Approval, Command, Emit, Launch, LimitWindow, SessionStatus};
 
 const INTERRUPT_GRACE: Duration = Duration::from_secs(4);
 
@@ -19,6 +19,23 @@ enum Pending {
     Thread,
     Turn,
     Other,
+}
+
+/// The windows of the user's plan, named by their length.
+fn limits_of(limits: &Value) -> Option<AgentEvent> {
+    let windows: Vec<LimitWindow> = ["primary", "secondary"]
+        .iter()
+        .filter_map(|key| {
+            let window = &limits[*key];
+            let name = match window["windowDurationMins"].as_u64()? {
+                300 => "five_hour".to_string(),
+                10_080 => "seven_day".to_string(),
+                other => format!("{other} minutes"),
+            };
+            Some(LimitWindow { window: name, used_percent: window["usedPercent"].as_f64()?, resets_at: window["resetsAt"].as_i64() })
+        })
+        .collect();
+    (!windows.is_empty()).then_some(AgentEvent::Limits { windows })
 }
 
 /// What a notification means for the session.
@@ -62,6 +79,7 @@ pub fn parse_notification(method: &str, params: &Value, last_error: &mut Option<
                 events.push(AgentEvent::Text { text: text.to_string() });
             }
         }
+        "account/rateLimits/updated" => events.extend(limits_of(&params["rateLimits"])),
         "thread/tokenUsage/updated" => {
             let total = &params["tokenUsage"]["total"];
             events.push(AgentEvent::Usage {
@@ -373,7 +391,7 @@ mod tests {
         std::fs::write(dir.join("late.js"), LATE_TURN).unwrap();
         let exe = dir.join("codex.cmd");
         std::fs::write(&exe, "@node \"%~dp0late.js\"\r\n").unwrap();
-        let launch = Launch { exe, cwd: ".".into(), prompt: "hi".into(), model: None, resume: None, restricted: false, images: vec![] };
+        let launch = Launch { exe, cwd: ".".into(), prompt: "hi".into(), model: None, resume: None, restricted: false, images: vec![], assistant: None };
         let (emit, events) = recorder();
         let (tx, rx) = mpsc::unbounded_channel();
         tx.send(Command::Send { text: "and this".into(), images: vec![] }).unwrap();
