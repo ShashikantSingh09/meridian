@@ -7,8 +7,10 @@ use windows::Foundation::{TimeSpan, TypedEventHandler};
 use windows::Globalization::Language;
 use windows::Media::SpeechRecognition::{
     ISpeechRecognitionConstraint, SpeechContinuousRecognitionCompletedEventArgs, SpeechContinuousRecognitionResultGeneratedEventArgs,
-    SpeechContinuousRecognitionSession, SpeechRecognitionConfidence, SpeechRecognitionListConstraint, SpeechRecognitionResultStatus, SpeechRecognizer,
+    SpeechContinuousRecognitionSession, SpeechRecognitionConfidence, SpeechRecognitionGrammarFileConstraint, SpeechRecognitionListConstraint, SpeechRecognitionResultStatus,
+    SpeechRecognizer,
 };
+use windows::Storage::StorageFile;
 use windows::System::UserProfile::GlobalizationPreferences;
 use windows::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
 use windows::Win32::System::StationsAndDesktops::{CloseDesktop, OpenInputDesktop, DESKTOP_CONTROL_FLAGS, DESKTOP_READOBJECTS};
@@ -31,14 +33,62 @@ pub fn clean(text: &str) -> Option<String> {
     fits.then_some(joined)
 }
 
-/// How easily it wakes: "sure", "balanced" or "easily". Anything else is treated as balanced.
-pub fn accepted(easiness: &str, confidence: SpeechRecognitionConfidence) -> bool {
+/// Longer than this and more was said than a name, which is also what talk in the room looks like.
+pub const NAME_MS: u64 = 1400;
+
+/// Below this a Low match is noise. Room talk scored 0.002 and 0.008 on the reference machine.
+const FAINTEST: f64 = 0.02;
+
+/// How easily it wakes: "sure", "balanced" or "easily". Anything else is treated as balanced. A name
+/// on its own may be faint, as a clear word across a room is. Inside a longer stretch of speech it
+/// has to be certain, because that is what people talking to each other sounds like.
+pub fn accepted(easiness: &str, confidence: SpeechRecognitionConfidence, raw: f64, spoken_ms: u64) -> bool {
     use SpeechRecognitionConfidence as C;
+    let alone = spoken_ms <= NAME_MS;
     match easiness {
         "sure" => confidence == C::High,
-        "easily" => confidence != C::Rejected,
-        _ => confidence == C::High || confidence == C::Medium,
+        "easily" => confidence != C::Rejected && (alone || confidence != C::Low),
+        _ if alone => confidence != C::Rejected && (confidence != C::Low || raw >= FAINTEST),
+        _ => confidence == C::High,
     }
+}
+
+const GREETINGS: [&str; 6] = ["hey", "hi", "hello", "okay", "ok", "oye"];
+
+/// Everything that counts as saying a wake word: the words themselves, the name alone, and the
+/// name with any greeting, because nobody keeps to one exact phrase.
+pub fn phrases(words: &[String]) -> Vec<String> {
+    let mut all: Vec<String> = Vec::new();
+    let mut add = |phrase: String| {
+        if !phrase.is_empty() && !all.contains(&phrase) {
+            all.push(phrase);
+        }
+    };
+    for word in words {
+        let word = word.to_lowercase();
+        add(word.clone());
+        let name = word.split_once(' ').filter(|(first, _)| GREETINGS.contains(first)).map_or(word.as_str(), |(_, rest)| rest);
+        add(name.to_string());
+        for greeting in GREETINGS {
+            add(format!("{greeting} {name}"));
+        }
+    }
+    all
+}
+
+/// A grammar that finds a phrase anywhere in what is said, so a command in the same breath counts.
+/// Phrases have been through `clean`, so they need no escaping beyond the apostrophe.
+pub fn grammar(phrases: &[String], language: &str) -> String {
+    let items: String = phrases.iter().map(|phrase| format!("<item>{}</item>", phrase.replace('\'', "&apos;"))).collect();
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?><grammar version="1.0" xml:lang="{language}" root="wake" mode="voice" tag-format="semantics/1.0" xmlns="http://www.w3.org/2001/06/grammar"><rule id="wake" scope="public"><item repeat="0-1"><ruleref special="GARBAGE"/></item><one-of>{items}</one-of><item repeat="0-1"><ruleref special="GARBAGE"/></item></rule></grammar>"#
+    )
+}
+
+/// The phrase in what was recognized, which can come wrapped in dots for the speech around it.
+pub fn phrase_in(text: &str, phrases: &[String]) -> Option<String> {
+    let text = text.to_lowercase();
+    phrases.iter().filter(|phrase| text.contains(phrase.as_str())).max_by_key(|phrase| phrase.len()).cloned()
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -149,9 +199,21 @@ fn language() -> Result<Language, VoiceError> {
     Ok(SpeechRecognizer::SystemSpeechLanguage()?)
 }
 
+pub fn use_grammar(recognizer: &SpeechRecognizer, phrases: &[String], language: &str) -> Result<bool, VoiceError> {
+    let path = std::env::temp_dir().join("meridian-wake-words.grxml");
+    std::fs::write(&path, grammar(phrases, language))?;
+    let file = StorageFile::GetFileFromPathAsync(&HSTRING::from(path.as_os_str()))?.join()?;
+    let constraint = SpeechRecognitionGrammarFileConstraint::CreateWithTag(&file, &HSTRING::from("wake"))?;
+    recognizer.Constraints()?.Append(&constraint.cast::<ISpeechRecognitionConstraint>()?)?;
+    Ok(recognizer.CompileConstraintsAsync()?.join()?.Status()? == SpeechRecognitionResultStatus::Success)
+}
+
 pub struct Heard {
     pub text: String,
     pub confidence: SpeechRecognitionConfidence,
+    pub raw: f64,
+    /// How long the whole utterance took, which tells a bare name from a name and a command.
+    pub spoken_ms: u64,
 }
 
 /// Open for as long as this is held. Dropping it closes the microphone.
@@ -163,12 +225,20 @@ pub struct Listener {
 impl Listener {
     /// `stopped` is told if Windows ends the session by itself, such as when the microphone goes.
     pub fn start(words: &[String], heard: impl Fn(Heard) + Send + 'static, stopped: impl Fn() + Send + 'static) -> Result<Self, VoiceError> {
-        let recognizer = SpeechRecognizer::Create(&language()?)?;
-        let phrases: IIterable<HSTRING> = words.iter().map(HSTRING::from).collect::<Vec<_>>().into();
-        let constraint = SpeechRecognitionListConstraint::CreateWithTag(&phrases, &HSTRING::from("wake"))?;
-        recognizer.Constraints()?.Append(&constraint.cast::<ISpeechRecognitionConstraint>()?)?;
-        if recognizer.CompileConstraintsAsync()?.join()?.Status()? != SpeechRecognitionResultStatus::Success {
-            return Err(VoiceError::Service("Windows could not use those wake words.".into()));
+        let language = language()?;
+        let recognizer = SpeechRecognizer::Create(&language)?;
+        let all = phrases(words);
+        let tag = language.LanguageTag()?.to_string();
+        // Falls back to exact phrases if a future Windows will not take the grammar.
+        if !use_grammar(&recognizer, &all, &tag).unwrap_or(false) {
+            let list: IIterable<HSTRING> = all.iter().map(HSTRING::from).collect::<Vec<_>>().into();
+            let constraint = SpeechRecognitionListConstraint::CreateWithTag(&list, &HSTRING::from("wake"))?;
+            let constraints = recognizer.Constraints()?;
+            constraints.Clear()?;
+            constraints.Append(&constraint.cast::<ISpeechRecognitionConstraint>()?)?;
+            if recognizer.CompileConstraintsAsync()?.join()?.Status()? != SpeechRecognitionResultStatus::Success {
+                return Err(VoiceError::Service("Windows could not use those wake words.".into()));
+            }
         }
         let session = recognizer.ContinuousRecognitionSession()?;
         session.SetAutoStopSilenceTimeout(QUIET_ALLOWED)?;
@@ -176,7 +246,8 @@ impl Listener {
             move |_, args: Ref<SpeechContinuousRecognitionResultGeneratedEventArgs>| {
                 if let Some(result) = args.as_ref().and_then(|args| args.Result().ok()) {
                     if result.Status()? == SpeechRecognitionResultStatus::Success {
-                        heard(Heard { text: result.Text()?.to_string(), confidence: result.Confidence()? });
+                        let spoken_ms = (result.PhraseDuration()?.Duration / 10_000).max(0) as u64;
+                        heard(Heard { text: result.Text()?.to_string(), confidence: result.Confidence()?, raw: result.RawConfidence()?, spoken_ms });
                     }
                 }
                 Ok(())
@@ -215,10 +286,45 @@ mod tests {
 
     #[test]
     fn how_easily_it_wakes_changes_what_counts() {
-        assert!(accepted("sure", C::High) && !accepted("sure", C::Medium));
-        assert!(accepted("balanced", C::Medium) && !accepted("balanced", C::Low));
-        assert!(accepted("easily", C::Low) && !accepted("easily", C::Rejected));
-        assert!(accepted("nonsense", C::Medium) && !accepted("nonsense", C::Low));
+        const ALONE: u64 = 800;
+        assert!(accepted("sure", C::High, 0.9, ALONE) && !accepted("sure", C::Medium, 0.9, ALONE));
+        assert!(accepted("balanced", C::Low, 0.3, ALONE) && !accepted("balanced", C::Rejected, 0.3, ALONE));
+        assert!(!accepted("balanced", C::Low, 0.008, ALONE), "this is what noise scored");
+        assert!(accepted("easily", C::Low, 0.002, ALONE) && !accepted("easily", C::Rejected, 0.3, ALONE));
+    }
+
+    #[test]
+    fn talk_in_the_room_does_not_wake_it() {
+        const TALK: u64 = 3000;
+        assert!(!accepted("balanced", C::Low, 0.5, TALK) && !accepted("balanced", C::Medium, 0.5, TALK));
+        assert!(accepted("balanced", C::High, 0.9, TALK), "a clear name and a command still works");
+        assert!(!accepted("easily", C::Low, 0.5, TALK));
+    }
+
+    #[test]
+    fn saying_the_name_any_natural_way_counts() {
+        let all = phrases(&["Hey Meridian".to_string()]);
+        for said in ["hey meridian", "meridian", "hi meridian", "okay meridian", "ok meridian", "hello meridian"] {
+            assert!(all.iter().any(|p| p == said), "{said}");
+        }
+        let mine = phrases(&["Suno Mira".to_string()]);
+        assert!(mine.iter().any(|p| p == "suno mira") && mine.iter().any(|p| p == "hey suno mira"));
+    }
+
+    #[test]
+    fn the_grammar_finds_a_phrase_anywhere_in_a_sentence() {
+        let text = grammar(&["hey meridian".to_string(), "bob's name".to_string()], "en-IN");
+        assert!(text.contains(r#"xml:lang="en-IN""#));
+        assert_eq!(text.matches(r#"special="GARBAGE""#).count(), 2);
+        assert!(text.contains("<item>hey meridian</item>") && text.contains("bob&apos;s name"));
+    }
+
+    #[test]
+    fn the_phrase_is_found_in_what_came_back() {
+        let all = phrases(&["Hey Meridian".to_string()]);
+        assert_eq!(phrase_in("... Hey Meridian ...", &all).as_deref(), Some("hey meridian"));
+        assert_eq!(phrase_in("meridian", &all).as_deref(), Some("meridian"));
+        assert_eq!(phrase_in("", &all), None);
     }
 
     const ON: Conditions = Conditions {

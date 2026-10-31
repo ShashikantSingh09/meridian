@@ -53,13 +53,49 @@ export function speakable(markdown: string): string {
 }
 
 /** Spoken ways of ending a conversation. Only as a whole sentence, so "stop the build" is not one. */
-export const isGoodbye = (words: string) => /^(that'?s all|that is all|thanks|thank you|stop|goodbye|bye|never mind|nothing)\W*$/i.test(words.trim());
+export const isGoodbye = (words: string) =>
+  /^(that'?s all|that is all|thanks|thank you|stop|goodbye|bye|never mind|nothing|bas|bas karo|bas itna hi|shukriya|dhanyavaad|बस|बस करो|बस इतना ही|शुक्रिया|धन्यवाद)[\s।.!]*$/iu.test(words.trim());
+
+/** What was said without the name it was called by, which the AI has no need to hear. */
+export function withoutWakeWord(words: string, wakeWords: string[]): string {
+  const name = (phrase: string) => phrase.toLowerCase().replace(/^(hey|hi|hello|okay|ok|oye)\s+/, "");
+  for (const phrase of wakeWords) {
+    const called = new RegExp(`^\\W*(?:(?:hey|hi|hello|okay|ok|oye)[\\s,]+)?${name(phrase).replace(/[^a-z' ]/g, "")}\\b[\\s,.!?:;-]*`, "i");
+    if (called.test(words)) return words.replace(called, "");
+  }
+  return words;
+}
+
+/** Letters apart, so a name written slightly differently by the hearing still counts. */
+function apart(a: string, b: string): number {
+  let row = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    const next = [i];
+    for (let j = 1; j <= b.length; j++) next[j] = Math.min(row[j]! + 1, next[j - 1]! + 1, row[j - 1]! + (a[i - 1] === b[j - 1] ? 0 : 1));
+    row = next;
+  }
+  return row[b.length]!;
+}
+
+/** Meridian as Hindi hearing writes it. */
+const MERIDIAN_IN_HINDI = /म[ेै]?र[िीे]?ड[िी]?[यए]न/u;
+
+/** Whether the words really hold a wake word. The check that talk in the room was not meant for it. */
+export function calledByName(words: string, wakeWords: string[]): boolean {
+  const said = words.toLowerCase().split(/[^\p{L}']+/u).filter(Boolean);
+  return wakeWords.some((phrase) => {
+    const name = phrase.toLowerCase().replace(/^(hey|hi|hello|okay|ok|oye)\s+/, "");
+    if (name === "meridian" && MERIDIAN_IN_HINDI.test(words)) return true;
+    const parts = name.split(/\s+/);
+    return parts.every((part) => said.some((word) => (part.length < 5 ? word === part : apart(word, part) <= 2)));
+  });
+}
 
 /** Yes or no, for a request that needs a decision. Anything else is not an answer. */
 export function yesOrNo(words: string): boolean | null {
-  const said = words.trim().replace(/[.!]+$/, "").toLowerCase();
-  if (/^(yes|yeah|yep|yes please|go ahead|do it|send it|allow it)$/.test(said)) return true;
-  if (/^(no|nope|no thanks|don't|do not|not now|deny it)$/.test(said)) return false;
+  const said = words.trim().replace(/[.!।,]+/g, "").replace(/\s+/g, " ").toLowerCase();
+  if (/^(yes|yeah|yep|yes please|go ahead|do it|send it|allow it|haan|han|haan kar do|haan ji|ji haan|theek hai|thik hai|kar do|हाँ|हां|हाँ कर दो|हां कर दो|जी हाँ|जी हां|ठीक है|कर दो)$/u.test(said)) return true;
+  if (/^(no|nope|no thanks|don't|do not|not now|deny it|nahin|nahi|mat karo|rehne do|nahin rehne do|नहीं|मत करो|रहने दो|नहीं रहने दो)$/u.test(said)) return false;
   return null;
 }
 

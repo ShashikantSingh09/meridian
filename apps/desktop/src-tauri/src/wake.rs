@@ -27,9 +27,12 @@ pub struct Status {
 }
 
 #[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct WakeHeard {
     word: String,
     test: bool,
+    /// How long the whole utterance took, so the interface can tell a name from a name and a command.
+    spoken_ms: u64,
 }
 
 pub struct Wake {
@@ -70,12 +73,11 @@ struct Asked {
 fn open(app: &AppHandle, asked: &Asked, ended: mpsc::Sender<()>) -> Result<Listener, String> {
     let handle = app.clone();
     let easiness = asked.easiness.clone();
+    let phrases = wake::phrases(&asked.words);
     let heard = move |heard: Heard| {
-        if !wake::accepted(&easiness, heard.confidence) {
-            return;
-        }
+        let Some(word) = wake::phrase_in(&heard.text, &phrases).filter(|_| wake::accepted(&easiness, heard.confidence, heard.raw, heard.spoken_ms)) else { return };
         let test = handle.state::<Wake>().testing_until.lock().unwrap().take().is_some();
-        let _ = handle.emit_to(island::LABEL, "wake-heard", WakeHeard { word: heard.text, test });
+        let _ = handle.emit_to(island::LABEL, "wake-heard", WakeHeard { word, test, spoken_ms: heard.spoken_ms });
     };
     Listener::start(&asked.words, heard, move || {
         let _ = ended.send(());

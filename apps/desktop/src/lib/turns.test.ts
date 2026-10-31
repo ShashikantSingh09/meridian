@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { filler, isGoodbye, looksFinished, sentences, silenceFor, speakable, yesOrNo } from "./turns";
+import { filler, isGoodbye, looksFinished, sentences, silenceFor, speakable, yesOrNo, withoutWakeWord, calledByName } from "./turns";
 
 describe("knowing when someone has finished", () => {
   it("hears a whole thought", () => {
@@ -70,5 +70,45 @@ describe("short answers", () => {
 
   it("varies what it says while it thinks", () => {
     expect(filler(0)).not.toBe(filler(1));
+  });
+});
+
+describe("the name it is called by", () => {
+  const words = ["Hey Meridian", "Suno Mira"];
+  it("comes off the front of what was said, however it was said", () => {
+    expect(withoutWakeWord("Hey Meridian, open Chrome", words)).toBe("open Chrome");
+    expect(withoutWakeWord("meridian what's the time", words)).toBe("what's the time");
+    expect(withoutWakeWord("Okay Meridian. Next song", words)).toBe("Next song");
+    expect(withoutWakeWord("Suno Mira gaana chalao", words)).toBe("gaana chalao");
+  });
+  it("stays when it is part of the question", () => {
+    expect(withoutWakeWord("what is the prime meridian", words)).toBe("what is the prime meridian");
+  });
+  it("leaves nothing when only the name was said", () => {
+    expect(withoutWakeWord("Hey Meridian.", words)).toBe("");
+  });
+});
+
+describe("answers in Hindi", () => {
+  it("count as yes and no", () => {
+    for (const yes of ["haan", "हाँ", "हाँ, कर दो", "ठीक है", "theek hai", "kar do"]) expect(yesOrNo(yes), yes).toBe(true);
+    for (const no of ["nahin", "नहीं", "मत करो", "रहने दो", "नहीं, रहने दो", "rehne do"]) expect(yesOrNo(no), no).toBe(false);
+  });
+  it("can end a conversation", () => {
+    for (const bye of ["bas", "बस", "शुक्रिया", "धन्यवाद"]) expect(isGoodbye(bye), bye).toBe(true);
+  });
+});
+
+describe("proving it was called", () => {
+  const words = ["Hey Meridian", "Meridian", "Suno Mira"];
+  it("accepts the name however the hearing wrote it", () => {
+    for (const said of ["Hey Meridian, open Chrome", "meridian what's the time", "Maridian open Spotify", "Meridien play music", "मेरिडियन गाना चलाओ", "मेरीडियन समय क्या है", "suno mira gaana chalao"]) {
+      expect(calledByName(said, words), said).toBe(true);
+    }
+  });
+  it("refuses talk that never said it", () => {
+    for (const said of ["हां वो देखना पड़ेगा तेरे साथ", "Quando você me explica essa? Do, que ela não posta", "what's for dinner tonight", "the meeting is at nine", ""]) {
+      expect(calledByName(said, words), said).toBe(false);
+    }
   });
 });

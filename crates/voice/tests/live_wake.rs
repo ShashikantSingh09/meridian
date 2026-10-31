@@ -114,3 +114,49 @@ fn says_what_it_sees() {
     let _ = session.CancelAsync().and_then(|stop| stop.join());
     std::thread::sleep(Duration::from_millis(300));
 }
+
+/// Which microphone the recognizer really opens, read from the sessions Windows lists on each one.
+#[test]
+#[ignore = "opens the real microphone"]
+fn says_which_microphone_it_uses() {
+    use windows::core::PCWSTR;
+    use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
+    use windows::Win32::Media::Audio::{eCapture, IAudioSessionControl2, IAudioSessionManager2, IMMDeviceEnumerator, MMDeviceEnumerator, DEVICE_STATE_ACTIVE};
+    use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL, STGM_READ};
+
+    apartment();
+    let listener = Listener::start(&["Hey Meridian".to_string()], |_| {}, || {}).unwrap();
+    std::thread::sleep(Duration::from_secs(2));
+    unsafe {
+        let enumerator: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL).unwrap();
+        let devices = enumerator.EnumAudioEndpoints(eCapture, DEVICE_STATE_ACTIVE).unwrap();
+        for d in 0..devices.GetCount().unwrap() {
+            let device = devices.Item(d).unwrap();
+            let name = device.OpenPropertyStore(STGM_READ).unwrap().GetValue(&PKEY_Device_FriendlyName).unwrap().to_string();
+            let manager: IAudioSessionManager2 = device.Activate(CLSCTX_ALL, None).unwrap();
+            let sessions = manager.GetSessionEnumerator().unwrap();
+            let mut users = Vec::new();
+            for s in 0..sessions.GetCount().unwrap() {
+                let control = sessions.GetSession(s).unwrap();
+                let state = control.GetState().unwrap();
+                let pid = control.cast::<IAudioSessionControl2>().unwrap().GetProcessId().unwrap_or(0);
+                users.push(format!("pid {pid} state {}", state.0));
+            }
+            println!("{name}: {users:?}");
+        }
+        let _ = PCWSTR::null();
+    }
+    drop(listener);
+}
+
+/// The grammar that finds a name inside a sentence has to compile here, or it falls back to exact phrases.
+#[test]
+#[ignore = "uses the Windows recognizer"]
+fn the_grammar_compiles_on_this_pc() {
+    apartment();
+    let language = Language::CreateLanguage(&HSTRING::from("en-IN")).unwrap();
+    let recognizer = SpeechRecognizer::Create(&language).unwrap();
+    let phrases = wake::phrases(&["Hey Meridian".to_string()]);
+    println!("{} phrases: {phrases:?}", phrases.len());
+    assert!(wake::use_grammar(&recognizer, &phrases, "en-IN").unwrap(), "the recognizer refused the grammar");
+}

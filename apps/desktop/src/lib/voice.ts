@@ -4,8 +4,8 @@
 // chose, and nothing is ever recorded to disk.
 
 import { bridge } from "./bridge";
-import { answerApproval, feel, getState, openPanel, openSettings, pickEngine, pushError, sendAgentChat, sendChat, setVoice, setWake, wakeTestHeard } from "./store";
-import { filler, isGoodbye, sentences, silenceFor, speakable, yesOrNo } from "./turns";
+import { answerApproval, feel, getState, openPanel, openSettings, pickEngine, pushError, sendAgentChat, sendChat, setVoice, setWake, startSession, wakeTestHeard, type Tab } from "./store";
+import { calledByName, filler, isGoodbye, sentences, silenceFor, speakable, withoutWakeWord, yesOrNo } from "./turns";
 
 export type VoiceMode = "hold" | "turn" | "conversation";
 export type VoicePhase = "listening" | "pause" | "thinking" | "speaking";
@@ -31,6 +31,23 @@ const FILLER_AFTER_MS = 1600;
 const TAP_MS = 280;
 const DOUBLE_TAP_MS = 380;
 
+interface Capture {
+  stream: MediaStream;
+  context: AudioContext;
+  node: AudioWorkletNode;
+}
+
+/** How much is kept while listening for a name. */
+const EAR_MS = 12_000;
+/** Taken from before the utterance as well, so its first word is not clipped. */
+const EAR_MARGIN_MS = 500;
+/** Longer than this after a name means there was more than the name. */
+const NAME_MS = 1400;
+
+let ear: Capture | null = null;
+let earOpening = false;
+let heardSoFar: Int16Array[] = [];
+
 let session: {
   mode: VoiceMode;
   stream: MediaStream;
@@ -46,12 +63,15 @@ let session: {
   deciding: { sessionId: string; approvalId: string; spoken: number } | null;
   /** What the chat held when the user last spoke, so an earlier reply is not taken for this one. */
   before: unknown;
+  /** Woken by words inside longer speech, so what was heard has to prove it was meant. */
+  provingName?: boolean;
 } | null = null;
 /** The microphone is on its way. There is no `session` until it arrives. */
 let opening = false;
 
 // Speech out.
 let output: AudioContext | null = null;
+let outputDevice: string | null = null;
 let meter: AnalyserNode | null = null;
 let playing: AudioBufferSourceNode[] = [];
 let playUntil = 0;
@@ -75,6 +95,16 @@ export function voiceLevel(): number {
   return Math.min(1, Math.sqrt(sum / samples.length) * 4);
 }
 
+/** Follows the setting as it changes. An unplugged device says so, and the reply still reaches the user. */
+function useChosenOutput(context: AudioContext) {
+  const chosen = getState().settings.voiceOutput;
+  if (chosen === outputDevice) return;
+  outputDevice = chosen;
+  (context as AudioContext & { setSinkId(id: string): Promise<void> }).setSinkId(chosen ?? "").catch(() => {
+    pushError({ title: "Your headphones are not connected", body: "Using the Windows default until they are back." });
+  });
+}
+
 function play(pcm: Int16Array, rate: number) {
   if (!output) {
     output = new AudioContext();
@@ -82,6 +112,7 @@ function play(pcm: Int16Array, rate: number) {
     meter.fftSize = 512;
     meter.connect(output.destination);
   }
+  useChosenOutput(output);
   const buffer = output.createBuffer(1, pcm.length, rate);
   const channel = buffer.getChannelData(0);
   for (let i = 0; i < pcm.length; i++) channel[i] = pcm[i]! / 32768;
@@ -120,20 +151,73 @@ function closeMicrophone(stream: MediaStream, context?: AudioContext) {
   void context?.close();
 }
 
-async function openMicrophone(mode: VoiceMode) {
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+/** The microphone the user chose, or the Windows default. */
+function microphoneSettings(): MediaTrackConstraints {
+  const chosen = getState().settings.voiceMicrophone;
+  return { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true, ...(chosen ? { deviceId: { exact: chosen } } : {}) };
+}
+
+async function captureMicrophone(handle: (chunk: Int16Array) => void): Promise<Capture> {
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: microphoneSettings() });
   let context: AudioContext | undefined;
   try {
     context = new AudioContext({ sampleRate: 16000 });
     await context.audioWorklet.addModule("/pcm-worklet.js");
     const node = new AudioWorkletNode(context, "pcm-chunks");
-    node.port.onmessage = (event: MessageEvent<Int16Array>) => onAudio(event.data);
+    node.port.onmessage = (event: MessageEvent<Int16Array>) => handle(event.data);
     context.createMediaStreamSource(stream).connect(node);
-    session = { mode, stream, context, sent: Promise.resolve(), floor: 0.01, heardSpeech: false, quietMs: 0, waitedMs: 0, loudMs: 0, turn: 0, deciding: null, before: null };
+    return { stream, context, node };
   } catch (err) {
     // Nothing holds these yet, so nothing else would ever close the microphone.
     closeMicrophone(stream, context);
     throw err;
+  }
+}
+
+async function openMicrophone(mode: VoiceMode) {
+  // Already open for wake words, so nothing said after the name is lost to reopening it.
+  const capture = ear ?? (await captureMicrophone(onAudio));
+  capture.node.port.onmessage = (event: MessageEvent<Int16Array>) => onAudio(event.data);
+  ear = null;
+  session = { mode, stream: capture.stream, context: capture.context, sent: Promise.resolve(), floor: 0.01, heardSpeech: false, quietMs: 0, waitedMs: 0, loudMs: 0, turn: 0, deciding: null, before: null };
+}
+
+/** Keeps the last few seconds in memory while listening for a name. It is never saved. */
+async function openEar() {
+  if (ear || earOpening || session) return;
+  earOpening = true;
+  try {
+    const capture = await captureMicrophone(remember);
+    // It may have been turned off while the microphone opened.
+    if (getState().wake.state === "listening" && !session) ear = capture;
+    else closeMicrophone(capture.stream, capture.context);
+  } catch {
+    // Listening for the name carries on without it, and only a command said in one breath is lost.
+  } finally {
+    earOpening = false;
+  }
+}
+
+function closeEar() {
+  if (ear) closeMicrophone(ear.stream, ear.context);
+  ear = null;
+  heardSoFar = [];
+}
+
+function remember(chunk: Int16Array) {
+  heardSoFar.push(chunk);
+  if (heardSoFar.length * CHUNK_MS > EAR_MS) heardSoFar.shift();
+}
+
+/** Hands over what was said with the name, so a command in the same breath is heard whole. */
+function hearOneBreath(spokenMs: number) {
+  const now = session;
+  const chunks = heardSoFar.slice(-Math.ceil((spokenMs + EAR_MARGIN_MS) / CHUNK_MS));
+  heardSoFar = [];
+  if (!now) return;
+  for (const chunk of chunks) {
+    const bytes = new Uint8Array(chunk.buffer.slice(0));
+    now.sent = now.sent.then(() => bridge.voiceHear(bytes)).then(() => {}, () => {});
   }
 }
 
@@ -247,7 +331,14 @@ async function finishTurn() {
     pushError({ title: "Could not hear that", body: String(err) });
   }
   if (session !== now) return;
-  const said = words || getState().voice?.words || "";
+  const wakeWords = getState().settings.wakeWords.filter((w) => w.on).map((w) => w.text);
+  const heard = words || getState().voice?.words || "";
+  // People talking near the microphone can sound like the name. Nothing goes further unless it was said.
+  if (now.provingName) {
+    now.provingName = false;
+    if (!calledByName(heard, wakeWords)) return endConversation();
+  }
+  const said = withoutWakeWord(heard, wakeWords);
   if (!said.trim() || (now.mode === "conversation" && isGoodbye(said))) return endConversation();
 
   if (now.deciding) {
@@ -354,8 +445,10 @@ async function followReply(turn: number, spoken = 0, answered: string | null = n
   else endConversation();
 }
 
-/** Starts a conversation, as the hotkey does. `woken` means it was called by name. */
-export async function startVoice(mode: VoiceMode, woken = false) {
+const currentSession = () => session;
+
+/** Starts a conversation, as the hotkey does. `spokenMs` is set when it was called by name, and says for how long. */
+export async function startVoice(mode: VoiceMode, spokenMs?: number) {
   if (opening) return;
   if (session) {
     if (getState().voice?.phase === "speaking") await interrupted();
@@ -364,9 +457,18 @@ export async function startVoice(mode: VoiceMode, woken = false) {
   opening = true;
   try {
     await openMicrophone(mode);
-    await listen(mode, woken);
+    await listen(mode, spokenMs !== undefined);
+    if (spokenMs !== undefined) {
+      hearOneBreath(spokenMs);
+      // A command came with the name, and it has already been said.
+      if (spokenMs > NAME_MS) {
+        const now = currentSession();
+        if (now) now.provingName = true;
+        void finishTurn();
+      }
+    }
   } catch (err) {
-    failed(/permission|notallowed|notfound/i.test(String(err)) ? "No microphone" : "Voice is not set up yet", err);
+    failed(/permission|notallowed|notfound|overconstrained/i.test(String(err)) ? "No microphone" : "Voice is not set up yet", /overconstrained/i.test(String(err)) ? "The microphone you chose is not connected. Plug it in, or choose another under Settings, Voice." : err);
   } finally {
     opening = false;
   }
@@ -408,7 +510,20 @@ export function wireVoice() {
   void bridge.onVoiceKey(onKey);
   // A reload can end a conversation without saying so.
   void bridge.wakeTalking(false);
-  void bridge.onWakeState(setWake);
-  void bridge.wakeStatus().then(setWake);
-  void bridge.onWakeHeard(({ word, test }) => (test ? wakeTestHeard(word) : void startVoice(getState().settings.wakeAfter, true)));
+  void bridge.onWakeState((status) => {
+    setWake(status);
+    if (status.state === "listening") void openEar();
+    else closeEar();
+  });
+  void bridge.onAssistantOpen((tab) => openPanel(tab as Tab));
+  void bridge.onAssistantAgent(({ task, folder }) => {
+    const cwd = folder || getState().settings.agentDefaultDir;
+    if (!cwd) return pushError({ title: "Choose a project folder", body: "Tell it which folder to work in." });
+    void startSession({ agent: "claude-code", cwd, prompt: task, model: null, restricted: false, images: [] }, "agents", "project");
+  });
+  void bridge.wakeStatus().then((status) => {
+    setWake(status);
+    if (status.state === "listening") void openEar();
+  });
+  void bridge.onWakeHeard(({ word, test, spokenMs }) => (test ? wakeTestHeard(word) : void startVoice(getState().settings.wakeAfter, spokenMs)));
 }

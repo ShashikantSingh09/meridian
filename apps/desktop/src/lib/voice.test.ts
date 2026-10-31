@@ -11,21 +11,25 @@ type Session = { id: string; agent: string; status: string; log: { kind: string;
 const h = vi.hoisted(() => ({
   app: {
     voice: null as { phase: string; mode: string } | null,
-    settings: { voiceInterrupt: true, wakeAfter: "turn" },
+    settings: { voiceInterrupt: true, wakeAfter: "turn", wakeWords: [{ text: "Hey Meridian", on: true }], voiceMicrophone: null as string | null, voiceOutput: null },
+    wake: { state: "off" },
     chat: { messages: [] as { role: string; content: string }[] },
     chatPending: false,
     agentChat: { agent: null as string | null, sessionId: null as string | null },
     sessions: [] as Session[],
   },
   key: (_down: boolean): Promise<void> => Promise.resolve(),
-  wake: (_heard: { word: string; test: boolean }) => {},
+  wake: (_heard: { word: string; test: boolean; spokenMs: number }) => {},
 }));
 
 vi.mock("./bridge", () => ({
   bridge: {
     onVoiceKey: (handler: (down: boolean) => Promise<void>) => void (h.key = handler),
     onWakeState: vi.fn(async () => {}),
-    onWakeHeard: (handler: (heard: { word: string; test: boolean }) => void) => void (h.wake = handler),
+    onWakeHeard: (handler: (heard: { word: string; test: boolean; spokenMs: number }) => void) => void (h.wake = handler),
+    onAssistantOpen: vi.fn(async () => {}),
+    onAssistantAgent: vi.fn(async () => {}),
+    voiceHear: vi.fn(async () => ""),
     wakeStatus: vi.fn(async () => ({ state: "off", why: "" })),
     wakeTalking: vi.fn(async () => {}),
     voiceHearStart: vi.fn(async () => {}),
@@ -47,6 +51,7 @@ vi.mock("./store", () => ({
   sendChat: vi.fn(async () => {}),
   setVoice: (voice: typeof h.app.voice) => void (h.app.voice = voice),
   setWake: vi.fn(),
+  startSession: vi.fn(),
   wakeTestHeard: vi.fn(),
 }));
 
@@ -170,15 +175,43 @@ describe("when something fails", () => {
 describe("a wake word", () => {
   it("starts a conversation as the setting says, and answers to its name", async () => {
     h.app.settings.wakeAfter = "conversation";
-    h.wake({ word: "Hey Meridian", test: false });
+    h.wake({ word: "Hey Meridian", test: false, spokenMs: 700 });
     micOpens();
     await settled();
     expect(h.app.voice).toMatchObject({ phase: "listening", mode: "conversation", woken: true });
     h.app.settings.wakeAfter = "turn";
+    endConversation();
+  });
+
+  it("takes a command said in the same breath, without the name", async () => {
+    vi.mocked(bridge.voiceHearEnd).mockResolvedValue("Hey Meridian, open Chrome");
+    h.wake({ word: "hey meridian", test: false, spokenMs: 2400 });
+    micOpens();
+    await vi.waitFor(() => expect(sendChat).toHaveBeenCalledWith("open Chrome", [], true));
+    endConversation();
+  });
+
+  it("drops talk in the room that only sounded like the name", async () => {
+    vi.mocked(bridge.voiceHearEnd).mockResolvedValue("हां वो देखना पड़ेगा तेरे साथ");
+    h.wake({ word: "meridian", test: false, spokenMs: 2600 });
+    micOpens();
+    await vi.waitFor(() => expect(h.app.voice).toBeNull());
+    expect(sendChat).not.toHaveBeenCalled();
+    expect(sendAgentChat).not.toHaveBeenCalled();
+  });
+
+  it("opens the microphone the user chose", async () => {
+    h.app.settings.voiceMicrophone = "headset";
+    void h.key(true);
+    micOpens();
+    await settled();
+    expect(getUserMedia.mock.lastCall).toEqual([{ audio: expect.objectContaining({ deviceId: { exact: "headset" } }) }]);
+    h.app.settings.voiceMicrophone = null;
+    endConversation();
   });
 
   it("starts nothing during a test, and reports what it heard", async () => {
-    h.wake({ word: "Hey Meridian", test: true });
+    h.wake({ word: "Hey Meridian", test: true, spokenMs: 700 });
     await settled();
     expect(getUserMedia).not.toHaveBeenCalled();
     expect(wakeTestHeard).toHaveBeenCalledWith("Hey Meridian");
