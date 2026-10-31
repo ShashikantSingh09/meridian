@@ -28,9 +28,12 @@ unproven. No cloud voice has been used. See `docs/KNOWN_ISSUES.md`.
 
 | Check | Result |
 |---|---|
-| Volume key | The change callback fired on a real volume change |
-| Windows voice | 6.73 s of 16 kHz audio through the real channel, with nothing played aloud |
-| Updates | Reads the real latest release through `gh` |
+| Update, end to end | A 0.3.9 build of this code pressed Update now, fetched v0.4.0 from the private repository, passed the checksum, quit, installed silently and restarted on 0.4.0, in about a minute |
+| Volume keys | Real key presses reached the installed island, which showed the level view |
+| Windows voice | 6.73 s of 16 kHz audio through the real channel, and the Hear button in the installed app, with nothing played aloud |
+| Microphone path | The audio worklet loads under the release build's security policy |
+| Claude Code session | Shows as working on the installed island with no setup |
+| v0.4.0 installer | Defender found no threats |
 | Tests | 533 Rust, 65 unit, 61 UI |
 
 ## 2026-10-31: Chat that really continues, and eyes with feelings

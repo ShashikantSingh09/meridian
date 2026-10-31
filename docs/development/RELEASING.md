@@ -44,6 +44,17 @@ click. See `docs/DECISIONS.md`, D52.
 The checksum catches a damaged download. It proves nothing about who built the file. Updating customers needs a public host and a
 signed update, so it needs the plan in D52 first.
 
+To try an update without publishing a second release, build the current code with an older version number, install that, and press
+Update now. It then fetches the real latest release:
+
+```powershell
+'{ "version": "0.3.9" }' | Set-Content older.json
+npx tauri build --bundles nsis --config older.json
+```
+
+A change to `update.rs` reaches a PC only with the update after the one that carries it, because the copy already installed does the
+installing.
+
 ## One-time setup
 
 Get a code-signing certificate. Without one, Windows SmartScreen warns every customer.

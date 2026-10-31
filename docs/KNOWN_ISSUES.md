@@ -94,15 +94,14 @@ What stands between this build and a stranger installing it. Only the owner can 
 |---|---|---|
 | All MCP providers | Discovery was checked anonymously against each vendor on 2026-10-30. No account was connected, so sign-in, tool names and result shapes are unproven. Tool preferences are educated guesses, and the user can pick another tool | Connect one |
 | Terminal dialog while a request waits | Real Claude Code in print mode was followed and answered from the app. In an interactive terminal, the docs do not say if the dialog shows while the hook is held. At worst it is delayed up to 295 s | Run `claude` in a terminal with following on, and trigger a request |
-| Updates | The path is built. No update has been downloaded or installed | Follow `RELEASING.md` |
 | Gmail, Google Calendar, Outlook, Microsoft Calendar | No real account has been connected. OAuth and all four connectors are tested against canned responses, so real-world quirks may remain. | Follow `docs/development/CONNECTING_ACCOUNTS.md` |
 | Codex full turn | Handshake, thread start and failure path ran for real. A successful turn, streaming, approvals and usage did not, because the sign-in here has expired. | Run `codex login`, then `node tests/live/e2e.mjs codex` |
 | Cloud chat APIs | No live call was made to any cloud API. Adapters are tested against a real local socket. An OpenRouter key was added here, but it was not used, to avoid spending it. | Send a message |
 | Ollama, LM Studio, llama.cpp | Not installed here. Tested through the real app against a stand-in server. | Run a real server |
-| Local voices and hearing | Downloads, checksums and unpacking were checked by hand. The engine itself has never run, because loading the downloaded DLL here was refused by a safety check. Kokoro's speaker names are from memory | Use Download in Settings, Voice, or run `cargo test -p voice --test live_local -- --ignored` with `MERIDIAN_SPEECH_DIR` set |
-| Cloud voices and hearing | ElevenLabs, OpenAI, Cartesia and Deepgram are written from their docs and tested on pure parts only. No key was used | Add a key in Settings, Voice |
+| Local voices and hearing | The owner downloaded the engine and hearing through the app on 2026-10-31, and no crash was recorded. Nobody has confirmed they work, because loading the downloaded DLL during development was refused by a safety check. Kokoro's speaker names are from memory | Press Ctrl Alt V and talk, or run `cargo test -p voice --test live_local -- --ignored` with `MERIDIAN_SPEECH_DIR` set |
+| Cloud voices and hearing | The owner added an ElevenLabs key and picked a voice, so its voice list works for real. Whether it has spoken is not recorded. OpenAI, Cartesia, Deepgram and cloud hearing are written from their docs and tested on pure parts only | Press a play button in Settings, Voice |
 | Talking with a real microphone | A recording stood in for the mic, through the real audio path. Interrupting a reply needs a real person and real speakers | Talk to it |
-| Brightness and battery | Only a desktop was available, so neither has fired for real. Volume was proved live | Try on a laptop |
+| Brightness and battery | Only a desktop was available, so neither has fired for real. Volume keys were proved on the installed app | Try on a laptop |
 | Real media players | Tested with a silent session of its own. Spotify, browsers and VLC not tried, so artwork in particular is unproven. | Play something |
 | Focus return after Esc | Implemented. The check is unreliable while someone else is using the machine. | Try it |
 | Concurrent live agents | Multitask view is tested with sample data only. | Start two sessions |
@@ -165,6 +164,8 @@ What stands between this build and a stranger installing it. Only the owner can 
   key. Until one is set, the microphone button opens Settings, Voice and says why. Speaking needs neither, because the Windows voice is
   always there.
 - Cloud hearing runs at the end of a turn, so words do not appear while talking. Only local hearing shows them live.
+- What is new on the Updates page is the release's notes, which still open with the install instructions from `release.yml`.
+- A portable copy that updates installs the normal version, then restarts the portable one, which is still the old version.
 - Windows reports screen brightness only for screens it controls, which means a laptop's own. A desktop monitor has no brightness to
   show, unless it is read over its cable, which is slow and not supported by every monitor.
 
