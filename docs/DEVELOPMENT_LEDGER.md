@@ -1,5 +1,17 @@
 # Development ledger
 
+## 2026-10-31: Voice failed until Chat had been opened
+
+The owner reported that voice did not work. Each layer was tested in the installed app, with their own recordings standing in for the microphone.
+
+- **Voice had no AI to ask.** Only the Chat tab chose an engine, so after every start or update a spoken turn ended on "No AI provider ready",
+  even with Claude Code signed in. Home's ask box and sharing a capture had the same hole. The choice now lives in the store as `pickEngine`.
+- **Talk in Chat gave no sign of listening.** The panel outranked the voice view, so the microphone opened with nothing on screen and no Stop
+  button. An open microphone now always shows, and the panel returns when the turn ends.
+- **Proved after the fix, with Chat never opened:** hold and tap, a Hindi question answered and spoken in Hindi through ElevenLabs. A page reload
+  during testing removed the stand-in clip, so the real microphone was used for about 30 s and answered a real question, with talking over the reply working too.
+- **What is new now always shows** under the version, and releases carry only what changed. See `docs/research/voice-hindi-test.md` for the hearing results.
+
 ## 2026-10-31: End-to-end pass on v0.4.1
 
 Run through the real app, with real Claude Code sessions, on the reference machine with a 180 Hz display.
