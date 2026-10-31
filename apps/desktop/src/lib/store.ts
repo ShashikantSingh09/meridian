@@ -584,6 +584,21 @@ export function selectEngine(id: string) {
   void selectProvider(id);
 }
 
+/** Chat opens on an AI, so nobody meets an empty choice. Asking from anywhere else gets the same one. */
+export function pickEngine() {
+  if (state.chat.providerId || state.agentChat.agent) return;
+  const provider = usableProvider();
+  const agent = state.agents.find((a) => a.installed)?.id;
+  if (provider) void selectProvider(provider.id);
+  else if (agent) selectEngine(agent);
+}
+
+/** Asks whichever AI Chat is on. */
+export function sendToEngine(text: string, images: string[] = []) {
+  pickEngine();
+  return state.agentChat.agent ? sendAgentChat(text, images) : sendChat(text, images);
+}
+
 export const setAgentMode = (mode: AgentMode) =>
   set({ agentChat: { ...state.agentChat, mode, sessionId: null } });
 export const setAgentCwd = (cwd: string) => set({ agentChat: { ...state.agentChat, cwd, sessionId: null } });
@@ -1095,7 +1110,11 @@ function tintOf(src: string, done: (tint: string) => void) {
   image.src = src;
 }
 
-export const setVoice = (voice: VoiceState | null) => set({ voice });
+export function setVoice(voice: VoiceState | null) {
+  // The panel steps aside for a conversation, so its window must not catch clicks meanwhile.
+  if (state.panelOpen && !voice !== !state.voice) void bridge.setInteractive(!voice);
+  set({ voice });
+}
 
 let feelingTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -1191,6 +1210,7 @@ export function shareTarget() {
 export function shareCapture(question: string) {
   const { capture, includeImage } = state.screen;
   if (!capture) return;
+  pickEngine();
   const target = shareTarget();
   const from = capture.window ? ` (${capture.window.process}: ${capture.window.title})` : "";
   const text = capture.text
@@ -1199,7 +1219,7 @@ export function shareCapture(question: string) {
   const images = includeImage && target.vision ? [capture.image] : [];
   discardCapture();
   setTab("chat");
-  void (state.agentChat.agent ? sendAgentChat(text, images) : sendChat(text, images));
+  void sendToEngine(text, images);
 }
 
 const suggestionFrom = (s: ScreenSuggestion): Suggestion => ({

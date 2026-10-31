@@ -1,6 +1,6 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { bridge } from "./bridge";
-import { answerApproval, openPanel, pushError, sendAgentChat, sendChat } from "./store";
+import { answerApproval, openPanel, pickEngine, pushError, sendAgentChat, sendChat } from "./store";
 import { endConversation, wireVoice } from "./voice";
 
 // The real conversation logic, with no microphone and no sound: the browser's audio, the bridge and
@@ -36,6 +36,7 @@ vi.mock("./store", () => ({
   getState: () => h.app,
   openPanel: vi.fn(),
   openSettings: vi.fn(),
+  pickEngine: vi.fn(),
   pushError: vi.fn(),
   sendAgentChat: vi.fn(async () => {}),
   sendChat: vi.fn(async () => {}),
@@ -156,6 +157,15 @@ describe("when something fails", () => {
     await holdAndSay("hello");
     await vi.waitFor(() => expect(h.app.voice).toBeNull());
     expect(sendAgentChat).toHaveBeenCalledOnce();
+  });
+});
+
+describe("choosing who to ask", () => {
+  it("talks to the AI Chat would open on, even if Chat has never been opened", async () => {
+    vi.mocked(pickEngine).mockImplementationOnce(() => void (h.app.agentChat.agent = "claude-code"));
+    await holdAndSay("hello");
+    await vi.waitFor(() => expect(sendAgentChat).toHaveBeenCalledOnce());
+    expect(sendChat).not.toHaveBeenCalled();
   });
 });
 

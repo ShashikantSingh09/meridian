@@ -3,7 +3,7 @@
 // audio goes no further than the hearing the user chose. Nothing is ever recorded to disk.
 
 import { bridge } from "./bridge";
-import { answerApproval, feel, getState, openPanel, openSettings, pushError, sendAgentChat, sendChat, setVoice } from "./store";
+import { answerApproval, feel, getState, openPanel, openSettings, pickEngine, pushError, sendAgentChat, sendChat, setVoice } from "./store";
 import { filler, isGoodbye, sentences, silenceFor, speakable, yesOrNo } from "./turns";
 
 export type VoiceMode = "hold" | "turn" | "conversation";
@@ -289,6 +289,7 @@ function replySoFar(): { text: string; done: boolean; waiting: { sessionId: stri
 }
 
 function ask(words: string) {
+  pickEngine();
   const app = getState();
   const now = session!;
   const turn = ++now.turn;

@@ -12,6 +12,7 @@ import {
   clearDraft,
   isReady,
   newAgentConversation,
+  pickEngine,
   refreshAuth,
   selectAgentConversation,
   selectEngine,
@@ -236,12 +237,7 @@ function ApiChat() {
   const firstAgent = agents.find((a) => a.installed)?.id;
   const noEngine = !first && !firstAgent;
 
-  // Chat opens on an AI, so nobody meets an empty choice.
-  useEffect(() => {
-    if (chat.providerId) return;
-    if (first) void selectProvider(first);
-    else if (firstAgent) selectEngine(firstAgent);
-  }, [chat.providerId, first, firstAgent]);
+  useEffect(pickEngine, [chat.providerId, first, firstAgent]);
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();

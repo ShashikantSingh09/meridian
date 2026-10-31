@@ -93,7 +93,8 @@ export const waitingApproval = <T extends SessionSummary>(sessions: T[]) =>
  * notices because an agent is blocked until someone answers.
  */
 export function deriveView(s: Snapshot): IslandView {
-  if (s.panelOpen) return "expanded";
+  // A conversation can start from inside the panel, and an open microphone always shows.
+  if (s.panelOpen && !s.voice) return "expanded";
   if (s.listening) return "listening";
   if (s.capturing) return "screen";
   if (waitingApproval(s.sessions)) return "working";

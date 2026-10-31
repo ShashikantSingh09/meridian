@@ -8,7 +8,7 @@ import { activeSessions } from "../island/machine";
 import { AgentMark, Bars } from "../island/marks";
 import { Artwork, Clock, hostOf } from "../island/views";
 import { Icon } from "../lib/icons";
-import { clearDraft, endFocus, openLink, openPanel, openSettings, sendChat, setDraft, setTab, startFocus, useApp } from "../lib/store";
+import { clearDraft, endFocus, openLink, openPanel, openSettings, sendToEngine, setDraft, setTab, startFocus, useApp } from "../lib/store";
 
 const HOUR = 3_600_000;
 const cardEnter = (i: number) =>
@@ -145,7 +145,7 @@ export function Home() {
     if (!prompt || pending) return;
     clearDraft();
     setTab("chat");
-    void sendChat(prompt);
+    void sendToEngine(prompt);
   };
 
   return (

@@ -73,6 +73,15 @@ describe("deriveView", () => {
     expect(deriveView({ ...base, panelOpen: true, listening: true, errors: [error] })).toBe("expanded");
   });
 
+  it("shows an open microphone even over the panel", () => {
+    expect(deriveView({ ...base, panelOpen: true, voice: true })).toBe("voice");
+  });
+
+  it("still puts a blocked approval ahead of a conversation started from the panel", () => {
+    const blocked = session({ status: "waiting", approval: { id: "a", tool: "Bash", summary: "x" } });
+    expect(deriveView({ ...base, panelOpen: true, voice: true, sessions: [blocked] })).toBe("working");
+  });
+
   it("puts a blocked approval ahead of errors and notices", () => {
     const approval = { id: "a", tool: "Bash", summary: "rm -rf build" };
     const sessions = [session({ status: "waiting", approval })];
