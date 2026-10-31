@@ -2,6 +2,7 @@ import { AssistantSection } from "./Assistant";
 import { showDevices } from "./Devices";
 import { FollowSwitch } from "./Follow";
 import { Markdown } from "./Markdown";
+import { Menu } from "./Menu";
 import { ScreenSection } from "./Screen";
 import { ThemesSection } from "./Themes";
 import { VoiceSection } from "./Voice";
@@ -12,9 +13,9 @@ import { useState, useEffect } from "react";
 import { Face, FACES, type Mood } from "../island/faces";
 import { bridge } from "../lib/bridge";
 import { Brand } from "../lib/brands";
-import { checkForUpdates, clearHistory, feel, installUpdate, PREVIEWS, refreshAuth, setSettingsSection, showPreview, testWake, updateSettings, useApp, type SettingsSection } from "../lib/store";
+import { checkForUpdates, clearHistory, feel, installUpdate, PREVIEWS, raiseMicrophone, refreshAuth, setSettingsSection, showPreview, testWake, updateSettings, useApp, type SettingsSection } from "../lib/store";
 import { Icon, type IconName } from "../lib/icons";
-import type { AgentInfo, Settings, WakeWord } from "../lib/types";
+import type { AgentInfo, Settings, WakeTested, WakeWord } from "../lib/types";
 import { Integrations } from "./Integrations";
 import { Providers } from "./Providers";
 
@@ -130,15 +131,10 @@ function IslandSection() {
           { value: "right", label: "Right" },
         ]} />
         {monitors.length > 1 && (
-          <label className="setting">
-            <span className="label">Display</span>
-            <select value={monitor} onChange={(e) => void updateSettings({ islandMonitor: e.target.value })}>
-              <option value="primary">Primary</option>
-              {monitors.map((m) => (
-                <option key={m} value={m}>{m}</option>
-              ))}
-            </select>
-          </label>
+          <div className="setting">
+            <span className="label grow">Display</span>
+            <Menu label="Display" value={monitor} items={[{ value: "primary", label: "Primary" }, ...monitors.map((m) => ({ value: m, label: m }))]} empty="Primary" onPick={(islandMonitor) => void updateSettings({ islandMonitor })} />
+          </div>
         )}
         <Choice name="animationSpeed" label="Animation speed" options={[
           { value: 0.75, label: "Relaxed" },
@@ -288,6 +284,20 @@ function UpdatesSection() {
 }
 
 const MOST_WAKE_WORDS = 8;
+/** Below this a voice held on the meter did not reach the recognizer. It failed at 0.15 and worked at 0.6. */
+const QUIET_LEVEL = 0.3;
+
+const tooQuiet = (microphone?: WakeTested) => !!microphone && (microphone.muted || microphone.level < QUIET_LEVEL);
+
+/** Why a test heard nothing, as far as can be told. */
+function whyMissed(microphone?: WakeTested) {
+  if (!tooQuiet(microphone)) return "Heard you, but not the word. Try again, or set How easily it wakes to Easily.";
+  const { name, muted, percent } = microphone!;
+  if (muted) return `${name} is muted in Windows, so wake words hear nothing.`;
+  return percent < 100
+    ? `${name} is too quiet for wake words. Windows has it at ${percent}%.`
+    : `Did not hear you on ${name}. If you spoke, it is too quiet even at 100%. Move closer to it, or make another microphone the Windows default.`;
+}
 
 /** The switch for the always-on microphone, and what it listens for. */
 function WakeSection() {
@@ -312,7 +322,7 @@ function WakeSection() {
       : test.phase === "heard"
         ? `Heard ${test.word}.`
         : test.phase === "missed"
-          ? "Did not hear it. Try again, or set How easily it wakes to Easily."
+          ? whyMissed(test.microphone)
           : first ? `Press Test, then say ${first}.` : "Turn on a wake word first.";
 
   return (
@@ -349,6 +359,7 @@ function WakeSection() {
             <span className="label">Try it</span>
             <span className="meta" role="status">{trying}</span>
           </span>
+          {test.phase === "missed" && tooQuiet(test.microphone) && (test.microphone!.muted || test.microphone!.percent < 100) && <button className="solid" onClick={raiseMicrophone}>Raise to 100%</button>}
           <button className="ghost" disabled={!first || test.phase === "waiting"} onClick={testWake}>Test</button>
         </div>
       </div>

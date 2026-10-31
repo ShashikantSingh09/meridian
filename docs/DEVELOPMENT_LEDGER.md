@@ -1,5 +1,26 @@
 # Development ledger
 
+## 2026-11-01: Wake words that heard nothing, and dropdowns that ignored the theme
+
+The owner chose their microphone and saw its level move, but the wake test said it heard nothing, and the device lists opened as black system boxes.
+
+- **Why wake words were deaf.** The chosen microphone was the Windows default, so the choice was not the problem. Its Windows slider sat at 26%. Windows'
+  Voice Clarity filter sits on that microphone and removes what it does not take for clear speech, and the recognizer gets no gain of its own. Measured on the
+  owner's voice: about 0.15 on the meter at 26% and nothing recognized, about 0.6 at 100% and five of six phrases recognized, with raw scores from 0.28 to 0.88.
+  Conversations go through the browser's gain, which is why Meridian's bar moved and made the microphone look fine.
+- **The test now says why.** It reports the microphone, its slider and how loud it held, ignoring clicks, and offers to raise a low slider. Only that button
+  touches the setting. The bar under Try them now shows the real level, with no gain.
+- **The webview may no longer move the slider.** `WebRtcAllowInputVolumeAdjustment` is off. It is a guard: nothing tonight caught it moving the slider, and
+  what set it to 26% is unknown.
+- **Every system dropdown is gone.** A system list cannot follow a theme, so all of them use the app's own menu, which opens upward when there is no room below.
+  The pills and the fields on the Agents page no longer stay dark in light themes.
+
+### Not proved
+
+- Wake words in the installed app on the owner's voice with the slider at 100%. The trace ran with the recognizer alone.
+- One run at 100% recognized nothing during loud sound, with a test stream open that was never read. The cause is not known.
+- Whether the bar under Try them is free of gain while wake words hold the same microphone open.
+
 ## 2026-10-31: A real assistant, and every board built
 
 The owner's verdict was that the app was a show-off: it told them to ask Meridian, could not open an app, and the designs were not in it.

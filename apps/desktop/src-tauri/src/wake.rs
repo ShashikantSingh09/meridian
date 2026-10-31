@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
-use voice::wake::{self, Conditions, Heard, Listener, Wanted};
+use voice::wake::{self, Conditions, DefaultMicrophone, Heard, Listener, Wanted};
 
 use crate::commands::Core;
 use crate::island;
@@ -18,6 +18,8 @@ const TEST_FOR: Duration = Duration::from_secs(10);
 /// Before trying again after the microphone failed.
 const RETRY_AFTER: Duration = Duration::from_secs(15);
 const MOST_WORDS: usize = 8;
+/// Between readings of how loud the microphone is during a test.
+const SAMPLE: Duration = Duration::from_millis(50);
 
 #[derive(Clone, PartialEq, Serialize)]
 pub struct Status {
@@ -58,9 +60,46 @@ pub fn wake_talking(wake: State<'_, Wake>, on: bool) {
     wake.talking.store(on, Ordering::Relaxed);
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Tested {
+    name: String,
+    percent: u32,
+    muted: bool,
+    /// How loud it held, from 0 to 1, which tells a microphone too quiet to hear from a word that was missed.
+    level: f32,
+}
+
+fn com() {
+    let _ = unsafe { windows::Win32::System::Com::CoInitializeEx(None, windows::Win32::System::Com::COINIT_MULTITHREADED) };
+}
+
+/// Listens until the word is heard or the time is up, and says how the microphone was doing.
 #[tauri::command]
-pub fn wake_test(wake: State<'_, Wake>) {
-    *wake.testing_until.lock().unwrap() = Some(Instant::now() + TEST_FOR);
+pub async fn wake_test(app: AppHandle) -> Result<Tested, String> {
+    *app.state::<Wake>().testing_until.lock().unwrap() = Some(Instant::now() + TEST_FOR);
+    let measured = tauri::async_runtime::spawn_blocking(move || {
+        com();
+        let microphone = DefaultMicrophone::open()?;
+        let wake = app.state::<Wake>();
+        let mut readings = Vec::new();
+        while wake.testing_until.lock().unwrap().is_some_and(|end| end > Instant::now()) {
+            readings.push(microphone.peak()?);
+            std::thread::sleep(SAMPLE);
+        }
+        Ok::<_, voice::VoiceError>(Tested { percent: microphone.percent()?, muted: microphone.muted()?, name: microphone.name, level: wake::held_level(readings) })
+    });
+    measured.await.map_err(|err| err.to_string())?.map_err(|err| err.to_string())
+}
+
+/// Only ever runs from the button that says so, because this is a Windows setting.
+#[tauri::command]
+pub async fn wake_raise_microphone() -> Result<(), String> {
+    let raised = tauri::async_runtime::spawn_blocking(|| {
+        com();
+        DefaultMicrophone::open()?.set_percent(100)
+    });
+    raised.await.map_err(|err| err.to_string())?.map_err(|err| err.to_string())
 }
 
 /// What the listener was opened with. When this changes it has to start again.
@@ -89,7 +128,7 @@ pub fn spawn(app: AppHandle) {
     let this_app = std::env::current_exe().ok().and_then(|path| path.file_name().map(|name| name.to_string_lossy().into_owned())).unwrap_or_default();
     std::thread::spawn(move || {
         // The recognizer is a Windows Runtime object, and its events arrive on other threads.
-        let _ = unsafe { windows::Win32::System::Com::CoInitializeEx(None, windows::Win32::System::Com::COINIT_MULTITHREADED) };
+        com();
         let (ended, stopped) = mpsc::channel();
         let mut listening: Option<(Asked, Listener)> = None;
         let mut failed: Option<(Instant, String)> = None;

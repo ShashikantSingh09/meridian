@@ -3,7 +3,7 @@
 
 import { spring } from "@meridian/design-system/motion";
 import { AnimatePresence, motion } from "motion/react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Icon } from "../lib/icons";
 
 export interface MenuItem {
@@ -14,15 +14,25 @@ export interface MenuItem {
 
 /** Past this many rows a list gets a search box. OpenRouter alone has hundreds. */
 const SEARCH_FROM = 10;
+/** Kept clear at the foot of the panel, where the page fades out under the dock. */
+const DOCK_ROOM = 110;
 
 export function Menu({ label, value, items, empty, onPick }: { label: string; value: string; items: MenuItem[]; empty: string; onPick: (value: string) => void }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [up, setUp] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const list = useRef<HTMLDivElement>(null);
   const button = useRef<HTMLButtonElement>(null);
   const shown = items.filter((i) => i.label.toLowerCase().includes(query.trim().toLowerCase()));
   const current = items.find((i) => i.value === value);
+
+  // Measured before it paints, so a list that has no room below never shows there first.
+  useLayoutEffect(() => {
+    if (!open) return;
+    const floor = root.current!.closest(".panel")?.getBoundingClientRect().bottom ?? innerHeight;
+    setUp(button.current!.getBoundingClientRect().bottom + list.current!.offsetHeight + DOCK_ROOM > floor);
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -66,6 +76,7 @@ export function Menu({ label, value, items, empty, onPick }: { label: string; va
           <motion.div
             ref={list}
             className="menu"
+            data-up={up}
             role="menu"
             aria-label={label}
             initial={{ opacity: 0, y: -6, scale: 0.97 }}

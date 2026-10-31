@@ -31,6 +31,7 @@ import type {
   Level,
   VoiceInfo,
   WakeStatus,
+  WakeTested,
 } from "./types";
 
 export const native = isTauri();
@@ -269,7 +270,8 @@ export const bridge = {
   },
   wakeStatus: () => (native ? invoke<WakeStatus>("wake_status") : Promise.resolve<WakeStatus>({ state: "off", why: "" })),
   wakeTalking: (on: boolean) => (native ? invoke<void>("wake_talking", { on }) : Promise.resolve()),
-  wakeTest: () => (native ? invoke<void>("wake_test") : Promise.resolve()),
+  wakeTest: () => (native ? invoke<WakeTested>("wake_test") : mock.wakeTest()),
+  wakeRaiseMicrophone: () => (native ? invoke<void>("wake_raise_microphone") : mock.wakeRaiseMicrophone()),
   onWakeState(handler: (status: WakeStatus) => void) {
     if (!native) return Promise.resolve(mock.onWakeState(handler));
     return listen<WakeStatus>("wake-state", (e) => handler(e.payload)).then(() => {});

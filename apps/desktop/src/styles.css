@@ -43,7 +43,6 @@ h3 {
 
 button,
 input,
-select,
 textarea {
   font: inherit;
   color: inherit;
@@ -606,7 +605,6 @@ button:active:not(:disabled) {
 }
 
 input:not([type="checkbox"], [type="radio"]),
-select,
 textarea {
   width: 100%;
   min-width: 0;
@@ -623,17 +621,6 @@ textarea {
   padding: var(--space-2) var(--space-3);
   resize: none;
   line-height: 1.45;
-}
-
-select {
-  width: auto;
-  cursor: pointer;
-}
-
-/* The popup is drawn by the system in the dark colour scheme. */
-select option {
-  background: #1c1c1e;
-  color: var(--ink-1);
 }
 
 input::placeholder,
@@ -2230,11 +2217,10 @@ textarea::placeholder {
 
 /* Forms and cards */
 input:not([type="checkbox"], [type="radio"]),
-select,
 textarea {
   border: 0;
   border-radius: 11px;
-  background: #1c1c1e;
+  background: var(--sink, #1c1c1e);
 }
 
 .ghost,
@@ -2520,10 +2506,10 @@ textarea {
   height: 32px;
   padding: 0 12px 0 7px;
   border-radius: 11px;
-  background: #1c1c1e;
+  background: var(--well);
   font-size: var(--text-sm);
   font-weight: 600;
-  color: #fff;
+  color: var(--ink-1);
   transition: background 0.15s ease;
 }
 
@@ -2599,15 +2585,15 @@ textarea {
   gap: 6px;
   padding: 0 11px 0 13px;
   border-radius: 11px;
-  background: #1c1c1e;
+  background: var(--well);
   font-size: var(--text-sm);
   font-weight: 600;
-  color: #fff;
+  color: var(--ink-1);
   transition: background 0.15s ease;
 }
 
 .pill-button:hover:not(:disabled) {
-  background: #2c2c2e;
+  background: var(--well-hover);
 }
 
 .pill-button:disabled {
@@ -3448,7 +3434,7 @@ kbd {
 }
 
 .voice-row[data-chosen="true"] {
-  background: #2c2c2e;
+  background: var(--well-active);
 }
 
 .voice-progress {

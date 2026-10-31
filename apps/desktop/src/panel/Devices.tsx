@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 import { bridge } from "../lib/bridge";
 import { Icon, type IconName } from "../lib/icons";
 import { setSettingsSection, updateSettings, useApp } from "../lib/store";
+import { Menu } from "./Menu";
 
 type Kind = "audioinput" | "audiooutput";
 
@@ -13,6 +14,9 @@ type Kind = "audioinput" | "audiooutput";
 const STAND_INS = ["default", "communications"];
 
 const realDevices = (devices: MediaDeviceInfo[], kind: Kind) => devices.filter((d) => d.kind === kind && d.deviceId && !STAND_INS.includes(d.deviceId));
+
+/** Windows' name, without the hardware id the browser adds to USB devices. */
+const deviceName = (device: MediaDeviceInfo) => device.label.replace(/ \([0-9a-f]{4}:[0-9a-f]{4}\)$/i, "");
 
 /** Ids are hidden until the microphone has been allowed, and then nothing can be called missing. */
 function isUnplugged(devices: MediaDeviceInfo[], kind: Kind, chosen: string | null) {
@@ -29,25 +33,21 @@ function windowsDefault(devices: MediaDeviceInfo[]) {
 function DevicePick({ kind, icon, label, hint, devices, chosen, onPick }: { kind: Kind; icon: IconName; label: string; hint: string; devices: MediaDeviceInfo[]; chosen: string | null; onPick: (id: string | null) => void }) {
   const list = realDevices(devices, kind);
   const unplugged = isUnplugged(devices, kind, chosen);
+  const items = [
+    { value: "", label: "Same as Windows" },
+    ...(chosen && !list.some((d) => d.deviceId === chosen) ? [{ value: chosen, label: unplugged ? "Unplugged device" : "Your chosen device" }] : []),
+    ...list.map((d, i) => ({ value: d.deviceId, label: deviceName(d) || `${label} ${i + 1}` })),
+  ];
   return (
     <>
-      <label className="setting">
+      <div className="setting">
         <Icon name={icon} size={15} />
         <span className="stacked grow">
           <span className="label">{label}</span>
           <span className="meta">{hint}</span>
         </span>
-        <span className="picker">
-          <select aria-label={label} value={chosen ?? ""} onChange={(e) => onPick(e.target.value || null)}>
-            <option value="">Same as Windows</option>
-            {chosen && !list.some((d) => d.deviceId === chosen) && <option value={chosen}>{unplugged ? "Unplugged device" : "Your chosen device"}</option>}
-            {list.map((d, i) => (
-              <option key={d.deviceId} value={d.deviceId}>{d.label || `${label} ${i + 1}`}</option>
-            ))}
-          </select>
-          <Icon name="chevron" size={12} />
-        </span>
-      </label>
+        <Menu label={label} value={chosen ?? ""} items={items} empty="Same as Windows" onPick={(id) => onPick(id || null)} />
+      </div>
       {unplugged && <p className="meta bad" role="alert">This is unplugged, so nothing will use it until it is back. Plug it in, or choose another.</p>}
     </>
   );
@@ -55,7 +55,7 @@ function DevicePick({ kind, icon, label, hint, devices, chosen, onPick }: { kind
 
 const MICROPHONE = {
   opening: "Opening the microphone.",
-  open: "The microphone is open while this section is. Speak and watch the bar move, or play a short sound.",
+  open: "The microphone is open while this section is. The bar shows its real level, and one that barely moves is too quiet for wake words.",
   blocked: "Meridian is not allowed to use the microphone. Check microphone privacy in Windows settings.",
   failed: "The microphone would not open. Another app may be holding it.",
 };
@@ -71,7 +71,8 @@ function TryThem({ microphone, output, microphoneGone, outputGone, onOpened }: {
     let live = true;
     let close = () => {};
     setState("opening");
-    navigator.mediaDevices.getUserMedia({ audio: microphone ? { deviceId: { exact: microphone } } : true }).then(
+    // Without the gain a conversation gets, because that would make a quiet microphone look fine.
+    navigator.mediaDevices.getUserMedia({ audio: { autoGainControl: false, echoCancellation: false, noiseSuppression: false, ...(microphone ? { deviceId: { exact: microphone } } : {}) } }).then(
       (stream) => {
         const stopTracks = () => stream.getTracks().forEach((track) => track.stop());
         if (!live) return stopTracks();
@@ -202,7 +203,7 @@ export function DevicesSection() {
           {known && <TryThem microphone={microphone} output={output} microphoneGone={microphoneGone} outputGone={outputGone} onOpened={() => void refresh()} />}
           <div className="stack card-block">
             <span className="label">Wake words</span>
-            <p className="meta">Wake words listen through your Windows default microphone{fallback ? `, which is ${fallback.label} right now` : ""}. Windows does not let an app point its recognizer at another one, so to use a different microphone for wake words, make it the default in Windows.</p>
+            <p className="meta">Wake words listen through your Windows default microphone{fallback ? `, which is ${deviceName(fallback)} right now` : ""}. Windows does not let an app point its recognizer at another one, so to use a different microphone for wake words, make it the default in Windows.</p>
             <div className="row device-warning">
               {differs && <span className="grow warn">Your microphone above is different from your Windows default.</span>}
               <button className="ghost" onClick={openSettings}>Open Windows sound settings</button>

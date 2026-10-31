@@ -17,6 +17,11 @@ const mics = (page: Page) => page.evaluate(() => {
 const accent = (page: Page) => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--accent").trim());
 const nav = (page: Page, name: string) => page.getByRole("navigation", { name: "Settings sections" }).getByRole("button", { name, exact: true }).click();
 const openDevices = (page: Page) => page.getByText("Microphone and headphones").click();
+const choose = async (page: Page, menu: string, option: string) => {
+  await page.getByRole("button", { name: menu, exact: true }).click();
+  // Scoped, because a list that just closed stays on the page while it fades.
+  await page.getByRole("menu", { name: menu }).getByRole("menuitemradio", { name: option, exact: true }).click();
+};
 
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
@@ -113,13 +118,13 @@ test.describe("themes", () => {
     await expect(page.locator("html")).toHaveAttribute("data-theme", "daylight");
     await page.emulateMedia({ colorScheme: "dark" });
     await expect(page.locator("html")).toHaveAttribute("data-theme", "midnight");
-    await page.getByLabel("When Windows is dark").selectOption("ocean");
+    await choose(page, "When Windows is dark", "Ocean");
     await expect(page.locator("html")).toHaveAttribute("data-theme", "ocean");
     await expect(page.getByRole("button", { name: /^Ocean/ })).toHaveAttribute("aria-pressed", "true");
 
     await page.getByRole("button", { name: "By time of day" }).click();
-    await expect(page.getByLabel("At night")).toHaveValue("ocean");
-    await expect(page.getByLabel("By day")).toHaveValue("daylight");
+    await expect(page.getByRole("button", { name: "At night" })).toHaveText("Ocean");
+    await expect(page.getByRole("button", { name: "By day" })).toHaveText("Daylight");
 
     // Picking a card is a plain choice of that theme, whatever was following what.
     await page.getByRole("button", { name: /^Graphite/ }).click();
@@ -283,25 +288,27 @@ test.describe("microphone and headphones", () => {
 
   test("lists real devices, after Same as Windows, and saves the choice by id", async ({ page }) => {
     await openDevices(page);
-    const microphone = page.getByLabel("Microphone", { exact: true });
-    const output = page.getByLabel("Headphones or speakers");
-    await expect(microphone.locator("option")).toHaveText(["Same as Windows", "Capture Input terminal (AC Interface)", "Headset (MiSuperBass)"]);
-    await expect(output.locator("option")).toHaveText(["Same as Windows", "MiSuperBass", "Speakers (Realtek Audio)"]);
+    await page.getByRole("button", { name: "Microphone", exact: true }).click();
+    await expect(page.getByRole("menuitemradio")).toHaveText(["Same as Windows", "Capture Input terminal (AC Interface)", "Headset (MiSuperBass)"]);
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: "Headphones or speakers" }).click();
+    await expect(page.getByRole("menuitemradio")).toHaveText(["Same as Windows", "MiSuperBass", "Speakers (Realtek Audio)"]);
+    await page.keyboard.press("Escape");
 
-    await microphone.selectOption({ label: "Headset (MiSuperBass)" });
-    await output.selectOption({ label: "Speakers (Realtek Audio)" });
+    await choose(page, "Microphone", "Headset (MiSuperBass)");
+    await choose(page, "Headphones or speakers", "Speakers (Realtek Audio)");
     expect(await app(page).get("voiceMicrophone")).toBe("mic-headset");
     expect(await app(page).get("voiceOutput")).toBe("out-speakers");
-    await expect.poll(async () => (await mics(page)).asked.at(-1)).toEqual({ deviceId: { exact: "mic-headset" } });
+    await expect.poll(async () => (await mics(page)).asked.at(-1)).toEqual({ autoGainControl: false, echoCancellation: false, noiseSuppression: false, deviceId: { exact: "mic-headset" } });
     await expect.poll(async () => (await mics(page)).active).toBe(1);
 
-    await microphone.selectOption({ label: "Same as Windows" });
+    await choose(page, "Microphone", "Same as Windows");
     expect(await app(page).get("voiceMicrophone")).toBe(null);
   });
 
   test("plays through the chosen output", async ({ page }) => {
     await openDevices(page);
-    await page.getByLabel("Headphones or speakers").selectOption({ label: "MiSuperBass" });
+    await choose(page, "Headphones or speakers", "MiSuperBass");
     // The panel's own chime is a tone too, so this counts from here.
     const before = (await mics(page)).tones;
     await page.getByRole("button", { name: "Play sound" }).click();
@@ -312,12 +319,11 @@ test.describe("microphone and headphones", () => {
   test("names the Windows default, and warns only when the choice differs from it", async ({ page }) => {
     await openDevices(page);
     const warning = page.getByText("different from your Windows default");
-    const microphone = page.getByLabel("Microphone", { exact: true });
     await expect(page.getByText("which is Capture Input terminal (AC Interface) right now")).toBeVisible();
     await expect(warning).toHaveCount(0);
-    await microphone.selectOption({ label: "Headset (MiSuperBass)" });
+    await choose(page, "Microphone", "Headset (MiSuperBass)");
     await expect(warning).toBeVisible();
-    await microphone.selectOption({ label: "Capture Input terminal (AC Interface)" });
+    await choose(page, "Microphone", "Capture Input terminal (AC Interface)");
     await expect(warning).toHaveCount(0);
     await expect(page.getByRole("button", { name: "Open Windows sound settings" })).toBeVisible();
   });
@@ -332,12 +338,10 @@ test.describe("microphone and headphones", () => {
       w.__devices.splice(w.__devices.findIndex((d) => d.deviceId === "mic-headset"), 1);
       navigator.mediaDevices.dispatchEvent(new Event("devicechange"));
     });
-    const microphone = page.getByLabel("Microphone", { exact: true });
     await expect(page.getByText("Your chosen microphone is unplugged.", { exact: true })).toBeVisible();
     await expect(page.getByText("Your chosen microphone is unplugged, so it is not open.")).toBeVisible();
     await expect(page.getByRole("alert")).toContainText("This is unplugged");
-    await expect(microphone).toHaveValue("mic-headset");
-    await expect(microphone.locator("option:checked")).toHaveText("Unplugged device");
+    await expect(page.getByRole("button", { name: "Microphone", exact: true })).toHaveText("Unplugged device");
     expect(await app(page).get("voiceMicrophone")).toBe("mic-headset");
     await expect.poll(async () => (await mics(page)).active).toBe(0);
 

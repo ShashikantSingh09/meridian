@@ -165,6 +165,7 @@ What stands between this build and a stranger installing it. Only the owner can 
 
 ## Behaviour to be aware of
 
+- Wake words hear the microphone as Windows delivers it, with no gain. A low Windows slider leaves them deaf, and Voice Clarity takes away anything that is not clear speech. The Test button says so and can raise the slider.
 - The assistant's actions work with Claude Code as the AI. API models and Codex can chat but have no tool loop yet, so they cannot act.
 - Wake words listen through the Windows default microphone whatever is chosen under Voice, because Windows gives no way to point its recognizer elsewhere.
 - Wake words cannot be written in Devanagari. A Hindi name works in English letters.

@@ -30,6 +30,7 @@ import type {
   Track,
   Level,
   WakeStatus,
+  WakeTested,
   LimitWindow,
 } from "./types";
 import type { Mood } from "../island/faces";
@@ -178,7 +179,7 @@ export interface AppState {
   /** A spoken conversation, while there is one. */
   voice: VoiceState | null;
   wake: WakeStatus;
-  wakeTest: { phase: "idle" | "waiting" | "heard" | "missed"; word: string };
+  wakeTest: { phase: "idle" | "waiting" | "heard" | "missed"; word: string; microphone?: WakeTested };
   /** The volume, brightness or battery, for a moment after it changes. */
   level: Level | null;
   /** The last one of the same kind, so a key press can be told up from down. */
@@ -205,7 +206,6 @@ const FINISHED_MS = 12_000;
 const PAST_NOTICES = 40;
 const GREETING_MS = 2600;
 /** A little longer than the core listens, so a late match still lands. */
-const WAKE_TEST_MS = 11_000;
 const HOVER_IN_MS = 180;
 const HOVER_OUT_MS = 240;
 const ANSWER_GAP_MS = 400;
@@ -1253,19 +1253,25 @@ export function setVoice(voice: VoiceState | null) {
 
 export const setWake = (wake: WakeStatus) => set({ wake });
 
-let wakeTestEnds: ReturnType<typeof setTimeout> | undefined;
-
 /** Listens for a few seconds whether or not the switch is on, and starts no conversation. */
 export function testWake() {
-  clearTimeout(wakeTestEnds);
   set({ wakeTest: { phase: "waiting", word: "" } });
-  void bridge.wakeTest();
-  wakeTestEnds = setTimeout(() => set({ wakeTest: { phase: "missed", word: "" } }), WAKE_TEST_MS);
+  const missed = (microphone?: WakeTested) => {
+    if (state.wakeTest.phase === "waiting") set({ wakeTest: { phase: "missed", word: "", microphone } });
+  };
+  bridge.wakeTest().then(missed, () => missed());
 }
 
 export function wakeTestHeard(word: string) {
-  clearTimeout(wakeTestEnds);
   set({ wakeTest: { phase: "heard", word } });
+}
+
+/** A Windows setting, so only the button that says so calls this. */
+export function raiseMicrophone() {
+  bridge.wakeRaiseMicrophone().then(
+    () => set({ wakeTest: { phase: "idle", word: "" } }),
+    (err) => pushError({ title: "Could not raise the microphone", body: describe(err) }),
+  );
 }
 
 let feelingTimer: ReturnType<typeof setTimeout> | undefined;

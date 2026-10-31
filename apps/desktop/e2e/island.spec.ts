@@ -1032,6 +1032,41 @@ test.describe("panel", () => {
     await expect(island(page)).toHaveAttribute("data-view", "expanded");
   });
 
+  test("a test that hears nothing says why, and only the button touches the Windows slider", async ({ page }) => {
+    const mock = (call: string) => page.evaluate(`window.__mock.${call}`);
+    const end = (tested: object) => mock(`endWakeTest(${JSON.stringify(tested)})`);
+    const mic = { name: "Capture Input terminal", percent: 26, muted: false, level: 0.1 };
+    await page.goto("/");
+    await page.locator(".island").click();
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await page.getByRole("button", { name: "Wake words" }).click();
+    const test_ = page.getByRole("button", { name: "Test", exact: true });
+    const raise = page.getByRole("button", { name: "Raise to 100%" });
+
+    await test_.click();
+    await end(mic);
+    await expect(page.getByText("Capture Input terminal is too quiet for wake words. Windows has it at 26%.")).toBeVisible();
+    expect(await mock("microphoneRaised()")).toBe(false);
+    await raise.click();
+    await expect.poll(() => mock("microphoneRaised()")).toBe(true);
+    await expect(raise).toHaveCount(0);
+
+    await test_.click();
+    await end({ ...mic, percent: 100 });
+    await expect(page.getByText("even at 100%")).toBeVisible();
+    await expect(raise).toHaveCount(0);
+
+    await test_.click();
+    await end({ ...mic, muted: true });
+    await expect(page.getByText("is muted in Windows")).toBeVisible();
+    await expect(raise).toBeVisible();
+
+    await test_.click();
+    await end({ ...mic, percent: 100, level: 0.6 });
+    await expect(page.getByText("Heard you, but not the word.")).toBeVisible();
+    await expect(raise).toHaveCount(0);
+  });
+
   test("the island shows a dot only while the microphone is open for wake words, and says why it is not", async ({ page }) => {
     const set = (state: string, why: string) => page.evaluate(([s, w]) => (window as never as { __mock: { setWakeState(v: unknown): void } }).__mock.setWakeState({ state: s, why: w }), [state, why]);
     const dot = page.getByRole("img", { name: "Listening for a wake word" });

@@ -12,6 +12,10 @@ use windows::Media::SpeechRecognition::{
 };
 use windows::Storage::StorageFile;
 use windows::System::UserProfile::GlobalizationPreferences;
+use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
+use windows::Win32::Media::Audio::Endpoints::{IAudioEndpointVolume, IAudioMeterInformation};
+use windows::Win32::Media::Audio::{eCapture, eConsole, IMMDeviceEnumerator, MMDeviceEnumerator};
+use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL, STGM_READ};
 use windows::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
 use windows::Win32::System::StationsAndDesktops::{CloseDesktop, OpenInputDesktop, DESKTOP_CONTROL_FLAGS, DESKTOP_READOBJECTS};
 use windows_collections::IIterable;
@@ -208,6 +212,57 @@ pub fn use_grammar(recognizer: &SpeechRecognizer, phrases: &[String], language: 
     Ok(recognizer.CompileConstraintsAsync()?.join()?.Status()? == SpeechRecognitionResultStatus::Success)
 }
 
+/// Readings of the microphone a voice has to outlast, at one every 50 ms.
+const HELD_READINGS: usize = 8;
+
+/// The level it held for about 400 ms. Clicks near a desk microphone are as loud as a voice but gone
+/// in a reading or two, so the loudest reading would call a silent room loud.
+pub fn held_level(mut readings: Vec<f32>) -> f32 {
+    readings.sort_by(|a, b| b.total_cmp(a));
+    readings.get(HELD_READINGS).or(readings.last()).copied().unwrap_or(0.0)
+}
+
+/// The Windows default microphone, which is the one the recognizer hears. Windows' voice filter
+/// removes what it does not take for clear speech before the recognizer gets it, and a conversation's
+/// gain does not reach it, so a low slider leaves it deaf while Meridian's own level still looks fine.
+pub struct DefaultMicrophone {
+    pub name: String,
+    slider: IAudioEndpointVolume,
+    meter: IAudioMeterInformation,
+}
+
+impl DefaultMicrophone {
+    pub fn open() -> Result<Self, VoiceError> {
+        unsafe {
+            let devices: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
+            let device = devices.GetDefaultAudioEndpoint(eCapture, eConsole)?;
+            let name = device.OpenPropertyStore(STGM_READ)?.GetValue(&PKEY_Device_FriendlyName)?.to_string();
+            Ok(Self { name, slider: device.Activate(CLSCTX_ALL, None)?, meter: device.Activate(CLSCTX_ALL, None)? })
+        }
+    }
+
+    /// Where its Windows slider sits, from 0 to 100.
+    pub fn percent(&self) -> Result<u32, VoiceError> {
+        Ok(unsafe { self.slider.GetMasterVolumeLevelScalar() }.map(|level| (level * 100.0).round() as u32)?)
+    }
+
+    pub fn muted(&self) -> Result<bool, VoiceError> {
+        Ok(unsafe { self.slider.GetMute() }?.as_bool())
+    }
+
+    /// How loud it is right now, from 0 to 1. Reads 0 unless something has it open.
+    pub fn peak(&self) -> Result<f32, VoiceError> {
+        Ok(unsafe { self.meter.GetPeakValue() }?)
+    }
+
+    pub fn set_percent(&self, percent: u32) -> Result<(), VoiceError> {
+        unsafe {
+            self.slider.SetMute(false, std::ptr::null())?;
+            Ok(self.slider.SetMasterVolumeLevelScalar(percent.min(100) as f32 / 100.0, std::ptr::null())?)
+        }
+    }
+}
+
 pub struct Heard {
     pub text: String,
     pub confidence: SpeechRecognitionConfidence,
@@ -294,10 +349,24 @@ mod tests {
     }
 
     #[test]
+    fn a_click_is_not_a_voice() {
+        let mut clicks = vec![0.003_f32; 200];
+        clicks[40] = 0.8;
+        clicks[41] = 0.7;
+        assert!(held_level(clicks) < 0.01);
+        let mut voice = vec![0.003_f32; 200];
+        voice[40..60].fill(0.5);
+        assert_eq!(held_level(voice), 0.5);
+        assert_eq!(held_level(Vec::new()), 0.0);
+    }
+
+    #[test]
     fn talk_in_the_room_does_not_wake_it() {
         const TALK: u64 = 3000;
         assert!(!accepted("balanced", C::Low, 0.5, TALK) && !accepted("balanced", C::Medium, 0.5, TALK));
         assert!(accepted("balanced", C::High, 0.9, TALK), "a clear name and a command still works");
+        assert!(accepted("balanced", C::Low, 0.28, 780), "the faintest real name on the reference machine");
+        assert!(!accepted("balanced", C::Low, 0.0065, 3270), "what a long sentence scored there");
         assert!(!accepted("easily", C::Low, 0.5, TALK));
     }
 

@@ -3,8 +3,13 @@
    blur the desktop behind it reliably, so the light comes from the sheet itself. */
 
 .panel {
+  --sink: rgba(0, 0, 0, 0.26);
   position: relative;
   isolation: isolate;
+}
+
+:root[data-theme="daylight"] .panel {
+  --sink: rgba(255, 255, 255, 0.55);
 }
 
 .panel::before {

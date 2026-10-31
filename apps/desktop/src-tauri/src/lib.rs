@@ -271,6 +271,7 @@ pub fn run() {
             wake::wake_status,
             wake::wake_talking,
             wake::wake_test,
+            wake::wake_raise_microphone,
             following::running_refresh,
             following::watch_preview,
             following::watch_status,

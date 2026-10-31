@@ -176,6 +176,14 @@ export interface WakeWord {
 }
 
 /** Whether the microphone is open for wake words, and if not, why. */
+/** How the Windows default microphone did during a wake word test. */
+export interface WakeTested {
+  name: string;
+  percent: number;
+  muted: boolean;
+  level: number;
+}
+
 export interface WakeStatus {
   state: "off" | "listening" | "paused" | "failed";
   why: string;

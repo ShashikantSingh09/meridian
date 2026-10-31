@@ -6,6 +6,7 @@ import { Icon } from "../lib/icons";
 import { getState, updateSettings, useApp } from "../lib/store";
 import { activeTheme, applyTheme, THEMES } from "../lib/theme";
 import type { CustomTheme, Settings } from "../lib/types";
+import { Menu } from "./Menu";
 
 const ACCENTS = [["#2a84ea", "Blue"], ["#17a2b8", "Teal"], ["#30b35a", "Green"], ["#ff9f0a", "Amber"], ["#e0527c", "Rose"], ["#8e6bff", "Violet"]] as const;
 const DARK_WINDOWS = [["#0c0d14", "Ink"], ["#06263a", "Deep sea"], ["#30101f", "Plum"], ["#1b2a20", "Moss"], ["#2c2d30", "Graphite"]] as const;
@@ -63,17 +64,10 @@ function Glass({ value, onChange }: { value: number; onChange: (value: number) =
 
 function ThemePick({ label, value, looks, onPick }: { label: string; value: string; looks: Look[]; onPick: (id: string) => void }) {
   return (
-    <label className="setting">
-      <span className="label">{label}</span>
-      <span className="picker" data-plain="true">
-        <select aria-label={label} value={value} onChange={(e) => onPick(e.target.value)}>
-          {looks.map((l) => (
-            <option key={l.id} value={l.id}>{l.name}</option>
-          ))}
-        </select>
-        <Icon name="chevron" size={12} />
-      </span>
-    </label>
+    <div className="setting">
+      <span className="label grow">{label}</span>
+      <Menu label={label} value={value} items={looks.map((l) => ({ value: l.id, label: l.name }))} empty="Choose a theme" onPick={onPick} />
+    </div>
   );
 }
 
