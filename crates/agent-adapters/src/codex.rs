@@ -313,6 +313,9 @@ pub async fn run(launch: Launch, emit: Emit, mut commands: mpsc::UnboundedReceiv
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Only here to end a test that has hung. A busy build machine can take many seconds to start node.
+    const HANG: Duration = Duration::from_secs(90);
     use crate::testing::{last_status, recorder};
 
     fn parse(line: &str, last_error: &mut Option<String>) -> Parsed {
@@ -396,7 +399,7 @@ mod tests {
         let (tx, rx) = mpsc::unbounded_channel();
         tx.send(Command::Send { text: "and this".into(), images: vec![] }).unwrap();
 
-        tokio::time::timeout(Duration::from_secs(10), run(launch, emit, rx)).await.unwrap();
+        tokio::time::timeout(HANG, run(launch, emit, rx)).await.unwrap();
 
         assert_eq!(last_status(&events.lock().unwrap()), Some(SessionStatus::Completed));
         let _ = std::fs::remove_dir_all(&dir);

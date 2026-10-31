@@ -429,6 +429,9 @@ async fn drive_with(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Only here to end a test that has hung. A busy build machine can take many seconds to start node.
+    const HANG: Duration = Duration::from_secs(90);
     use crate::testing::{last_status, recorder};
 
     // Trimmed from a real run of Claude Code 2.1.314.
@@ -663,7 +666,7 @@ mod tests {
         let (emit, events) = recorder();
         let (tx, rx) = mpsc::unbounded_channel();
         tx.send(Command::Cancel).unwrap();
-        tokio::time::timeout(Duration::from_secs(10), drive(launch, args, emit, rx)).await.unwrap();
+        tokio::time::timeout(HANG, drive(launch, args, emit, rx)).await.unwrap();
         assert_eq!(last_status(&events.lock().unwrap()), Some(SessionStatus::Cancelled));
     }
 
@@ -673,7 +676,7 @@ mod tests {
         let (emit, events) = recorder();
         let (tx, rx) = mpsc::unbounded_channel();
         tx.send(Command::Kill).unwrap();
-        tokio::time::timeout(Duration::from_secs(3), drive(launch, args, emit, rx)).await.unwrap();
+        tokio::time::timeout(HANG, drive(launch, args, emit, rx)).await.unwrap();
         assert_eq!(last_status(&events.lock().unwrap()), Some(SessionStatus::Cancelled));
     }
 
@@ -693,7 +696,7 @@ mod tests {
         let (launch, args) = launch(&script);
         let (emit, events) = recorder();
         let (_tx, rx) = mpsc::unbounded_channel();
-        tokio::time::timeout(Duration::from_secs(10), drive_with(launch, args, emit, rx, Duration::from_millis(100))).await.unwrap();
+        tokio::time::timeout(HANG, drive_with(launch, args, emit, rx, Duration::from_millis(100))).await.unwrap();
         assert_eq!(last_status(&events.lock().unwrap()), Some(SessionStatus::Completed));
     }
 
@@ -704,7 +707,7 @@ mod tests {
         let (launch, args) = launch(&script);
         let (emit, events) = recorder();
         let (_tx, rx) = mpsc::unbounded_channel();
-        tokio::time::timeout(Duration::from_secs(10), drive_with(launch, args, emit, rx, Duration::from_millis(300))).await.unwrap();
+        tokio::time::timeout(HANG, drive_with(launch, args, emit, rx, Duration::from_millis(300))).await.unwrap();
         let events = events.lock().unwrap();
         assert_eq!(events.iter().filter(|e| **e == AgentEvent::status(SessionStatus::Completed)).count(), 2);
     }
@@ -720,7 +723,7 @@ mod tests {
         let run = tokio::spawn(drive_with(launch, args, emit, rx, Duration::from_millis(600)));
         tokio::time::sleep(Duration::from_millis(400)).await;
         tx.send(Command::Send { text: "again".into(), images: vec![] }).unwrap();
-        tokio::time::timeout(Duration::from_secs(10), run).await.unwrap().unwrap();
+        tokio::time::timeout(HANG, run).await.unwrap().unwrap();
         let events = events.lock().unwrap();
         let completed = events.iter().filter(|e| **e == AgentEvent::status(SessionStatus::Completed)).count();
         assert_eq!(completed, 2);
