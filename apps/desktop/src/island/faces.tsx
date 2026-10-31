@@ -68,16 +68,21 @@ export const FACES: FaceDef[] = [
 /** A face from a newer version, or one since removed, falls back to the default. */
 export const faceById = (id: string) => FACES.find((f) => f.id === id) ?? FACES[0];
 
+/** Each z redraws the window for 2.4 s, so a face left asleep for hours has to stop making them. */
+const SNORES = 6;
+
 export function Face({ id, mood, scale = 1, reduced: asked }: { id: string; mood: Mood; scale?: number; reduced?: boolean }) {
   const ref = useRef<HTMLSpanElement>(null);
   const setting = useReduced();
   const reduced = asked ?? setting;
 
   // Little things happen at random, because a steady rhythm reads as a machine. A timer costs
-  // one short repaint every few seconds instead of a repaint every frame. Asleep, it snores.
+  // one short repaint every few seconds instead of a repaint every frame. Asleep, it snores a
+  // little and then rests until something wakes it.
   useEffect(() => {
     if (reduced) return;
     const sleeping = mood === "asleep";
+    let snores = 0;
     let timer: ReturnType<typeof setTimeout>;
     const flag = (name: string, ms: number) => {
       const el = ref.current;
@@ -86,6 +91,7 @@ export function Face({ id, mood, scale = 1, reduced: asked }: { id: string; mood
       setTimeout(() => delete el.dataset[name], ms);
     };
     const act = () => {
+      if (sleeping && snores++ === SNORES) return;
       const roll = Math.random();
       if (sleeping) flag("snore", 2400);
       else if (mood === "rest" && roll < 0.18) flag("glance", 900);

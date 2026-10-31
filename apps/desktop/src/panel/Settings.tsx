@@ -247,6 +247,8 @@ function UpdatesSection() {
   }, []);
 
   const when = update.published ? new Date(update.published).toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" }) : null;
+  // Below the line is how to install by hand, which this page does for you.
+  const notes = update.notes.split(/^---$/m)[0].trim();
   return (
     <section className="stack-lg">
       <h1>Updates</h1>
@@ -259,10 +261,10 @@ function UpdatesSection() {
           <button className="ghost" disabled={busy !== null} onClick={() => void checkForUpdates()}>Check for updates</button>
           {update.available && <button className="solid" disabled={busy !== null} onClick={() => void installUpdate()}>Update now</button>}
         </div>
-        {update.available && update.notes && (
+        {update.available && notes && (
           <>
             <h2>What is new in {update.latest?.replace(/^v/, "")}{when ? `, ${when}` : ""}</h2>
-            <div className="update-notes"><Markdown text={update.notes} /></div>
+            <div className="update-notes"><Markdown text={notes} /></div>
           </>
         )}
       </div>

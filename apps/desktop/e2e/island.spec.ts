@@ -189,6 +189,27 @@ test("a tired face is startled awake by the pointer", async ({ page }) => {
   await expect(page.locator(".island .peek-face .face")).toHaveAttribute("data-mood", "needs");
 });
 
+test("a sleeping face snores a little, then stops drawing", async ({ page }) => {
+  await page.clock.install();
+  await page.goto("/");
+  await expect(island(page)).toHaveAttribute("data-view", "idle");
+  await page.clock.fastForward(121_000);
+  await expect(page.locator(".island .face")).toHaveAttribute("data-mood", "asleep");
+  await page.evaluate(() => {
+    const face = document.querySelector(".island .face") as HTMLElement;
+    const seen = window as never as { snores: number };
+    seen.snores = 0;
+    new MutationObserver(() => void (face.dataset.snore && seen.snores++)).observe(face, { attributes: true, attributeFilter: ["data-snore"] });
+  });
+  const snores = async () => page.evaluate(() => (window as never as { snores: number }).snores);
+  await page.clock.runFor(120_000);
+  const heard = await snores();
+  expect(heard).toBeGreaterThan(0);
+  expect(heard).toBeLessThanOrEqual(6);
+  await page.clock.runFor(120_000);
+  expect(await snores()).toBe(heard);
+});
+
 test("the listening preview never asks for the microphone", async ({ page }) => {
   await page.addInitScript(() => {
     (window as never as { micCalls: number }).micCalls = 0;

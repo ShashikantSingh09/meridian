@@ -19,6 +19,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The release notes list the commits since the last tag.
+          fetch-depth: 0
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -136,9 +139,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $v = "${{ steps.version.outputs.version }}"
-          $notes = @"
+          $previous = git describe --tags --abbrev=0 "${{ github.ref_name }}^"
+          $changes = git log "$previous..${{ github.ref_name }}" --no-merges --format="- %s" | Where-Object { $_ -notmatch "^- Release v" }
+          $install = @"
           Download ``Meridian-$v-setup.exe`` or ``Meridian-$v.msi`` and run it. ``Meridian-$v-portable.exe`` needs no install.
 
           These are not code-signed yet, so Windows SmartScreen shows a warning: click **More info**, then **Run anyway**.
           "@
+          # The Updates page shows what is above the line. The rest is for the release page.
+          $notes = ($changes -join "`n") + "`n`n---`n`n" + $install
           gh release create "${{ github.ref_name }}" (Get-ChildItem release -File).FullName --title "Meridian $v" --notes $notes --generate-notes
