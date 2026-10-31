@@ -15,6 +15,9 @@ That sets the version, commits, tags and pushes. GitHub then tests the app, buil
 | `Meridian-0.2.0-portable.exe` | Runs with no install. Needs the WebView2 runtime, which Windows 11 includes |
 | `SHA256SUMS.txt` | Checksums for all of the above |
 
+The release notes are the commit subjects since the last tag, leaving out those starting with Release or Record. The Updates page shows
+them as they are, so write subjects for the person using the app.
+
 To try a build without publishing anything, open the Actions tab, choose Release, and press Run workflow. The files stay on that
 run for 7 days. Commit your work first: the script refuses to run with uncommitted changes.
 

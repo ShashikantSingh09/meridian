@@ -688,6 +688,16 @@ test.describe("panel", () => {
     expect(await page.evaluate(() => (window as never as { __mock: { updateInstalled(): boolean } }).__mock.updateInstalled())).toBe(true);
   });
 
+  test("what is new stays on the page once you are up to date", async ({ page }) => {
+    await page.evaluate(() => (window as never as { __mock: { setUpdate(s: unknown): void } }).__mock.setUpdate({ notes: "- Talking to it" }));
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await page.getByRole("button", { name: "Updates", exact: true }).click();
+    await expect(page.getByText("You are on the latest version.")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "What is new in 0.3.0" })).toBeVisible();
+    await expect(page.locator(".update-notes li")).toHaveText("Talking to it");
+    await expect(page.getByRole("button", { name: "Update now" })).toHaveCount(0);
+  });
+
   test("how much the app may see is set in Settings", async ({ page }) => {
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page.getByRole("button", { name: "Screen", exact: true }).click();
