@@ -2,9 +2,9 @@
 //! recordings they made, here on this PC, so it works for any word in any language. Only the pattern
 //! of those recordings is kept, never the sound, and what the microphone hears goes no further.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
-use rustpotter::{Rustpotter, RustpotterConfig, SampleFormat, WakewordLoad, WakewordRef, WakewordRefBuildFromBuffers, WakewordSave};
+use rustpotter::{Rustpotter, RustpotterConfig, SampleFormat, VADMode, WakewordLoad, WakewordRef, WakewordRefBuildFromBuffers, WakewordSave};
 use windows::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
 use windows::Win32::System::StationsAndDesktops::{CloseDesktop, OpenInputDesktop, DESKTOP_CONTROL_FLAGS, DESKTOP_READOBJECTS};
 
@@ -32,19 +32,64 @@ fn closeness(easiness: &str) -> f32 {
 const STRETCH: u16 = 8;
 /// Moments in a row that have to match, which a voice's few strong ones can meet.
 const MATCHES_NEEDED: usize = 3;
-/// The quick first look, which only saves work. A real voice scored as low as 0.22 on it.
-const FIRST_LOOK: f32 = 0.12;
+/// The comparison ignores loudness, so room noise scored the same as a real voice, some of it almost
+/// silent. A word also has to have been at the level of a voice, for 360 ms of the last second. On
+/// the reference machine a voice saying the name reached 16 to 33 of these readings, and noise 0 to 11.
+const VOICE_LEVEL: f32 = 0.025;
+const VOICED_NEEDED: usize = 12;
+const VOICE_WINDOW: usize = 33;
+/// A recording outside these limits is not the word. A 60 ms blip in a lesson matched any noise at all.
+const SHORTEST_WORD_MS: usize = 300;
+const LONGEST_WORD_MS: usize = 2500;
+/// How much two recordings of one word have to resemble each other. On the reference machine true
+/// pairs scored 0.41 to 0.51, and a bad lesson's recordings 0.2 or less.
+const ALIKE: f32 = 0.3;
+
+fn pattern_of(word: &str, recordings: &[&Vec<u8>]) -> Result<WakewordRef, VoiceError> {
+    let samples: HashMap<String, Vec<u8>> = recordings.iter().enumerate().map(|(i, pcm)| (format!("{i}"), to_wav(pcm, SAMPLE_RATE))).collect();
+    WakewordRef::new_from_sample_buffers(word.to_string(), None, None, samples, DETAIL).map_err(VoiceError::Service)
+}
+
+/// How alike two recordings are from 0 to 1, with the longer one squeezed to the length of the shorter.
+fn likeness(a: &[Vec<f32>], b: &[Vec<f32>]) -> f32 {
+    let frames = a.len().min(b.len()).max(1);
+    let total: f32 = (0..frames)
+        .map(|i| {
+            let (x, y) = (&a[i * a.len() / frames], &b[i * b.len() / frames]);
+            let dot: f32 = x.iter().zip(y).map(|(p, q)| p * q).sum();
+            dot / (x.iter().map(|p| p * p).sum::<f32>() * y.iter().map(|q| q * q).sum::<f32>()).sqrt().max(f32::EPSILON)
+        })
+        .sum();
+    total / frames as f32
+}
+
+/// The biggest group of recordings that are really the same word, by their place in the list.
+pub fn same_word(recordings: &[Vec<u8>]) -> Result<Vec<usize>, VoiceError> {
+    let usable = |pcm: &&Vec<u8>| (SHORTEST_WORD_MS..=LONGEST_WORD_MS).contains(&(pcm.len() * 1000 / 2 / SAMPLE_RATE as usize));
+    let chosen: Vec<usize> = (0..recordings.len()).filter(|&i| usable(&&recordings[i])).collect();
+    if chosen.is_empty() {
+        return Ok(chosen);
+    }
+    let pattern = pattern_of("word", &chosen.iter().map(|&i| &recordings[i]).collect::<Vec<_>>())?;
+    let features: Vec<&Vec<Vec<f32>>> = (0..chosen.len()).map(|i| &pattern.samples_features[&i.to_string()]).collect();
+    let group = (0..chosen.len())
+        .map(|i| (0..chosen.len()).filter(|&j| j == i || likeness(features[i], features[j]) >= ALIKE).collect::<Vec<_>>())
+        .max_by_key(Vec::len)
+        .unwrap_or_default();
+    Ok(group.into_iter().map(|i| chosen[i]).collect())
+}
 
 /// Turns recordings of a word, as 16-bit mono sound, into the pattern that is kept in their place.
 pub fn learn(word: &str, recordings: &[Vec<u8>]) -> Result<Vec<u8>, VoiceError> {
-    let samples: HashMap<String, Vec<u8>> = recordings.iter().enumerate().map(|(i, pcm)| (format!("{i}.wav"), to_wav(pcm, SAMPLE_RATE))).collect();
-    WakewordRef::new_from_sample_buffers(word.to_string(), None, None, samples, DETAIL).and_then(|pattern| pattern.save_to_buffer()).map_err(VoiceError::Service)
+    pattern_of(word, &recordings.iter().collect::<Vec<_>>())?.save_to_buffer().map_err(VoiceError::Service)
 }
 
 /// Finds learned words in sound as it arrives.
 pub struct Spotter {
     detector: Rustpotter,
     waiting: Vec<i16>,
+    /// Whether each recent piece of sound was as loud as a voice.
+    voiced: VecDeque<bool>,
 }
 
 impl Spotter {
@@ -54,17 +99,17 @@ impl Spotter {
         config.fmt.sample_rate = SAMPLE_RATE as usize;
         config.fmt.sample_format = SampleFormat::I16;
         config.detector.threshold = closeness(easiness);
-        config.detector.avg_threshold = FIRST_LOOK;
         // As soon as it is sure, because a command can follow straight on from the name.
         config.detector.eager = true;
         config.detector.band_size = STRETCH;
         config.detector.min_scores = MATCHES_NEEDED;
+        config.detector.vad_mode = Some(VADMode::Easy);
         let mut detector = Rustpotter::new(&config).map_err(VoiceError::Service)?;
         for (word, pattern) in learned {
             let pattern = WakewordRef::load_from_buffer(pattern).map_err(VoiceError::Service)?;
             detector.add_wakeword_ref(word, pattern).map_err(VoiceError::Service)?;
         }
-        Ok(Self { detector, waiting: Vec::new() })
+        Ok(Self { detector, waiting: Vec::new(), voiced: VecDeque::new() })
     }
 
     /// Takes 16-bit mono sound, in pieces of any size, and says which word it found, if one.
@@ -74,7 +119,15 @@ impl Spotter {
         let mut found = None;
         while self.waiting.len() >= frame {
             let piece: Vec<i16> = self.waiting.drain(..frame).collect();
-            found = self.detector.process_samples(piece).map(|hit| hit.name).or(found);
+            let power = piece.iter().map(|&sample| (sample as f32 / 32768.0).powi(2)).sum::<f32>() / frame as f32;
+            self.voiced.push_back(power.sqrt() >= VOICE_LEVEL);
+            if self.voiced.len() > VOICE_WINDOW {
+                self.voiced.pop_front();
+            }
+            let hit = self.detector.process_samples(piece);
+            if self.voiced.iter().filter(|&&loud| loud).count() >= VOICED_NEEDED {
+                found = hit.map(|hit| hit.name).or(found);
+            }
         }
         found
     }
@@ -202,6 +255,25 @@ mod tests {
         let mut sound = word(true, 0.5);
         sound.extend(silence(2));
         assert_eq!(heard(&sound), ["hey mira"]);
+    }
+
+    #[test]
+    fn a_shape_that_matches_is_not_enough_without_the_loudness_of_a_voice() {
+        let pattern = learn("hey mira", &[word(true, 0.0), word(true, 1.0), word(true, 2.0)]).unwrap();
+        let mut spotter = Spotter::new("balanced", &[("hey mira".to_string(), pattern)]).unwrap();
+        let faint: Vec<u8> = word(true, 0.5).chunks_exact(2).flat_map(|s| (i16::from_le_bytes([s[0], s[1]]) / 100).to_le_bytes()).collect();
+        let mut sound = faint;
+        sound.extend(silence(2));
+        assert!(sound.chunks(3_200).all(|piece| spotter.hear(piece).is_none()));
+    }
+
+    #[test]
+    fn a_lesson_keeps_only_recordings_that_are_the_word() {
+        let blip = word(true, 0.0)[..1_920].to_vec();
+        let long: Vec<u8> = word(true, 0.0).repeat(5);
+        let recordings = [blip, word(true, 0.0), word(false, 0.0), word(true, 1.0), long, word(true, 2.0)];
+        assert_eq!(same_word(&recordings).unwrap(), [1, 3, 5]);
+        assert!(same_word(&[]).unwrap().is_empty());
     }
 
     #[test]

@@ -503,6 +503,10 @@ the microphone against those recordings on this PC.
 - A word can be in any language, and this works on a Mac too.
 - Recordings stay in memory for the lesson. Only a pattern of them is kept, and removing a word deletes it.
 - It knows the voices that taught it and no others, which is what keeps other people out, but every user has to teach it.
+- A lesson is only as good as its recordings, and one bad take spoils it. A 60 ms blip in a lesson matched any noise at all, and takes that were not alike missed the
+  real word. A lesson now keeps asking until four takes are the right length and sound alike.
+- The comparison ignores loudness, so noise can still match. Voice detection and a rule that a word must be voice-level for 360 ms keep that out.
+  Requiring two recordings to agree at one moment does not work, because recordings differ in length and never line up.
 - Nothing proves the name before speech goes to the hearing any more. D57's proof depended on the recognizer's own timing, and missed commands were the worse failure.
   Someone's own speech that sounds close can wake it, and what they say next is then treated as a request.
 - candle 0.2, which rustpotter depends on, does not compile with newer versions of `half`, so `Cargo.lock` holds `half` at 2.3.1.

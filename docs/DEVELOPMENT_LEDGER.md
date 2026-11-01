@@ -8,6 +8,10 @@ The owner reported wake words working once and then stopping, and each fix to th
   stream on the microphone. The entry below blames the slider and the filter, and that turned out to be at most part of it.
 - **rustpotter replaced the recognizer.** On recordings it found the word 10 times in 10, and never in another voice. On the owner's voice it first fell just short,
   because lessons held half a second of silence and its settings were tuned on synthetic speech. Trimming the lessons and retuning against real scores fixed that.
+- **Noise and misses had one cause: a bad lesson.** Retuned for a real voice, room noise woke it and then the owner's voice did not. Reading the saved pattern showed why: its four
+  recordings were 60 ms, 1470 ms, 570 ms and 570 ms, and none sounded like another. The 60 ms blip matched anything. Tuning thresholds around that could never work.
+  A lesson now throws out takes of the wrong length, and keeps asking until four sound alike. After a clean lesson the owner reported it working.
+  v0.4.8 has none of this and should be passed over.
 - **Conversations end when asked.** Goodbyes are recognised however they are put, in English and Hindi, and the assistant has a tool for anything else. A noisy room
   can no longer hold a turn open.
 - **Spoken replies are the answer only.** Text between an agent's steps is not read out, and no reply runs past three sentences.
@@ -22,7 +26,7 @@ The owner's voice woke it three times after the retune, and they judged it worki
 
 ### Not proved
 
-- How often it misses, or wakes by mistake, over a normal day. The first-look gate was widened after their test, from evidence in the log.
+- How often it misses, or wakes by mistake, over a normal day. The loudness rule was set from logged scores taken with the bad lesson, so it may be stricter than it needs to be.
 - Music opening on hover with a real player.
 - The assistant's stop_listening tool on a real conversation.
 

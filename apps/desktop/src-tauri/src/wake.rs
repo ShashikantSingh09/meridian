@@ -19,8 +19,9 @@ const TICK: Duration = Duration::from_secs(1);
 /// How long the Test button keeps listening.
 const TEST_FOR: Duration = Duration::from_secs(10);
 const MOST_WORDS: usize = 8;
-/// More recordings than the interface asks for means something has gone wrong.
-const MOST_RECORDINGS: usize = 8;
+/// A lesson gives up after this many, and keeps this many of them that are alike.
+const MOST_RECORDINGS: usize = 12;
+const RECORDINGS_NEEDED: usize = 4;
 
 #[derive(Clone, PartialEq, Serialize)]
 pub struct Status {
@@ -90,15 +91,15 @@ pub fn wake_taught(app: AppHandle, words: Vec<String>) -> Vec<String> {
     words.into_iter().filter(|word| pattern_file(&app, word).is_ok_and(|file| file.exists())).collect()
 }
 
-/// Takes one recording of a word. The sound stays in memory until the lesson ends.
+/// Takes one recording of a word, and says how many so far are really the word, and whether the
+/// lesson can go on. The sound stays in memory until the lesson ends.
 #[tauri::command]
-pub async fn wake_teach_sample(wake: State<'_, Wake>, request: Request<'_>) -> Result<(), String> {
+pub async fn wake_teach_sample(wake: State<'_, Wake>, request: Request<'_>) -> Result<(usize, bool), String> {
     let InvokeBody::Raw(pcm) = request.body() else { return Err("Expected audio.".into()) };
     let mut recordings = wake.recordings.lock().unwrap();
-    if recordings.len() < MOST_RECORDINGS {
-        recordings.push(pcm.clone());
-    }
-    Ok(())
+    recordings.push(pcm.clone());
+    let good = wake::same_word(&recordings).map_err(|err| err.to_string())?.len();
+    Ok((good, recordings.len() < MOST_RECORDINGS))
 }
 
 /// Ends a lesson. With a word it learns it, and without one it drops what was recorded.
@@ -106,7 +107,11 @@ pub async fn wake_teach_sample(wake: State<'_, Wake>, request: Request<'_>) -> R
 pub async fn wake_teach_end(app: AppHandle, wake: State<'_, Wake>, word: Option<String>) -> Result<(), String> {
     let recordings = std::mem::take(&mut *wake.recordings.lock().unwrap());
     let Some(word) = word else { return Ok(()) };
-    let pattern = wake::learn(word.trim(), &recordings).map_err(|err| err.to_string())?;
+    let good: Vec<Vec<u8>> = wake::same_word(&recordings).map_err(|err| err.to_string())?.into_iter().map(|i| recordings[i].clone()).collect();
+    if good.len() < RECORDINGS_NEEDED {
+        return Err("Those did not sound like the same word. Try again somewhere quieter, close to the microphone.".to_string());
+    }
+    let pattern = wake::learn(word.trim(), &good).map_err(|err| err.to_string())?;
     let file = pattern_file(&app, &word)?;
     if let Some(folder) = file.parent() {
         std::fs::create_dir_all(folder).map_err(|err| err.to_string())?;

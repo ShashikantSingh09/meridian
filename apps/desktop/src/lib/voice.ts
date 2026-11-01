@@ -41,7 +41,7 @@ interface Capture {
   node: AudioWorkletNode;
 }
 
-/** Recordings that make a wake word. */
+/** Recordings that make a wake word, all of them really the same word. */
 const RECORDINGS = 4;
 /** How long it waits for each one before giving up. */
 const TEACH_WAIT_MS = 15_000;
@@ -49,7 +49,7 @@ const TEACH_WAIT_MS = 15_000;
 const WORD_END_MS = 500;
 const LONGEST_WORD_MS = 3000;
 /** Taken from just before the voice started, so its first sound is not clipped. */
-const BEFORE_WORD_CHUNKS = 1;
+const BEFORE_WORD_CHUNKS = 2;
 
 /** Open while listening for a name, and handed to the conversation when it hears one. */
 let ear: Capture | null = null;
@@ -263,9 +263,10 @@ export async function teachWakeWord(word: string, onStep: (recording: number, of
   try {
     let hear = (_chunk: Int16Array) => {};
     capture = await captureMicrophone((chunk) => hear(chunk));
-    for (let recording = 1; recording <= RECORDINGS; recording++) {
-      onStep(recording, RECORDINGS);
-      await bridge.wakeTeachSample(await recordWord((handler) => (hear = handler)));
+    // Stays on the same number until it has one that is really the word.
+    for (let good = 0, more = true; good < RECORDINGS && more; ) {
+      onStep(good + 1, RECORDINGS);
+      [good, more] = await bridge.wakeTeachSample(await recordWord((handler) => (hear = handler)));
     }
     await bridge.wakeTeachEnd(word);
   } catch (err) {
