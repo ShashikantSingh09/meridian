@@ -291,6 +291,16 @@ test("playing media takes over an idle island and answers its controls", async (
   await expect(island(page)).toContainText("Northern Lights");
   await expect(island(page).getByRole("button", { name: "Pause" })).toHaveCount(0);
 
+  const hover = (on: boolean) => page.evaluate((v) => (window as never as { __meridian: { setHovered(h: boolean): void } }).__meridian.setHovered(v), on);
+  await hover(true);
+  await expect(island(page).getByRole("button", { name: "Pause" })).toBeVisible();
+  await settled(page);
+  expect((await island(page).boundingBox())!.height).toBeCloseTo(172, 0);
+  await hover(false);
+  await expect(island(page).getByRole("button", { name: "Pause" })).toHaveCount(0);
+  await settled(page);
+  expect((await island(page).boundingBox())!.height).toBeCloseTo(46, 0);
+
   await page.getByRole("button", { name: /Open the player/ }).click();
   await expect(island(page).getByRole("button", { name: "Pause" })).toBeVisible();
   await settled(page);
@@ -1006,9 +1016,12 @@ test.describe("panel", () => {
 
   test("wake words are off until turned on, and can be set up and tried", async ({ page }) => {
     const mock = (call: string) => page.evaluate((c) => new Function("m", `m.${c}`)((window as never as { __mock: unknown }).__mock), call);
+    await mock('wakeTeachEnd("Hey Meridian")');
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page.getByRole("button", { name: "Wake words", exact: true }).click();
     await expect(page.getByRole("switch", { name: /Listen for wake words/ })).not.toBeChecked();
+    await expect(page.getByText("Knows your voice")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Teach again" })).toBeVisible();
 
     const add = page.getByRole("button", { name: "Add", exact: true });
     await page.getByLabel("Add a wake word").fill("Suno Mira");
@@ -1017,9 +1030,13 @@ test.describe("panel", () => {
     await page.getByRole("button", { name: "Remove Okay Meridian" }).click();
     await expect(page.getByRole("switch", { name: "Okay Meridian" })).toHaveCount(0);
 
-    await page.getByLabel("Add a wake word").fill("सुनो मीरा");
-    await expect(page.getByText("Use English letters")).toBeVisible();
+    await page.getByLabel("Add a wake word").fill("wake 123");
+    await expect(page.getByText("Use letters only.")).toBeVisible();
     await expect(add).toBeDisabled();
+    await page.getByLabel("Add a wake word").fill("सुनो मीरा");
+    await expect(add).toBeEnabled();
+    await add.click();
+    await expect(page.getByRole("switch", { name: "सुनो मीरा" })).toBeChecked();
     await page.getByLabel("Add a wake word").fill("suno mira");
     await expect(add).toBeDisabled();
 
@@ -1032,39 +1049,21 @@ test.describe("panel", () => {
     await expect(island(page)).toHaveAttribute("data-view", "expanded");
   });
 
-  test("a test that hears nothing says why, and only the button touches the Windows slider", async ({ page }) => {
-    const mock = (call: string) => page.evaluate(`window.__mock.${call}`);
-    const end = (tested: object) => mock(`endWakeTest(${JSON.stringify(tested)})`);
-    const mic = { name: "Capture Input terminal", percent: 26, muted: false, level: 0.1 };
+  test("a word it was never taught cannot be tested, and a lesson with no microphone says so", async ({ page }) => {
     await page.goto("/");
     await page.locator(".island").click();
     await page.getByRole("button", { name: "Settings", exact: true }).click();
-    await page.getByRole("button", { name: "Wake words" }).click();
-    const test_ = page.getByRole("button", { name: "Test", exact: true });
-    const raise = page.getByRole("button", { name: "Raise to 100%" });
-
-    await test_.click();
-    await end(mic);
-    await expect(page.getByText("Capture Input terminal is too quiet for wake words. Windows has it at 26%.")).toBeVisible();
-    expect(await mock("microphoneRaised()")).toBe(false);
-    await raise.click();
-    await expect.poll(() => mock("microphoneRaised()")).toBe(true);
-    await expect(raise).toHaveCount(0);
-
-    await test_.click();
-    await end({ ...mic, percent: 100 });
-    await expect(page.getByText("even at 100%")).toBeVisible();
-    await expect(raise).toHaveCount(0);
-
-    await test_.click();
-    await end({ ...mic, muted: true });
-    await expect(page.getByText("is muted in Windows")).toBeVisible();
-    await expect(raise).toBeVisible();
-
-    await test_.click();
-    await end({ ...mic, percent: 100, level: 0.6 });
-    await expect(page.getByText("Heard you, but not the word.")).toBeVisible();
-    await expect(raise).toHaveCount(0);
+    await page.getByRole("button", { name: "Wake words", exact: true }).click();
+    await expect(page.getByText("Teach it a wake word first.")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Test", exact: true })).toBeDisabled();
+    await page.evaluate(() => {
+      navigator.mediaDevices.getUserMedia = async () => {
+        throw new Error("No microphone was found.");
+      };
+    });
+    await page.getByRole("button", { name: "Teach", exact: true }).first().click();
+    await expect(page.getByRole("alert")).toContainText("No microphone was found.");
+    await expect(page.getByRole("button", { name: "Teach", exact: true }).first()).toBeEnabled();
   });
 
   test("the island shows a dot only while the microphone is open for wake words, and says why it is not", async ({ page }) => {

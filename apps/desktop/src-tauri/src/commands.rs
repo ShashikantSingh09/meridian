@@ -68,11 +68,6 @@ pub fn open_logs(app: AppHandle) -> Result<(), String> {
 // â”€â”€ Settings â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 #[tauri::command]
-pub fn open_sound_settings() -> Result<(), String> {
-    std::process::Command::new("explorer.exe").arg("ms-settings:sound").spawn().map(|_| ()).map_err(stringify)
-}
-
-#[tauri::command]
 pub fn settings_get(core: State<'_, Core>) -> Settings {
     core.settings.lock().unwrap().clone()
 }

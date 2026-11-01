@@ -1,9 +1,9 @@
 // The store's timing, against the browser stand-in for the core. Each of these is something a
 // spoken turn or a click depends on happening at once, before anything has been waited for.
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { bridge } from "./bridge";
-import { applyAgentEvent, nextEngine, clearAgentFocus, clearChat, closeOnBlur, closePanel, dismissError, dismissNotice, getState, openPanel, openSession, refreshProviders, selectProvider, sendChat, sendToSession, setHovered, startSession, toggleFromCore } from "./store";
+import { applyAgentEvent, nextEngine, clearAgentFocus, clearChat, closeOnBlur, closePanel, dismissError, dismissNotice, getState, openPanel, openSession, pushError, pushNotice, refreshProviders, selectProvider, sendChat, sendToSession, setHovered, startSession, toggleFromCore } from "./store";
 import type { AgentEvent } from "./types";
 
 vi.mock("./sound", () => ({ chime: () => {} }));
@@ -184,10 +184,10 @@ describe("what an agent is doing", () => {
     expect(getState().pastNotices).toHaveLength(before);
   });
 
-  it("tells the card about a Chat session that ends with the panel closed", async () => {
+  it("gives the assistant no finished card, with the panel open or closed", async () => {
     const id = await started("chat");
     send(id, { type: "status", status: "completed" });
-    expect(getState().notices[0]).toMatchObject({ finished: true, sessionId: id });
+    expect(getState().notices).toHaveLength(0);
   });
 
   it("does not call a terminal that went silent done", async () => {
@@ -197,13 +197,16 @@ describe("what an agent is doing", () => {
     expect(getState().notices[0]?.finished).toBeUndefined();
   });
 
-  it("leaves what went wrong up until it is answered", async () => {
+  it("keeps a failed agent up for a minute, then moves it to Notifications", async () => {
     const id = await started();
     vi.useFakeTimers();
     send(id, { type: "status", status: "failed", message: "2 tests failed in machine.test.ts" });
-    vi.advanceTimersByTime(60_000);
-    vi.useRealTimers();
+    vi.advanceTimersByTime(30_000);
     expect(getState().errors.at(-1)).toMatchObject({ body: "2 tests failed in machine.test.ts", sessionId: id });
+    vi.advanceTimersByTime(31_000);
+    vi.useRealTimers();
+    expect(getState().errors.some((e) => e.sessionId === id)).toBe(false);
+    expect(getState().pastNotices[0]).toMatchObject({ body: "2 tests failed in machine.test.ts", sessionId: id });
   });
 
   it("does not raise anything when the user stopped it", async () => {
@@ -241,6 +244,33 @@ describe("the tray icon", () => {
     toggleFromCore();
     vi.useRealTimers();
     expect(getState().panelOpen).toBe(true);
+  });
+});
+
+describe("leaving the island", () => {
+  beforeEach(() => void vi.useFakeTimers());
+  afterEach(() => void vi.useRealTimers());
+
+  it("an error goes by itself", () => {
+    const before = getState().errors.length;
+    pushError({ title: "Could not hear that", body: "x" });
+    expect(getState().errors).toHaveLength(before + 1);
+    vi.advanceTimersByTime(16_000);
+    expect(getState().errors).toHaveLength(before);
+  });
+
+  it("a pointer holds a notice for a while, and not for ever", () => {
+    vi.spyOn(Date, "now").mockImplementation(() => vi.getMockedSystemTime()?.valueOf() ?? 0);
+    setHovered(true);
+    vi.advanceTimersByTime(500);
+    expect(getState().hovered).toBe(true);
+    pushNotice({ tone: "info", title: "Held", body: "" });
+    vi.advanceTimersByTime(10_000);
+    expect(getState().notices.some((n) => n.title === "Held")).toBe(true);
+    vi.advanceTimersByTime(30_000);
+    expect(getState().notices.some((n) => n.title === "Held")).toBe(false);
+    setHovered(false);
+    vi.advanceTimersByTime(500);
   });
 });
 

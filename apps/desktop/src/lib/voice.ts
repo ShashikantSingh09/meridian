@@ -5,7 +5,7 @@
 
 import { bridge } from "./bridge";
 import { answerApproval, feel, getState, openPanel, openSettings, pickEngine, pushError, sendAgentChat, sendChat, setVoice, setWake, startSession, wakeTestHeard, type Tab } from "./store";
-import { calledByName, filler, isGoodbye, sentences, silenceFor, speakable, withoutWakeWord, yesOrNo } from "./turns";
+import { filler, isGoodbye, sentences, silenceFor, speakable, withoutWakeWord, yesOrNo } from "./turns";
 
 export type VoiceMode = "hold" | "turn" | "conversation";
 export type VoicePhase = "listening" | "pause" | "thinking" | "speaking";
@@ -25,6 +25,10 @@ const CHUNK_MS = 100;
 const QUIET_NOTICE_MS = 600;
 /** Silence before giving up on a turn that never started. */
 const NOTHING_SAID_MS = { hold: Infinity, turn: 7000, conversation: 15000 };
+/** A noisy room can pass for speech for ever, so a turn ends here even if it never goes quiet. */
+const LONGEST_TURN_MS = 45_000;
+/** The most of any one reply it reads out. The whole of it is in Chat. */
+const MOST_SENTENCES = 3;
 const INTERRUPT_MS = 200;
 const FILLER_AFTER_MS = 1600;
 /** A key held less than this was tapped. */
@@ -37,16 +41,20 @@ interface Capture {
   node: AudioWorkletNode;
 }
 
-/** How much is kept while listening for a name. */
-const EAR_MS = 12_000;
-/** Taken from before the utterance as well, so its first word is not clipped. */
-const EAR_MARGIN_MS = 500;
-/** Longer than this after a name means there was more than the name. */
-const NAME_MS = 1400;
+/** Recordings that make a wake word. */
+const RECORDINGS = 4;
+/** How long it waits for each one before giving up. */
+const TEACH_WAIT_MS = 15_000;
+/** Silence that ends a recording, and the longest a word can run. */
+const WORD_END_MS = 500;
+const LONGEST_WORD_MS = 3000;
+/** Taken from just before the voice started, so its first sound is not clipped. */
+const BEFORE_WORD_CHUNKS = 1;
 
+/** Open while listening for a name, and handed to the conversation when it hears one. */
 let ear: Capture | null = null;
 let earOpening = false;
-let heardSoFar: Int16Array[] = [];
+let teaching = false;
 
 let session: {
   mode: VoiceMode;
@@ -58,13 +66,14 @@ let session: {
   quietMs: number;
   waitedMs: number;
   loudMs: number;
+  listenedMs: number;
   turn: number;
   /** A request waiting for a spoken yes or no, and how many sentences came before it. */
   deciding: { sessionId: string; approvalId: string; spoken: number } | null;
   /** What the chat held when the user last spoke, so an earlier reply is not taken for this one. */
   before: unknown;
-  /** Woken by words inside longer speech, so what was heard has to prove it was meant. */
-  provingName?: boolean;
+  /** The assistant heard them say they were finished, so this reply is the last. */
+  closing?: boolean;
 } | null = null;
 /** The microphone is on its way. There is no `session` until it arrives. */
 let opening = false;
@@ -179,20 +188,20 @@ async function openMicrophone(mode: VoiceMode) {
   const capture = ear ?? (await captureMicrophone(onAudio));
   capture.node.port.onmessage = (event: MessageEvent<Int16Array>) => onAudio(event.data);
   ear = null;
-  session = { mode, stream: capture.stream, context: capture.context, sent: Promise.resolve(), floor: 0.01, heardSpeech: false, quietMs: 0, waitedMs: 0, loudMs: 0, turn: 0, deciding: null, before: null };
+  session = { mode, stream: capture.stream, context: capture.context, sent: Promise.resolve(), floor: 0.01, heardSpeech: false, quietMs: 0, waitedMs: 0, loudMs: 0, listenedMs: 0, turn: 0, deciding: null, before: null };
 }
 
-/** Keeps the last few seconds in memory while listening for a name. It is never saved. */
+/** Passes sound on for the name to be found in. None of it is kept. */
 async function openEar() {
-  if (ear || earOpening || session) return;
+  if (ear || earOpening || session || teaching) return;
   earOpening = true;
   try {
-    const capture = await captureMicrophone(remember);
+    const capture = await captureMicrophone((chunk) => void bridge.wakeAudio(new Uint8Array(chunk.buffer.slice(0))));
     // It may have been turned off while the microphone opened.
-    if (getState().wake.state === "listening" && !session) ear = capture;
+    if (getState().wake.state === "listening" && !session && !teaching) ear = capture;
     else closeMicrophone(capture.stream, capture.context);
   } catch {
-    // Listening for the name carries on without it, and only a command said in one breath is lost.
+    // It tries again the next time wake words start.
   } finally {
     earOpening = false;
   }
@@ -201,23 +210,71 @@ async function openEar() {
 function closeEar() {
   if (ear) closeMicrophone(ear.stream, ear.context);
   ear = null;
-  heardSoFar = [];
 }
 
-function remember(chunk: Int16Array) {
-  heardSoFar.push(chunk);
-  if (heardSoFar.length * CHUNK_MS > EAR_MS) heardSoFar.shift();
+const loudnessOf = (chunk: Int16Array) => {
+  let sum = 0;
+  for (const sample of chunk) sum += (sample / 32768) ** 2;
+  return Math.sqrt(sum / chunk.length);
+};
+
+/** Waits for someone to say something once, and returns it. */
+function recordWord(listenWith: (hear: (chunk: Int16Array) => void) => void) {
+  return new Promise<Uint8Array>((resolve, reject) => {
+    const giveUp = setTimeout(() => reject(new Error("Did not hear anything. Check the microphone and try again.")), TEACH_WAIT_MS);
+    const before: Int16Array[] = [];
+    const said: Int16Array[] = [];
+    let floor = 0.01;
+    let quietMs = 0;
+    listenWith((chunk) => {
+      const loudness = loudnessOf(chunk);
+      floor = loudness < floor ? loudness : floor * 1.01;
+      const speech = loudness > Math.max(0.012, floor * 3);
+      if (said.length === 0) {
+        before.push(chunk);
+        if (before.length > BEFORE_WORD_CHUNKS) before.shift();
+        if (speech) said.push(...before);
+        return;
+      }
+      said.push(chunk);
+      quietMs = speech ? 0 : quietMs + CHUNK_MS;
+      if (quietMs < WORD_END_MS && said.length * CHUNK_MS < LONGEST_WORD_MS) return;
+      clearTimeout(giveUp);
+      listenWith(() => {});
+      // Only the word itself, because silence in a lesson is something a live voice can never match.
+      const word = said.slice(0, said.length - quietMs / CHUNK_MS);
+      const samples = word.reduce((all, part) => all + part.length, 0);
+      const joined = new Int16Array(samples);
+      let at = 0;
+      for (const part of word) {
+        joined.set(part, at);
+        at += part.length;
+      }
+      resolve(new Uint8Array(joined.buffer));
+    });
+  });
 }
 
-/** Hands over what was said with the name, so a command in the same breath is heard whole. */
-function hearOneBreath(spokenMs: number) {
-  const now = session;
-  const chunks = heardSoFar.slice(-Math.ceil((spokenMs + EAR_MARGIN_MS) / CHUNK_MS));
-  heardSoFar = [];
-  if (!now) return;
-  for (const chunk of chunks) {
-    const bytes = new Uint8Array(chunk.buffer.slice(0));
-    now.sent = now.sent.then(() => bridge.voiceHear(bytes)).then(() => {}, () => {});
+/** Learns a wake word from the user saying it a few times. `onStep` hears which time this is. */
+export async function teachWakeWord(word: string, onStep: (recording: number, of: number) => void) {
+  teaching = true;
+  closeEar();
+  let capture: Capture | undefined;
+  try {
+    let hear = (_chunk: Int16Array) => {};
+    capture = await captureMicrophone((chunk) => hear(chunk));
+    for (let recording = 1; recording <= RECORDINGS; recording++) {
+      onStep(recording, RECORDINGS);
+      await bridge.wakeTeachSample(await recordWord((handler) => (hear = handler)));
+    }
+    await bridge.wakeTeachEnd(word);
+  } catch (err) {
+    await bridge.wakeTeachEnd(null);
+    throw err;
+  } finally {
+    if (capture) closeMicrophone(capture.stream, capture.context);
+    teaching = false;
+    if (getState().wake.state === "listening") void openEar();
   }
 }
 
@@ -227,6 +284,8 @@ export function endConversation() {
   session = null;
   micLevel = 0;
   setVoice(null);
+  // The conversation took this microphone, and the next one-breath command needs it back.
+  if (getState().wake.state === "listening") void openEar();
 }
 
 /** Ends the conversation and says why, and goes to the page that fixes it if there is one. */
@@ -253,7 +312,7 @@ async function speak(text: string) {
 
 async function listen(mode: VoiceMode, woken = false) {
   if (!session) return;
-  Object.assign(session, { mode, heardSpeech: false, quietMs: 0, waitedMs: 0, loudMs: 0 });
+  Object.assign(session, { mode, heardSpeech: false, quietMs: 0, waitedMs: 0, loudMs: 0, listenedMs: 0 });
   try {
     await bridge.voiceHearStart();
   } catch (err) {
@@ -266,9 +325,7 @@ async function listen(mode: VoiceMode, woken = false) {
 function onAudio(chunk: Int16Array) {
   const now = session;
   if (!now) return;
-  let sum = 0;
-  for (const sample of chunk) sum += (sample / 32768) ** 2;
-  const loudness = Math.sqrt(sum / chunk.length);
+  const loudness = loudnessOf(chunk);
   micLevel = micLevel * 0.5 + Math.min(1, loudness * 8) * 0.5;
   // The room's own noise sets the bar for what counts as speech.
   now.floor = loudness < now.floor ? loudness : now.floor * 1.01;
@@ -282,6 +339,8 @@ function onAudio(chunk: Int16Array) {
     return;
   }
   if (voice.phase !== "listening" && voice.phase !== "pause") return;
+  now.listenedMs += CHUNK_MS;
+  if (now.mode !== "hold" && now.listenedMs >= LONGEST_TURN_MS) return void finishTurn();
 
   const bytes = new Uint8Array(chunk.buffer.slice(0));
   now.sent = now.sent.then(() => bridge.voiceHear(bytes)).then((words) => {
@@ -333,17 +392,17 @@ async function finishTurn() {
   if (session !== now) return;
   const wakeWords = getState().settings.wakeWords.filter((w) => w.on).map((w) => w.text);
   const heard = words || getState().voice?.words || "";
-  // People talking near the microphone can sound like the name. Nothing goes further unless it was said.
-  if (now.provingName) {
-    now.provingName = false;
-    if (!calledByName(heard, wakeWords)) return endConversation();
-  }
   const said = withoutWakeWord(heard, wakeWords);
-  if (!said.trim() || (now.mode === "conversation" && isGoodbye(said))) return endConversation();
+  if (!heard.trim()) return endConversation();
+  // Only its name, and then a pause. They have not asked yet, so this is no reason to go.
+  if (!said.trim()) return now.mode === "hold" ? endConversation() : void listen(now.mode, true);
+  const goodbye = isGoodbye(said, [...wakeWords, getState().settings.assistantName ?? ""]);
 
   if (now.deciding) {
     const answer = yesOrNo(said);
     if (answer === null) {
+      // A request stays on the island for its buttons. Leaving never answers it.
+      if (goodbye) return endConversation();
       await speak("Please say yes or no, or use the buttons.");
       return void listen(now.mode);
     }
@@ -352,6 +411,7 @@ async function finishTurn() {
     now.deciding = null;
     return void followReply(++now.turn, spoken, approvalId);
   }
+  if (goodbye) return endConversation();
   update({ words: said, ahead: "" });
   void ask(said);
 }
@@ -373,11 +433,15 @@ function replySoFar(): { text: string; done: boolean; waiting: { sessionId: stri
   const chat = app.sessions.find((s) => s.id === app.agentChat.sessionId);
   if (!chat || unchanged) return { text: "", done: false, waiting: null };
   const start = chat.log.map((entry) => entry.kind).lastIndexOf("user");
-  const text = chat.log.slice(start + 1).filter((entry) => entry.kind === "text").map((entry) => entry.text).join("\n");
+  const turn = chat.log.slice(start + 1);
+  const done = ["completed", "failed", "cancelled"].includes(chat.status);
+  // What it writes between steps is working out loud. Only what follows the last step is the answer,
+  // and that is not known until it has finished.
+  const answer = turn.slice(turn.map((entry) => entry.kind === "text").lastIndexOf(false) + 1).map((entry) => entry.text).join("\n");
   const asking = chat.approval;
   return {
-    text,
-    done: ["completed", "failed", "cancelled"].includes(chat.status),
+    text: done ? answer || (turn.length > 0 && chat.status === "completed" ? "Done." : "") : "",
+    done,
     waiting: asking ? { sessionId: chat.id, approvalId: asking.id, summary: asking.summary, agent: chat.agent } : null,
   };
 }
@@ -422,7 +486,7 @@ async function followReply(turn: number, spoken = 0, answered: string | null = n
       return;
     }
     const { ready } = sentences(speakable(reply.text), reply.done);
-    const sentence = ready[spoken];
+    const sentence = spoken < MOST_SENTENCES ? ready[spoken] : undefined;
     if (sentence) {
       spoken++;
       saidAnything = true;
@@ -441,14 +505,12 @@ async function followReply(turn: number, spoken = 0, answered: string | null = n
     await sleep(120);
   }
   if (!current()) return;
-  if (session!.mode === "conversation") await listen("conversation");
+  if (session!.mode === "conversation" && !session!.closing) await listen("conversation");
   else endConversation();
 }
 
-const currentSession = () => session;
-
-/** Starts a conversation, as the hotkey does. `spokenMs` is set when it was called by name, and says for how long. */
-export async function startVoice(mode: VoiceMode, spokenMs?: number) {
+/** Starts a conversation, as the hotkey does. `woken` says it was called by name. */
+export async function startVoice(mode: VoiceMode, woken = false) {
   if (opening) return;
   if (session) {
     if (getState().voice?.phase === "speaking") await interrupted();
@@ -457,16 +519,7 @@ export async function startVoice(mode: VoiceMode, spokenMs?: number) {
   opening = true;
   try {
     await openMicrophone(mode);
-    await listen(mode, spokenMs !== undefined);
-    if (spokenMs !== undefined) {
-      hearOneBreath(spokenMs);
-      // A command came with the name, and it has already been said.
-      if (spokenMs > NAME_MS) {
-        const now = currentSession();
-        if (now) now.provingName = true;
-        void finishTurn();
-      }
-    }
+    await listen(mode, woken);
   } catch (err) {
     failed(/permission|notallowed|notfound|overconstrained/i.test(String(err)) ? "No microphone" : "Voice is not set up yet", /overconstrained/i.test(String(err)) ? "The microphone you chose is not connected. Plug it in, or choose another under Settings, Voice." : err);
   } finally {
@@ -508,14 +561,15 @@ async function onKey(down: boolean) {
 
 export function wireVoice() {
   void bridge.onVoiceKey(onKey);
-  // A reload can end a conversation without saying so.
-  void bridge.wakeTalking(false);
   void bridge.onWakeState((status) => {
     setWake(status);
     if (status.state === "listening") void openEar();
     else closeEar();
   });
   void bridge.onAssistantOpen((tab) => openPanel(tab as Tab));
+  void bridge.onAssistantStopListening(() => {
+    if (session) session.closing = true;
+  });
   void bridge.onAssistantAgent(({ task, folder }) => {
     const cwd = folder || getState().settings.agentDefaultDir;
     if (!cwd) return pushError({ title: "Choose a project folder", body: "Tell it which folder to work in." });
@@ -525,5 +579,5 @@ export function wireVoice() {
     setWake(status);
     if (status.state === "listening") void openEar();
   });
-  void bridge.onWakeHeard(({ word, test, spokenMs }) => (test ? wakeTestHeard(word) : void startVoice(getState().settings.wakeAfter, spokenMs)));
+  void bridge.onWakeHeard(({ word, test }) => (test ? wakeTestHeard(word) : void startVoice(getState().settings.wakeAfter, true)));
 }

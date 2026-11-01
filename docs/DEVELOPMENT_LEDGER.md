@@ -1,5 +1,31 @@
 # Development ledger
 
+## 2026-11-01: Wake words learn your voice
+
+The owner reported wake words working once and then stopping, and each fix to the Windows recognizer failed on their real voice. See `docs/DECISIONS.md`, D59.
+
+- **Theories that the evidence ruled out:** the chosen device, the mic slider alone, Voice Clarity, the time since the session started, the new grammar, and a second
+  stream on the microphone. The entry below blames the slider and the filter, and that turned out to be at most part of it.
+- **rustpotter replaced the recognizer.** On recordings it found the word 10 times in 10, and never in another voice. On the owner's voice it first fell just short,
+  because lessons held half a second of silence and its settings were tuned on synthetic speech. Trimming the lessons and retuning against real scores fixed that.
+- **Conversations end when asked.** Goodbyes are recognised however they are put, in English and Hindi, and the assistant has a tool for anything else. A noisy room
+  can no longer hold a turn open.
+- **Spoken replies are the answer only.** Text between an agent's steps is not read out, and no reply runs past three sentences.
+- **Fixed by measuring:** the dock's highlight left its bar on hover, because the whole button grew. Music now opens on hover.
+- **Nothing sits on the island.** Notices, errors and suggestions all leave by themselves, a pointer resting there holds them for 20 seconds at most, and urgent reminders go after a minute.
+- **Assistant replies get no finished card.** The card and its See what changed are for agents working in a project.
+- **An approval answered in the terminal clears.** Claude Code does not always hang up its hook, so a tool that ran or a turn that moved on now counts as the answer.
+
+### Proved
+
+The owner's voice woke it three times after the retune, and they judged it working. The whole path was proved in the release build with recordings: learn, listen, find, forget.
+
+### Not proved
+
+- How often it misses, or wakes by mistake, over a normal day. The first-look gate was widened after their test, from evidence in the log.
+- Music opening on hover with a real player.
+- The assistant's stop_listening tool on a real conversation.
+
 ## 2026-11-01: Wake words that heard nothing, and dropdowns that ignored the theme
 
 The owner chose their microphone and saw its level move, but the wake test said it heard nothing, and the device lists opened as black system boxes.

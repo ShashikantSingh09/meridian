@@ -474,7 +474,8 @@ struct State {
     sessions: HashMap<String, Tracked>,
     /// By approval id, so parallel requests in one session stay apart. Each
     /// names its session, so an answer cannot land on another one.
-    waiting: HashMap<String, (String, oneshot::Sender<Reply>)>,
+    /// The session and tool each held hook is for.
+    waiting: HashMap<String, (String, String, oneshot::Sender<Reply>)>,
 }
 
 struct Shared {
@@ -518,11 +519,26 @@ impl Shared {
         }
     }
 
+    /// A tool that ran, or a turn that moved on, means the question was answered in the terminal.
+    /// Letting go of the wait ends it with no decision. A long tool only shows here once it ends,
+    /// and another tool in the same turn says nothing about this one.
+    fn settle(&self, session: &str, name: &str, hook: &Value) {
+        let ran = hook["tool_name"].as_str();
+        self.state.lock().unwrap().waiting.retain(|_, (owner, tool, _)| {
+            let answered = match name {
+                "PostToolUse" | "PostToolUseFailure" => ran == Some(tool.as_str()),
+                "UserPromptSubmit" | "Stop" | "StopFailure" | "SessionEnd" => true,
+                _ => false,
+            };
+            !(owner == session && answered)
+        });
+    }
+
     fn sweep(&self, now: Instant) {
         let mut state = self.state.lock().unwrap();
         let State { sessions, waiting } = &mut *state;
         sessions.retain(|session, tracked| {
-            let open = waiting.values().any(|(owner, _)| owner == session);
+            let open = waiting.values().any(|(owner, ..)| owner == session);
             let stale = is_stale(now.duration_since(tracked.last_hook), open);
             if stale {
                 let message = Some(STALE_MESSAGE.to_string());
@@ -549,13 +565,13 @@ async fn ask(mut socket: TcpStream, shared: &Shared, session: String, hook: &Val
     let (tx, rx) = oneshot::channel();
     shared.observe(&session, "PermissionRequest", hook);
     // Waiting before the app hears of it, so even a fast click finds it.
-    shared.state.lock().unwrap().waiting.insert(id.clone(), (session.clone(), tx));
+    shared.state.lock().unwrap().waiting.insert(id.clone(), (session.clone(), tool.clone(), tx));
     let approval = Approval { id: id.clone(), tool: tool.clone(), summary, questions, plan };
     shared.send(&session, AgentEvent::Approval { approval });
 
     let decision = tokio::select! {
         decision = tokio::time::timeout(shared.wait, rx) => decision.ok().and_then(Result::ok),
-        // The user answered in the terminal, or the terminal has gone.
+        // The terminal has gone, or answered and hung up. It does not always, which is what `settle` is for.
         () = closed(&mut socket) => None,
     };
     shared.state.lock().unwrap().waiting.remove(&id);
@@ -585,6 +601,7 @@ async fn handle(mut socket: TcpStream, shared: Arc<Shared>) {
     if name == "PermissionRequest" {
         return ask(socket, &shared, session, &hook).await;
     }
+    shared.settle(&session, name, &hook);
     shared.observe(&session, name, &hook);
     respond(&mut socket, "200 OK", "").await;
 }
@@ -659,10 +676,10 @@ impl Watcher {
     /// True when that session was waiting on that approval here.
     pub fn answer(&self, session_id: &str, approval_id: &str, allow: bool, answers: Option<Map<String, Value>>) -> bool {
         let mut state = self.shared.state.lock().unwrap();
-        if !matches!(state.waiting.get(approval_id), Some((owner, _)) if owner == session_id) {
+        if !matches!(state.waiting.get(approval_id), Some((owner, ..)) if owner == session_id) {
             return false;
         }
-        state.waiting.remove(approval_id).is_some_and(|(_, tx)| tx.send(Reply { allow, answers }).is_ok())
+        state.waiting.remove(approval_id).is_some_and(|(.., tx)| tx.send(Reply { allow, answers }).is_ok())
     }
 
     /// Stops listening. Held hooks are let go without a decision, so each one
@@ -1514,6 +1531,34 @@ mod tests {
         until(&log, resolved(id.clone())).await;
         assert!(!watcher.answer("watch:s1", &id, true, None));
         assert!(watcher.shared.state.lock().unwrap().waiting.is_empty());
+    }
+
+    #[tokio::test]
+    async fn an_answer_in_the_terminal_clears_the_prompt_even_if_the_hook_stays_open() {
+        let (watcher, log) = watcher(LONG_WAIT).await;
+        let mut socket = hook(&watcher, permission()).await;
+        until(&log, has_approvals(1)).await;
+        let id = approvals(&log)[0].id.clone();
+
+        deliver(&watcher, tool_event("Notification", "Bash", json!({}))).await;
+        deliver(&watcher, tool_event("PreToolUse", "Read", json!({}))).await;
+        deliver(&watcher, tool_event("PostToolUse", "Read", json!({}))).await;
+        assert_eq!(watcher.shared.state.lock().unwrap().waiting.len(), 1, "another tool says nothing about this one");
+
+        deliver(&watcher, tool_event("PostToolUse", "Bash", json!({ "command": "rm -rf build" }))).await;
+        until(&log, resolved(id.clone())).await;
+        assert_eq!(body_of(&reply(&mut socket).await), "", "the terminal already decided");
+        assert!(!watcher.answer("watch:s1", &id, true, None));
+    }
+
+    #[tokio::test]
+    async fn a_turn_that_moved_on_clears_the_prompt() {
+        let (watcher, log) = watcher(LONG_WAIT).await;
+        let _socket = hook(&watcher, permission()).await;
+        until(&log, has_approvals(1)).await;
+        let id = approvals(&log)[0].id.clone();
+        deliver(&watcher, event("Stop")).await;
+        until(&log, resolved(id)).await;
     }
 
     #[tokio::test]

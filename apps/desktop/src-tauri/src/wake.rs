@@ -1,13 +1,16 @@
-//! Keeps the wake word listener open only while it should be. The microphone stays shut unless the
-//! user turned this on, and it closes for a conversation and for each pause they chose.
+//! Keeps the wake word listener running only while it should. The microphone stays shut unless the
+//! user turned this on, and it closes for each pause they chose. The microphone itself is opened by
+//! the interface, which sends its sound here. What it hears is compared and dropped.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{mpsc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
+use tauri::ipc::{InvokeBody, Request};
 use tauri::{AppHandle, Emitter, Manager, State};
-use voice::wake::{self, Conditions, DefaultMicrophone, Heard, Listener, Wanted};
+use voice::wake::{self, Conditions, Spotter, Wanted};
 
 use crate::commands::Core;
 use crate::island;
@@ -15,11 +18,9 @@ use crate::island;
 const TICK: Duration = Duration::from_secs(1);
 /// How long the Test button keeps listening.
 const TEST_FOR: Duration = Duration::from_secs(10);
-/// Before trying again after the microphone failed.
-const RETRY_AFTER: Duration = Duration::from_secs(15);
 const MOST_WORDS: usize = 8;
-/// Between readings of how loud the microphone is during a test.
-const SAMPLE: Duration = Duration::from_millis(50);
+/// More recordings than the interface asks for means something has gone wrong.
+const MOST_RECORDINGS: usize = 8;
 
 #[derive(Clone, PartialEq, Serialize)]
 pub struct Status {
@@ -29,24 +30,38 @@ pub struct Status {
 }
 
 #[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
 struct WakeHeard {
     word: String,
     test: bool,
-    /// How long the whole utterance took, so the interface can tell a name from a name and a command.
-    spoken_ms: u64,
 }
 
 pub struct Wake {
-    talking: AtomicBool,
     testing_until: Mutex<Option<Instant>>,
     status: Mutex<Status>,
+    spotter: Mutex<Option<Spotter>>,
+    sound: Mutex<Option<mpsc::Sender<Vec<u8>>>>,
+    recordings: Mutex<Vec<Vec<u8>>>,
+    /// Goes up whenever a word is learned or forgotten, so the spotter is built again.
+    lessons: AtomicU64,
 }
 
 impl Default for Wake {
     fn default() -> Self {
-        Self { talking: AtomicBool::new(false), testing_until: Mutex::new(None), status: Mutex::new(Status { state: "off", why: String::new() }) }
+        Self {
+            testing_until: Mutex::new(None),
+            status: Mutex::new(Status { state: "off", why: String::new() }),
+            spotter: Mutex::new(None),
+            sound: Mutex::new(None),
+            recordings: Mutex::new(Vec::new()),
+            lessons: AtomicU64::new(0),
+        }
     }
+}
+
+/// Where a word's pattern lives. The name is written out in hex, because a word can be in any script.
+fn pattern_file(app: &AppHandle, word: &str) -> Result<PathBuf, String> {
+    let name: String = word.trim().to_lowercase().bytes().map(|byte| format!("{byte:02x}")).collect();
+    Ok(app.path().app_local_data_dir().map_err(|err| err.to_string())?.join("wake").join(format!("{name}.rpw")))
 }
 
 #[tauri::command]
@@ -54,84 +69,100 @@ pub fn wake_status(wake: State<'_, Wake>) -> Status {
     wake.status.lock().unwrap().clone()
 }
 
-/// A conversation holds the microphone, so listening for a name waits until it ends.
 #[tauri::command]
-pub fn wake_talking(wake: State<'_, Wake>, on: bool) {
-    wake.talking.store(on, Ordering::Relaxed);
+pub fn wake_test(wake: State<'_, Wake>) {
+    *wake.testing_until.lock().unwrap() = Some(Instant::now() + TEST_FOR);
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Tested {
-    name: String,
-    percent: u32,
-    muted: bool,
-    /// How loud it held, from 0 to 1, which tells a microphone too quiet to hear from a word that was missed.
-    level: f32,
-}
-
-fn com() {
-    let _ = unsafe { windows::Win32::System::Com::CoInitializeEx(None, windows::Win32::System::Com::COINIT_MULTITHREADED) };
-}
-
-/// Listens until the word is heard or the time is up, and says how the microphone was doing.
+/// Takes the next piece of what the microphone hears.
 #[tauri::command]
-pub async fn wake_test(app: AppHandle) -> Result<Tested, String> {
-    *app.state::<Wake>().testing_until.lock().unwrap() = Some(Instant::now() + TEST_FOR);
-    let measured = tauri::async_runtime::spawn_blocking(move || {
-        com();
-        let microphone = DefaultMicrophone::open()?;
-        let wake = app.state::<Wake>();
-        let mut readings = Vec::new();
-        while wake.testing_until.lock().unwrap().is_some_and(|end| end > Instant::now()) {
-            readings.push(microphone.peak()?);
-            std::thread::sleep(SAMPLE);
-        }
-        Ok::<_, voice::VoiceError>(Tested { percent: microphone.percent()?, muted: microphone.muted()?, name: microphone.name, level: wake::held_level(readings) })
-    });
-    measured.await.map_err(|err| err.to_string())?.map_err(|err| err.to_string())
+pub async fn wake_audio(wake: State<'_, Wake>, request: Request<'_>) -> Result<(), String> {
+    let InvokeBody::Raw(pcm) = request.body() else { return Err("Expected audio.".into()) };
+    if let Some(sound) = wake.sound.lock().unwrap().as_ref() {
+        let _ = sound.send(pcm.clone());
+    }
+    Ok(())
 }
 
-/// Only ever runs from the button that says so, because this is a Windows setting.
+/// Which of these words it has learned.
 #[tauri::command]
-pub async fn wake_raise_microphone() -> Result<(), String> {
-    let raised = tauri::async_runtime::spawn_blocking(|| {
-        com();
-        DefaultMicrophone::open()?.set_percent(100)
-    });
-    raised.await.map_err(|err| err.to_string())?.map_err(|err| err.to_string())
+pub fn wake_taught(app: AppHandle, words: Vec<String>) -> Vec<String> {
+    words.into_iter().filter(|word| pattern_file(&app, word).is_ok_and(|file| file.exists())).collect()
 }
 
-/// What the listener was opened with. When this changes it has to start again.
+/// Takes one recording of a word. The sound stays in memory until the lesson ends.
+#[tauri::command]
+pub async fn wake_teach_sample(wake: State<'_, Wake>, request: Request<'_>) -> Result<(), String> {
+    let InvokeBody::Raw(pcm) = request.body() else { return Err("Expected audio.".into()) };
+    let mut recordings = wake.recordings.lock().unwrap();
+    if recordings.len() < MOST_RECORDINGS {
+        recordings.push(pcm.clone());
+    }
+    Ok(())
+}
+
+/// Ends a lesson. With a word it learns it, and without one it drops what was recorded.
+#[tauri::command]
+pub async fn wake_teach_end(app: AppHandle, wake: State<'_, Wake>, word: Option<String>) -> Result<(), String> {
+    let recordings = std::mem::take(&mut *wake.recordings.lock().unwrap());
+    let Some(word) = word else { return Ok(()) };
+    let pattern = wake::learn(word.trim(), &recordings).map_err(|err| err.to_string())?;
+    let file = pattern_file(&app, &word)?;
+    if let Some(folder) = file.parent() {
+        std::fs::create_dir_all(folder).map_err(|err| err.to_string())?;
+    }
+    std::fs::write(file, pattern).map_err(|err| err.to_string())?;
+    wake.lessons.fetch_add(1, Ordering::Relaxed);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn wake_forget(app: AppHandle, wake: State<'_, Wake>, word: String) -> Result<(), String> {
+    match std::fs::remove_file(pattern_file(&app, &word)?) {
+        Err(err) if err.kind() != std::io::ErrorKind::NotFound => return Err(err.to_string()),
+        _ => {}
+    }
+    wake.lessons.fetch_add(1, Ordering::Relaxed);
+    Ok(())
+}
+
+/// What the spotter was built from. When this changes it has to be built again.
 #[derive(PartialEq)]
 struct Asked {
     words: Vec<String>,
     easiness: String,
+    lessons: u64,
 }
 
-fn open(app: &AppHandle, asked: &Asked, ended: mpsc::Sender<()>) -> Result<Listener, String> {
-    let handle = app.clone();
-    let easiness = asked.easiness.clone();
-    let phrases = wake::phrases(&asked.words);
-    let heard = move |heard: Heard| {
-        let Some(word) = wake::phrase_in(&heard.text, &phrases).filter(|_| wake::accepted(&easiness, heard.confidence, heard.raw, heard.spoken_ms)) else { return };
-        let test = handle.state::<Wake>().testing_until.lock().unwrap().take().is_some();
-        let _ = handle.emit_to(island::LABEL, "wake-heard", WakeHeard { word, test, spoken_ms: heard.spoken_ms });
-    };
-    Listener::start(&asked.words, heard, move || {
-        let _ = ended.send(());
-    })
-    .map_err(|err| err.to_string())
+fn build(app: &AppHandle, asked: &Asked) -> Result<Spotter, String> {
+    let mut learned = Vec::new();
+    for word in &asked.words {
+        learned.push((word.clone(), std::fs::read(pattern_file(app, word)?).map_err(|err| err.to_string())?));
+    }
+    Spotter::new(&asked.easiness, &learned).map_err(|err| err.to_string())
+}
+
+/// Sound is checked here, in the order it came, so a slow moment never holds up the interface.
+fn listen(app: AppHandle, sound: mpsc::Receiver<Vec<u8>>) {
+    for pcm in sound {
+        let wake = app.state::<Wake>();
+        let found = wake.spotter.lock().unwrap().as_mut().and_then(|spotter| spotter.hear(&pcm));
+        if let Some(word) = found {
+            let test = wake.testing_until.lock().unwrap().take().is_some();
+            let _ = app.emit_to(island::LABEL, "wake-heard", WakeHeard { word, test });
+        }
+    }
 }
 
 pub fn spawn(app: AppHandle) {
     let this_app = std::env::current_exe().ok().and_then(|path| path.file_name().map(|name| name.to_string_lossy().into_owned())).unwrap_or_default();
+    let (sound, heard) = mpsc::channel();
+    *app.state::<Wake>().sound.lock().unwrap() = Some(sound);
+    let ears = app.clone();
+    std::thread::spawn(move || listen(ears, heard));
     std::thread::spawn(move || {
-        // The recognizer is a Windows Runtime object, and its events arrive on other threads.
-        com();
-        let (ended, stopped) = mpsc::channel();
-        let mut listening: Option<(Asked, Listener)> = None;
-        let mut failed: Option<(Instant, String)> = None;
+        let mut built: Option<Asked> = None;
+        let mut failed: Option<String> = None;
         loop {
             std::thread::sleep(TICK);
             let settings = app.state::<Core>().settings.lock().unwrap().clone();
@@ -143,7 +174,8 @@ pub fn spawn(app: AppHandle) {
                 }
                 until.is_some()
             };
-            let words: Vec<String> = settings.wake_words.iter().filter(|word| word.on).filter_map(|word| wake::clean(&word.text)).take(MOST_WORDS).collect();
+            let chosen: Vec<String> = settings.wake_words.iter().filter(|word| word.on && !word.text.trim().is_empty()).map(|word| word.text.trim().to_string()).take(MOST_WORDS).collect();
+            let words: Vec<String> = chosen.iter().filter(|word| pattern_file(&app, word).is_ok_and(|file| file.exists())).cloned().collect();
             // The system is only asked about while this is on, so a user who never turns it on pays nothing.
             let active = settings.wake_enabled || testing;
             let wants = wake::wanted(&Conditions {
@@ -151,7 +183,6 @@ pub fn spawn(app: AppHandle) {
                 monitoring_paused: settings.monitoring_paused,
                 has_words: !words.is_empty(),
                 testing,
-                talking: state.talking.load(Ordering::Relaxed),
                 charger_only: settings.wake_listen == "charger",
                 on_battery: active && wake::on_battery(),
                 pause_when_locked: settings.wake_pause_locked,
@@ -160,33 +191,28 @@ pub fn spawn(app: AppHandle) {
                 others_on_microphone: active && wake::others_on_microphone(&this_app),
             });
 
-            if stopped.try_recv().is_ok() && listening.is_some() {
-                listening = None;
-                failed = Some((Instant::now(), "The microphone stopped. Trying again shortly.".to_string()));
-            }
-            let asked = Asked { words, easiness: settings.wake_sensitivity.clone() };
-            if wants != Wanted::Listening || listening.as_ref().is_some_and(|(open, _)| *open != asked) {
-                listening = None;
-                while stopped.try_recv().is_ok() {}
-            }
+            let asked = Asked { words, easiness: settings.wake_sensitivity.clone(), lessons: state.lessons.load(Ordering::Relaxed) };
             if wants != Wanted::Listening {
+                *state.spotter.lock().unwrap() = None;
+                built = None;
                 failed = None;
-            } else if listening.is_none() && failed.as_ref().is_none_or(|(at, _)| at.elapsed() >= RETRY_AFTER) {
-                match open(&app, &asked, ended.clone()) {
-                    Ok(listener) => {
-                        listening = Some((asked, listener));
+            } else if built.as_ref() != Some(&asked) {
+                match build(&app, &asked) {
+                    Ok(spotter) => {
+                        *state.spotter.lock().unwrap() = Some(spotter);
+                        built = Some(asked);
                         failed = None;
                     }
-                    Err(why) => failed = Some((Instant::now(), why)),
+                    Err(why) => failed = Some(why),
                 }
             }
 
-            let now = match (wants, &listening, &failed) {
-                (Wanted::Off, ..) => Status { state: "off", why: String::new() },
-                (Wanted::Paused(why), ..) => Status { state: "paused", why: why.to_string() },
-                (Wanted::Listening, Some(_), _) => Status { state: "listening", why: String::new() },
-                (Wanted::Listening, None, Some((_, why))) => Status { state: "failed", why: why.clone() },
-                (Wanted::Listening, None, None) => Status { state: "off", why: String::new() },
+            let now = match (wants, &failed) {
+                (Wanted::Off, _) if settings.wake_enabled && !chosen.is_empty() => Status { state: "off", why: "Teach it your voice to start listening.".to_string() },
+                (Wanted::Off, _) => Status { state: "off", why: String::new() },
+                (Wanted::Paused(why), _) => Status { state: "paused", why: why.to_string() },
+                (Wanted::Listening, Some(why)) => Status { state: "failed", why: why.clone() },
+                (Wanted::Listening, None) => Status { state: "listening", why: String::new() },
             };
             let mut shown = state.status.lock().unwrap();
             if *shown != now {

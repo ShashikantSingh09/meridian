@@ -31,7 +31,6 @@ import type {
   Level,
   VoiceInfo,
   WakeStatus,
-  WakeTested,
 } from "./types";
 
 export const native = isTauri();
@@ -158,7 +157,6 @@ export const bridge = {
       : mock.checkUpdate(),
   installUpdate: () => (native ? invoke<void>("update_install") : mock.installUpdate()),
   openLogs: () => (native ? invoke<void>("open_logs") : Promise.resolve()),
-  openSoundSettings: () => (native ? invoke<void>("open_sound_settings") : Promise.resolve()),
 
   screenCapture: (target: "window" | "screen") =>
     native ? invoke<Capture>("screen_capture", { target }) : mock.screenCapture(),
@@ -264,14 +262,21 @@ export const bridge = {
     if (!native) return Promise.resolve();
     return listen<string>("assistant-open", (e) => handler(e.payload)).then(() => {});
   },
+  onAssistantStopListening(handler: () => void) {
+    if (!native) return Promise.resolve();
+    return listen("assistant-stop-listening", handler).then(() => {});
+  },
   onAssistantAgent(handler: (start: { task: string; folder: string }) => void) {
     if (!native) return Promise.resolve();
     return listen<{ task: string; folder: string }>("assistant-start-agent", (e) => handler(e.payload)).then(() => {});
   },
   wakeStatus: () => (native ? invoke<WakeStatus>("wake_status") : Promise.resolve<WakeStatus>({ state: "off", why: "" })),
-  wakeTalking: (on: boolean) => (native ? invoke<void>("wake_talking", { on }) : Promise.resolve()),
-  wakeTest: () => (native ? invoke<WakeTested>("wake_test") : mock.wakeTest()),
-  wakeRaiseMicrophone: () => (native ? invoke<void>("wake_raise_microphone") : mock.wakeRaiseMicrophone()),
+  wakeTest: () => (native ? invoke<void>("wake_test") : Promise.resolve()),
+  wakeAudio: (pcm: Uint8Array) => (native ? invoke<void>("wake_audio", pcm) : Promise.resolve()),
+  wakeTaught: (words: string[]) => (native ? invoke<string[]>("wake_taught", { words }) : mock.wakeTaught(words)),
+  wakeTeachSample: (pcm: Uint8Array) => (native ? invoke<void>("wake_teach_sample", pcm) : Promise.resolve()),
+  wakeTeachEnd: (word: string | null) => (native ? invoke<void>("wake_teach_end", { word }) : mock.wakeTeachEnd(word)),
+  wakeForget: (word: string) => (native ? invoke<void>("wake_forget", { word }) : mock.wakeForget(word)),
   onWakeState(handler: (status: WakeStatus) => void) {
     if (!native) return Promise.resolve(mock.onWakeState(handler));
     return listen<WakeStatus>("wake-state", (e) => handler(e.payload)).then(() => {});

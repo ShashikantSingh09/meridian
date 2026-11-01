@@ -19,19 +19,23 @@ const h = vi.hoisted(() => ({
     sessions: [] as Session[],
   },
   key: (_down: boolean): Promise<void> => Promise.resolve(),
-  wake: (_heard: { word: string; test: boolean; spokenMs: number }) => {},
+  wake: (_heard: { word: string; test: boolean }) => {},
+  state: (_status: { state: string; why: string }) => {},
+  stop: () => {},
+  node: { port: {} } as { port: { onmessage?: (event: { data: Int16Array }) => void } },
 }));
 
 vi.mock("./bridge", () => ({
   bridge: {
     onVoiceKey: (handler: (down: boolean) => Promise<void>) => void (h.key = handler),
-    onWakeState: vi.fn(async () => {}),
-    onWakeHeard: (handler: (heard: { word: string; test: boolean; spokenMs: number }) => void) => void (h.wake = handler),
+    onWakeState: (handler: (status: { state: string; why: string }) => void) => void (h.state = handler),
+    onWakeHeard: (handler: (heard: { word: string; test: boolean }) => void) => void (h.wake = handler),
     onAssistantOpen: vi.fn(async () => {}),
+    onAssistantStopListening: (handler: () => void) => void (h.stop = handler),
     onAssistantAgent: vi.fn(async () => {}),
     voiceHear: vi.fn(async () => ""),
     wakeStatus: vi.fn(async () => ({ state: "off", why: "" })),
-    wakeTalking: vi.fn(async () => {}),
+    wakeAudio: vi.fn(async () => {}),
     voiceHearStart: vi.fn(async () => {}),
     voiceHearEnd: vi.fn(async () => ""),
     voiceSpeak: vi.fn(async () => {}),
@@ -63,6 +67,14 @@ let clock = 0;
 
 const settled = () => new Promise((resolve) => setTimeout(resolve, 0));
 
+/** What the microphone would send for a few words and then a pause long enough to end a turn. */
+async function speakAndPause() {
+  const send = (level: number) => h.node.port.onmessage?.({ data: new Int16Array(1600).fill(level) });
+  for (let i = 0; i < 5; i++) send(8000);
+  for (let i = 0; i < 25; i++) send(0);
+  await settled();
+}
+
 /** Holds the key for a second, as if saying `words`. */
 async function holdAndSay(words: string) {
   vi.mocked(bridge.voiceHearEnd).mockResolvedValue(words);
@@ -87,7 +99,12 @@ beforeEach(() => {
     createMediaStreamSource = () => ({ connect() {} });
     close = async () => {};
   });
-  vi.stubGlobal("AudioWorkletNode", class { port = {}; });
+  vi.stubGlobal("AudioWorkletNode", class {
+    port = {};
+    constructor() {
+      h.node = this as never;
+    }
+  });
   Object.assign(h.app, { voice: null, chat: { messages: [] }, chatPending: false, agentChat: { agent: null, sessionId: null }, sessions: [] });
 });
 
@@ -175,7 +192,7 @@ describe("when something fails", () => {
 describe("a wake word", () => {
   it("starts a conversation as the setting says, and answers to its name", async () => {
     h.app.settings.wakeAfter = "conversation";
-    h.wake({ word: "Hey Meridian", test: false, spokenMs: 700 });
+    h.wake({ word: "Hey Meridian", test: false });
     micOpens();
     await settled();
     expect(h.app.voice).toMatchObject({ phase: "listening", mode: "conversation", woken: true });
@@ -183,21 +200,46 @@ describe("a wake word", () => {
     endConversation();
   });
 
-  it("takes a command said in the same breath, without the name", async () => {
-    vi.mocked(bridge.voiceHearEnd).mockResolvedValue("Hey Meridian, open Chrome");
-    h.wake({ word: "hey meridian", test: false, spokenMs: 2400 });
+  it("sends what the microphone hears on, and hands it to the conversation when it hears the name", async () => {
+    h.app.wake.state = "listening";
+    h.state({ state: "listening", why: "" });
     micOpens();
-    await vi.waitFor(() => expect(sendChat).toHaveBeenCalledWith("open Chrome", [], true));
+    await settled();
+    const opened = getUserMedia.mock.calls.length;
+    h.wake({ word: "hey meridian", test: false });
+    await settled();
+    expect(h.app.voice).toMatchObject({ phase: "listening", woken: true });
+    expect(getUserMedia.mock.calls.length).toBe(opened);
+    endConversation();
+    micOpens();
+    await settled();
+    h.app.wake.state = "off";
+    h.state({ state: "off", why: "" });
+  });
+
+  it("waits for the question when only its name was said, even twice", async () => {
+    vi.mocked(bridge.voiceHearEnd).mockResolvedValue("Hey Meridian. Hey Meridian.");
+    h.wake({ word: "hey meridian", test: false });
+    micOpens();
+    await settled();
+    await speakAndPause();
+    await vi.waitFor(() => expect(bridge.voiceHearStart).toHaveBeenCalledTimes(2));
+    expect(h.app.voice).toMatchObject({ phase: "listening", woken: true });
+    expect(sendChat).not.toHaveBeenCalled();
     endConversation();
   });
 
-  it("drops talk in the room that only sounded like the name", async () => {
-    vi.mocked(bridge.voiceHearEnd).mockResolvedValue("हां वो देखना पड़ेगा तेरे साथ");
-    h.wake({ word: "meridian", test: false, spokenMs: 2600 });
+  it("takes the microphone back for the next name when a conversation ends", async () => {
+    h.app.wake.state = "listening";
+    void h.key(true);
     micOpens();
-    await vi.waitFor(() => expect(h.app.voice).toBeNull());
-    expect(sendChat).not.toHaveBeenCalled();
-    expect(sendAgentChat).not.toHaveBeenCalled();
+    await settled();
+    const opened = getUserMedia.mock.calls.length;
+    endConversation();
+    await vi.waitFor(() => expect(getUserMedia.mock.calls.length).toBe(opened + 1));
+    h.app.wake.state = "off";
+    micOpens();
+    await settled();
   });
 
   it("opens the microphone the user chose", async () => {
@@ -211,10 +253,57 @@ describe("a wake word", () => {
   });
 
   it("starts nothing during a test, and reports what it heard", async () => {
-    h.wake({ word: "Hey Meridian", test: true, spokenMs: 700 });
+    h.wake({ word: "Hey Meridian", test: true });
     await settled();
     expect(getUserMedia).not.toHaveBeenCalled();
     expect(wakeTestHeard).toHaveBeenCalledWith("Hey Meridian");
+  });
+});
+
+describe("ending a conversation", () => {
+  async function inConversation() {
+    h.app.settings.wakeAfter = "conversation";
+    h.wake({ word: "Hey Meridian", test: false });
+    micOpens();
+    await settled();
+    await speakAndPause();
+  }
+  afterEach(() => void (h.app.settings.wakeAfter = "turn"));
+
+  it("stops listening when they say they are done, in any words", async () => {
+    for (const bye of ["Ok, that's it.", "I am done.", "Thanks, that's all.", "Bye."]) {
+      vi.mocked(bridge.voiceHearEnd).mockResolvedValue(`Hey Meridian. ${bye}`);
+      await inConversation();
+      await vi.waitFor(() => expect(h.app.voice).toBeNull());
+      await settled();
+    }
+    expect(sendChat).not.toHaveBeenCalled();
+  });
+
+  it("stops after the reply when the assistant understood they were finished", async () => {
+    vi.mocked(bridge.voiceHearEnd).mockResolvedValue("Hey Meridian, I have got what I needed");
+    h.app.chatPending = true;
+    await inConversation();
+    await vi.waitFor(() => expect(sendChat).toHaveBeenCalled());
+    h.stop();
+    Object.assign(h.app, { chat: { messages: [{ role: "assistant", content: "Okay." }] }, chatPending: false });
+    await vi.waitFor(() => expect(h.app.voice).toBeNull(), { timeout: 3000 });
+    expect(bridge.voiceHearStart).toHaveBeenCalledTimes(1);
+  });
+
+  it("never answers a waiting request by leaving", async () => {
+    const chat: Session = { id: "s", agent: "Claude", status: "running", log: [{ kind: "user", text: "fix it" }], approval: null };
+    h.app.sessions = [chat];
+    h.app.agentChat = { agent: "claude-code", sessionId: "s" };
+    vi.mocked(sendAgentChat).mockImplementationOnce(async () => void (chat.log = [...chat.log]));
+    await holdAndSay("fix it");
+    Object.assign(chat, { status: "waiting", approval: { id: "a1", summary: "edit a file" } });
+    await vi.waitFor(() => expect(bridge.voiceSpeak).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(h.app.voice?.phase).toBe("listening"));
+    await holdAndSay("ok that's it, thanks");
+    await vi.waitFor(() => expect(h.app.voice).toBeNull());
+    expect(answerApproval).not.toHaveBeenCalled();
+    expect(bridge.voiceSpeak).toHaveBeenCalledOnce();
   });
 });
 
@@ -251,8 +340,8 @@ describe("following a reply", () => {
     vi.mocked(sendAgentChat).mockImplementationOnce(async () => void (chat.log = [...chat.log]));
 
     await holdAndSay("fix it");
-    await vi.waitFor(() => expect(bridge.voiceSpeak).toHaveBeenCalledOnce());
     Object.assign(chat, { status: "waiting", approval: { id: "a1", summary: "edit a file" } });
+    await vi.waitFor(() => expect(bridge.voiceSpeak).toHaveBeenCalledOnce());
     await vi.waitFor(() => expect(h.app.voice?.phase).toBe("listening"));
     await holdAndSay("yes");
     expect(answerApproval).toHaveBeenCalledWith("s", "a1", true);
@@ -260,11 +349,44 @@ describe("following a reply", () => {
 
     // The agent has not reported the answer yet, so the request is still listed.
     const said = () => vi.mocked(bridge.voiceSpeak).mock.calls.map((call) => call[0]);
-    expect(said()).toEqual(["On it.", "Claude wants to edit a file. Should it?"]);
+    expect(said()).toEqual(["Claude wants to edit a file. Should it?"]);
 
     Object.assign(chat, { approval: null, status: "completed", log: [...chat.log, { kind: "text", text: "All done." }] });
     await vi.waitFor(() => expect(h.app.voice).toBeNull());
-    expect(said().slice(2)).toEqual(["Looking now.", "All done."]);
+    expect(said().slice(1)).toEqual(["On it.", "Looking now.", "All done."]);
+  });
+
+  it("reads only the answer after the last step, never its working", async () => {
+    const chat: Session = { id: "s", agent: "Claude", status: "running", log: [{ kind: "user", text: "close chrome" }], approval: null };
+    h.app.sessions = [chat];
+    h.app.agentChat = { agent: "claude-code", sessionId: "s" };
+    vi.mocked(sendAgentChat).mockImplementationOnce(async () => void (chat.log = [...chat.log]));
+    await holdAndSay("close chrome");
+    Object.assign(chat, { log: [...chat.log, { kind: "text", text: "I'll stop it with PowerShell." }, { kind: "did", text: "$ Stop-Process chrome" }, { kind: "text", text: "It is stopped. Now checking." }, { kind: "did", text: "$ Get-Process chrome" }] });
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    expect(bridge.voiceSpeak).not.toHaveBeenCalled();
+    Object.assign(chat, { status: "completed", log: [...chat.log, { kind: "text", text: "Chrome is closed." }] });
+    await vi.waitFor(() => expect(h.app.voice).toBeNull());
+    expect(vi.mocked(bridge.voiceSpeak).mock.calls.map((call) => call[0])).toEqual(["Chrome is closed."]);
+  });
+
+  it("says done when the work ended without a word", async () => {
+    const chat: Session = { id: "s", agent: "Claude", status: "running", log: [{ kind: "user", text: "close chrome" }], approval: null };
+    h.app.sessions = [chat];
+    h.app.agentChat = { agent: "claude-code", sessionId: "s" };
+    vi.mocked(sendAgentChat).mockImplementationOnce(async () => void (chat.log = [...chat.log]));
+    await holdAndSay("close chrome");
+    Object.assign(chat, { status: "completed", log: [...chat.log, { kind: "did", text: "$ Stop-Process chrome" }] });
+    await vi.waitFor(() => expect(h.app.voice).toBeNull());
+    expect(vi.mocked(bridge.voiceSpeak).mock.calls.map((call) => call[0])).toEqual(["Done."]);
+  });
+
+  it("reads no more than a few sentences of any reply", async () => {
+    h.app.chatPending = true;
+    await holdAndSay("tell me everything");
+    Object.assign(h.app, { chat: { messages: [{ role: "assistant", content: "One. Two. Three. Four. Five." }] }, chatPending: false });
+    await vi.waitFor(() => expect(h.app.voice).toBeNull());
+    expect(vi.mocked(bridge.voiceSpeak).mock.calls.map((call) => call[0])).toEqual(["One.", "Two.", "Three."]);
   });
 
   it("does not let a stopped conversation speak in the next one", async () => {

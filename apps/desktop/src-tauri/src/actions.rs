@@ -32,9 +32,9 @@ const MOST_FILES: usize = 25;
 const MOST_LOOKED_AT: usize = 40_000;
 const SCREEN_CHARS: usize = 6000;
 const SERVER: &str = "meridian";
-const RUN_WITHOUT_ASKING: [&str; 13] = [
+const RUN_WITHOUT_ASKING: [&str; 14] = [
     "open_app", "list_apps", "open_website", "search_web", "open_windows_settings", "open_path", "find_files", "media_control", "set_volume", "remind_me", "my_day",
-    "show_panel", "pc_status",
+    "show_panel", "pc_status", "stop_listening",
 ];
 
 fn tools() -> Value {
@@ -56,6 +56,7 @@ fn tools() -> Value {
         tool("my_day", "Lists what is coming up: flights, meetings, deliveries and reminders.", json!({}), &[]),
         tool("show_panel", "Opens one of Meridian's own tabs for the user to look at.", json!({ "tab": { "type": "string", "enum": ["home", "chat", "agents", "media", "day", "inbox", "settings"] } }), &["tab"]),
         tool("pc_status", "Gives the current date and time, and whether the PC is on battery.", json!({}), &[]),
+        tool("stop_listening", "Ends a spoken conversation after this reply, for when the user has said they are finished.", json!({}), &[]),
         tool("read_screen", "Reads the text on the user's screen, which then goes to the AI. Asks them first.", json!({}), &[]),
         tool("start_agent", "Starts a coding agent on a task in a project folder, which keeps working by itself. Asks them first.", json!({ "task": text("What it should do"), "folder": text("The project folder") }), &["task"]),
     ])
@@ -78,8 +79,9 @@ pub fn setup(url: &str, settings: &Settings) -> AssistantSetup {
     let manner = if you.is_empty() { manner } else { format!("{manner} Call the user {you}.") };
     let instructions = format!(
         "You are {name}, the personal assistant built into this Windows PC, running inside the Meridian app. {name} is you, so never tell the user to ask Meridian or {name}, and never say something is outside what you can do while a tool can do it.{manner} \
-         You act, you do not explain how. When the user asks you to open, play, pause, skip, change, find, check or remind, call the matching mcp__{SERVER} tool straight away, then confirm in a few words. \
+         You act, you do not explain how. When the user asks you to open, play, pause, skip, change, find, check or remind, call the matching mcp__{SERVER} tool straight away, then confirm in a few words, without describing the commands or steps you used. \
          Use mcp__{SERVER}__show_panel to bring up Meridian's own screens. For anything no tool covers, run a PowerShell command with Bash. It asks the user on the island first, so do not ask in chat as well. \
+         When the user says in any words that they are finished or need nothing more, call mcp__{SERVER}__stop_listening and reply with a few words at most. \
          Never run anything the user did not ask for. Reply in the language the user speaks, whether Hindi, English or a mix of both."
     );
     AssistantSetup { tools_url: url.to_string(), server: SERVER.to_string(), allowed: RUN_WITHOUT_ASKING.iter().map(|tool| format!("mcp__{SERVER}__{tool}")).collect(), instructions }
@@ -296,6 +298,7 @@ fn call(app: &AppHandle, name: &str, input: &Value) -> Result<String, String> {
         }
         "my_day" => my_day(app),
         "show_panel" => app.emit_to(island::LABEL, "assistant-open", text("tab")).map(|()| "Opened.".to_string()).map_err(|err| err.to_string()),
+        "stop_listening" => app.emit_to(island::LABEL, "assistant-stop-listening", ()).map(|()| "It will stop listening after this reply.".to_string()).map_err(|err| err.to_string()),
         "pc_status" => Ok(format!("It is {}. The PC is {}.", Local::now().format("%A %-d %B %Y, %-I:%M %P"), if voice::wake::on_battery() { "on battery" } else { "plugged in" })),
         "read_screen" => read_screen(app),
         "start_agent" => {

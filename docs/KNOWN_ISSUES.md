@@ -143,7 +143,7 @@ What stands between this build and a stranger installing it. Only the owner can 
 
 ## Not built yet
 
-- **Writing down speech with the Windows recognizer.** Left out on purpose. See `docs/DECISIONS.md`, D51. Wake words do use it, see D55.
+- **Writing down speech with the Windows recognizer.** Left out on purpose. See `docs/DECISIONS.md`, D51. Wake words do not use it, see D59.
 - **Restored sessions are read-only.** Chat and finished sessions survive a restart, but a session's process does not, so it
   cannot be continued. Quitting ends every agent the app started. Agents in your own terminal carry on.
 - **Following Codex.** Claude Code only.
@@ -165,10 +165,10 @@ What stands between this build and a stranger installing it. Only the owner can 
 
 ## Behaviour to be aware of
 
-- Wake words hear the microphone as Windows delivers it, with no gain. A low Windows slider leaves them deaf, and Voice Clarity takes away anything that is not clear speech. The Test button says so and can raise the slider.
+- Wake words have to be taught, and they know only the voices that taught them. Someone's own speech that sounds close can wake it.
+- An approval answered in the terminal clears from the island when the tool finishes, or at once if Claude Code hangs up its hook, so a long command can leave it showing until then.
+
 - The assistant's actions work with Claude Code as the AI. API models and Codex can chat but have no tool loop yet, so they cannot act.
-- Wake words listen through the Windows default microphone whatever is chosen under Voice, because Windows gives no way to point its recognizer elsewhere.
-- Wake words cannot be written in Devanagari. A Hindi name works in English letters.
 
 - Talking needs something to hear with. Hearing defaults to this PC, which needs a download of about 65 MB, or an ElevenLabs or Deepgram
   key. Until one is set, the microphone button opens Settings, Voice and says why. Speaking needs neither, because the Windows voice is

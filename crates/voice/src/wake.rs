@@ -1,98 +1,83 @@
-//! Listens for a few chosen phrases, with the speech recognizer built into Windows held to a fixed
-//! list. It runs on this PC and needs no download. Nothing it hears is kept, and the text of a match
-//! is all that leaves here. The rest of the speech path stays out of it until a phrase is heard.
+//! Listens for a word in the user's own voice. It compares the microphone they chose against a few
+//! recordings they made, here on this PC, so it works for any word in any language. Only the pattern
+//! of those recordings is kept, never the sound, and what the microphone hears goes no further.
 
-use windows::core::{Interface, Ref, HSTRING};
-use windows::Foundation::{TimeSpan, TypedEventHandler};
-use windows::Globalization::Language;
-use windows::Media::SpeechRecognition::{
-    ISpeechRecognitionConstraint, SpeechContinuousRecognitionCompletedEventArgs, SpeechContinuousRecognitionResultGeneratedEventArgs,
-    SpeechContinuousRecognitionSession, SpeechRecognitionConfidence, SpeechRecognitionGrammarFileConstraint, SpeechRecognitionListConstraint, SpeechRecognitionResultStatus,
-    SpeechRecognizer,
-};
-use windows::Storage::StorageFile;
-use windows::System::UserProfile::GlobalizationPreferences;
-use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
-use windows::Win32::Media::Audio::Endpoints::{IAudioEndpointVolume, IAudioMeterInformation};
-use windows::Win32::Media::Audio::{eCapture, eConsole, IMMDeviceEnumerator, MMDeviceEnumerator};
-use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_ALL, STGM_READ};
+use std::collections::HashMap;
+
+use rustpotter::{Rustpotter, RustpotterConfig, SampleFormat, WakewordLoad, WakewordRef, WakewordRefBuildFromBuffers, WakewordSave};
 use windows::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
 use windows::Win32::System::StationsAndDesktops::{CloseDesktop, OpenInputDesktop, DESKTOP_CONTROL_FLAGS, DESKTOP_READOBJECTS};
-use windows_collections::IIterable;
 
-use crate::VoiceError;
+use crate::{to_wav, VoiceError};
 
-const MOST_LETTERS: usize = 40;
-/// Windows would otherwise end the session after a few quiet seconds.
-const QUIET_ALLOWED: TimeSpan = TimeSpan { Duration: 24 * 60 * 60 * 10_000_000 };
 const MICROPHONE_USERS: &str = r"Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\microphone";
-/// Windows runs the recognizer in this, so its use of the microphone is ours.
-const OUR_RECOGNIZER: &str = "speechruntime";
+/// The interface runs in this, so its use of the microphone is ours.
+const OUR_WEBVIEW: &str = "msedgewebview2";
+const SAMPLE_RATE: u32 = 16_000;
+/// How much of each moment of sound is compared, which is the size rustpotter's own tools use.
+const DETAIL: u16 = 16;
 
-/// A phrase the recognizer can take: English letters and single spaces. It works out how a word
-/// sounds from its spelling, so a Hindi name works when written in English letters.
-pub fn clean(text: &str) -> Option<String> {
-    let joined = text.split_whitespace().collect::<Vec<_>>().join(" ");
-    let fits = !joined.is_empty() && joined.len() <= MOST_LETTERS && joined.chars().all(|c| c.is_ascii_alphabetic() || c == ' ' || c == '\'');
-    fits.then_some(joined)
-}
-
-/// Longer than this and more was said than a name, which is also what talk in the room looks like.
-pub const NAME_MS: u64 = 1400;
-
-/// Below this a Low match is noise. Room talk scored 0.002 and 0.008 on the reference machine.
-const FAINTEST: f64 = 0.02;
-
-/// How easily it wakes: "sure", "balanced" or "easily". Anything else is treated as balanced. A name
-/// on its own may be faint, as a clear word across a room is. Inside a longer stretch of speech it
-/// has to be certain, because that is what people talking to each other sounds like.
-pub fn accepted(easiness: &str, confidence: SpeechRecognitionConfidence, raw: f64, spoken_ms: u64) -> bool {
-    use SpeechRecognitionConfidence as C;
-    let alone = spoken_ms <= NAME_MS;
+/// How close to the recordings a word has to be: "sure", "balanced" or "easily". A real voice scored
+/// about 0.55 before the silence came out of its recordings, and a sentence that only sounded close
+/// scored 0.54.
+fn closeness(easiness: &str) -> f32 {
     match easiness {
-        "sure" => confidence == C::High,
-        "easily" => confidence != C::Rejected && (alone || confidence != C::Low),
-        _ if alone => confidence != C::Rejected && (confidence != C::Low || raw >= FAINTEST),
-        _ => confidence == C::High,
+        "sure" => 0.58,
+        "easily" => 0.46,
+        _ => 0.5,
     }
 }
 
-const GREETINGS: [&str; 6] = ["hey", "hi", "hello", "okay", "ok", "oye"];
+/// How far a word can stretch against a recording, because nobody says it the same way twice.
+const STRETCH: u16 = 8;
+/// Moments in a row that have to match, which a voice's few strong ones can meet.
+const MATCHES_NEEDED: usize = 3;
+/// The quick first look, which only saves work. A real voice scored as low as 0.22 on it.
+const FIRST_LOOK: f32 = 0.12;
 
-/// Everything that counts as saying a wake word: the words themselves, the name alone, and the
-/// name with any greeting, because nobody keeps to one exact phrase.
-pub fn phrases(words: &[String]) -> Vec<String> {
-    let mut all: Vec<String> = Vec::new();
-    let mut add = |phrase: String| {
-        if !phrase.is_empty() && !all.contains(&phrase) {
-            all.push(phrase);
+/// Turns recordings of a word, as 16-bit mono sound, into the pattern that is kept in their place.
+pub fn learn(word: &str, recordings: &[Vec<u8>]) -> Result<Vec<u8>, VoiceError> {
+    let samples: HashMap<String, Vec<u8>> = recordings.iter().enumerate().map(|(i, pcm)| (format!("{i}.wav"), to_wav(pcm, SAMPLE_RATE))).collect();
+    WakewordRef::new_from_sample_buffers(word.to_string(), None, None, samples, DETAIL).and_then(|pattern| pattern.save_to_buffer()).map_err(VoiceError::Service)
+}
+
+/// Finds learned words in sound as it arrives.
+pub struct Spotter {
+    detector: Rustpotter,
+    waiting: Vec<i16>,
+}
+
+impl Spotter {
+    /// `learned` pairs each word with its pattern from `learn`.
+    pub fn new(easiness: &str, learned: &[(String, Vec<u8>)]) -> Result<Self, VoiceError> {
+        let mut config = RustpotterConfig::default();
+        config.fmt.sample_rate = SAMPLE_RATE as usize;
+        config.fmt.sample_format = SampleFormat::I16;
+        config.detector.threshold = closeness(easiness);
+        config.detector.avg_threshold = FIRST_LOOK;
+        // As soon as it is sure, because a command can follow straight on from the name.
+        config.detector.eager = true;
+        config.detector.band_size = STRETCH;
+        config.detector.min_scores = MATCHES_NEEDED;
+        let mut detector = Rustpotter::new(&config).map_err(VoiceError::Service)?;
+        for (word, pattern) in learned {
+            let pattern = WakewordRef::load_from_buffer(pattern).map_err(VoiceError::Service)?;
+            detector.add_wakeword_ref(word, pattern).map_err(VoiceError::Service)?;
         }
-    };
-    for word in words {
-        let word = word.to_lowercase();
-        add(word.clone());
-        let name = word.split_once(' ').filter(|(first, _)| GREETINGS.contains(first)).map_or(word.as_str(), |(_, rest)| rest);
-        add(name.to_string());
-        for greeting in GREETINGS {
-            add(format!("{greeting} {name}"));
-        }
+        Ok(Self { detector, waiting: Vec::new() })
     }
-    all
-}
 
-/// A grammar that finds a phrase anywhere in what is said, so a command in the same breath counts.
-/// Phrases have been through `clean`, so they need no escaping beyond the apostrophe.
-pub fn grammar(phrases: &[String], language: &str) -> String {
-    let items: String = phrases.iter().map(|phrase| format!("<item>{}</item>", phrase.replace('\'', "&apos;"))).collect();
-    format!(
-        r#"<?xml version="1.0" encoding="UTF-8"?><grammar version="1.0" xml:lang="{language}" root="wake" mode="voice" tag-format="semantics/1.0" xmlns="http://www.w3.org/2001/06/grammar"><rule id="wake" scope="public"><item repeat="0-1"><ruleref special="GARBAGE"/></item><one-of>{items}</one-of><item repeat="0-1"><ruleref special="GARBAGE"/></item></rule></grammar>"#
-    )
-}
-
-/// The phrase in what was recognized, which can come wrapped in dots for the speech around it.
-pub fn phrase_in(text: &str, phrases: &[String]) -> Option<String> {
-    let text = text.to_lowercase();
-    phrases.iter().filter(|phrase| text.contains(phrase.as_str())).max_by_key(|phrase| phrase.len()).cloned()
+    /// Takes 16-bit mono sound, in pieces of any size, and says which word it found, if one.
+    pub fn hear(&mut self, pcm: &[u8]) -> Option<String> {
+        self.waiting.extend(pcm.chunks_exact(2).map(|sample| i16::from_le_bytes([sample[0], sample[1]])));
+        let frame = self.detector.get_samples_per_frame();
+        let mut found = None;
+        while self.waiting.len() >= frame {
+            let piece: Vec<i16> = self.waiting.drain(..frame).collect();
+            found = self.detector.process_samples(piece).map(|hit| hit.name).or(found);
+        }
+        found
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -103,8 +88,6 @@ pub struct Conditions {
     pub has_words: bool,
     /// The Test button is waiting, which works with the switch off.
     pub testing: bool,
-    /// A conversation holds the microphone.
-    pub talking: bool,
     pub charger_only: bool,
     pub on_battery: bool,
     pub pause_when_locked: bool,
@@ -128,9 +111,6 @@ pub fn wanted(c: &Conditions) -> Wanted {
     }
     if c.monitoring_paused {
         return Wanted::Paused("Paused with all monitoring.");
-    }
-    if c.talking {
-        return Wanted::Paused("Paused during a conversation.");
     }
     if c.pause_when_locked && c.locked {
         return Wanted::Paused("Paused while the screen is locked.");
@@ -182,7 +162,7 @@ fn microphone_users() -> Vec<String> {
 
 fn is_ours(user: &str, this_app: &str) -> bool {
     let user = user.to_ascii_lowercase();
-    user.contains(OUR_RECOGNIZER) || user.contains(this_app)
+    user.contains(OUR_WEBVIEW) || user.contains(this_app)
 }
 
 /// Is some other app using the microphone? `this_app` is this program's file name.
@@ -190,210 +170,50 @@ pub fn others_on_microphone(this_app: &str) -> bool {
     microphone_users().iter().any(|user| !is_ours(user, &this_app.to_ascii_lowercase()))
 }
 
-/// The user's own language if Windows can recognize it, which is what tells Indian English from British.
-fn language() -> Result<Language, VoiceError> {
-    let supported = SpeechRecognizer::SupportedGrammarLanguages()?;
-    let tags = supported.into_iter().filter_map(|l| l.LanguageTag().ok()).collect::<Vec<_>>();
-    if let Some(tag) = GlobalizationPreferences::Languages()?.into_iter().find(|tag| tags.contains(tag)) {
-        return Ok(Language::CreateLanguage(&tag)?);
-    }
-    if tags.is_empty() {
-        return Err(VoiceError::Service("Windows has no speech recognizer here. Add English in Windows Settings, Time and language, Speech.".into()));
-    }
-    Ok(SpeechRecognizer::SystemSpeechLanguage()?)
-}
-
-pub fn use_grammar(recognizer: &SpeechRecognizer, phrases: &[String], language: &str) -> Result<bool, VoiceError> {
-    let path = std::env::temp_dir().join("meridian-wake-words.grxml");
-    std::fs::write(&path, grammar(phrases, language))?;
-    let file = StorageFile::GetFileFromPathAsync(&HSTRING::from(path.as_os_str()))?.join()?;
-    let constraint = SpeechRecognitionGrammarFileConstraint::CreateWithTag(&file, &HSTRING::from("wake"))?;
-    recognizer.Constraints()?.Append(&constraint.cast::<ISpeechRecognitionConstraint>()?)?;
-    Ok(recognizer.CompileConstraintsAsync()?.join()?.Status()? == SpeechRecognitionResultStatus::Success)
-}
-
-/// Readings of the microphone a voice has to outlast, at one every 50 ms.
-const HELD_READINGS: usize = 8;
-
-/// The level it held for about 400 ms. Clicks near a desk microphone are as loud as a voice but gone
-/// in a reading or two, so the loudest reading would call a silent room loud.
-pub fn held_level(mut readings: Vec<f32>) -> f32 {
-    readings.sort_by(|a, b| b.total_cmp(a));
-    readings.get(HELD_READINGS).or(readings.last()).copied().unwrap_or(0.0)
-}
-
-/// The Windows default microphone, which is the one the recognizer hears. Windows' voice filter
-/// removes what it does not take for clear speech before the recognizer gets it, and a conversation's
-/// gain does not reach it, so a low slider leaves it deaf while Meridian's own level still looks fine.
-pub struct DefaultMicrophone {
-    pub name: String,
-    slider: IAudioEndpointVolume,
-    meter: IAudioMeterInformation,
-}
-
-impl DefaultMicrophone {
-    pub fn open() -> Result<Self, VoiceError> {
-        unsafe {
-            let devices: IMMDeviceEnumerator = CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL)?;
-            let device = devices.GetDefaultAudioEndpoint(eCapture, eConsole)?;
-            let name = device.OpenPropertyStore(STGM_READ)?.GetValue(&PKEY_Device_FriendlyName)?.to_string();
-            Ok(Self { name, slider: device.Activate(CLSCTX_ALL, None)?, meter: device.Activate(CLSCTX_ALL, None)? })
-        }
-    }
-
-    /// Where its Windows slider sits, from 0 to 100.
-    pub fn percent(&self) -> Result<u32, VoiceError> {
-        Ok(unsafe { self.slider.GetMasterVolumeLevelScalar() }.map(|level| (level * 100.0).round() as u32)?)
-    }
-
-    pub fn muted(&self) -> Result<bool, VoiceError> {
-        Ok(unsafe { self.slider.GetMute() }?.as_bool())
-    }
-
-    /// How loud it is right now, from 0 to 1. Reads 0 unless something has it open.
-    pub fn peak(&self) -> Result<f32, VoiceError> {
-        Ok(unsafe { self.meter.GetPeakValue() }?)
-    }
-
-    pub fn set_percent(&self, percent: u32) -> Result<(), VoiceError> {
-        unsafe {
-            self.slider.SetMute(false, std::ptr::null())?;
-            Ok(self.slider.SetMasterVolumeLevelScalar(percent.min(100) as f32 / 100.0, std::ptr::null())?)
-        }
-    }
-}
-
-pub struct Heard {
-    pub text: String,
-    pub confidence: SpeechRecognitionConfidence,
-    pub raw: f64,
-    /// How long the whole utterance took, which tells a bare name from a name and a command.
-    pub spoken_ms: u64,
-}
-
-/// Open for as long as this is held. Dropping it closes the microphone.
-pub struct Listener {
-    recognizer: SpeechRecognizer,
-    session: SpeechContinuousRecognitionSession,
-}
-
-impl Listener {
-    /// `stopped` is told if Windows ends the session by itself, such as when the microphone goes.
-    pub fn start(words: &[String], heard: impl Fn(Heard) + Send + 'static, stopped: impl Fn() + Send + 'static) -> Result<Self, VoiceError> {
-        let language = language()?;
-        let recognizer = SpeechRecognizer::Create(&language)?;
-        let all = phrases(words);
-        let tag = language.LanguageTag()?.to_string();
-        // Falls back to exact phrases if a future Windows will not take the grammar.
-        if !use_grammar(&recognizer, &all, &tag).unwrap_or(false) {
-            let list: IIterable<HSTRING> = all.iter().map(HSTRING::from).collect::<Vec<_>>().into();
-            let constraint = SpeechRecognitionListConstraint::CreateWithTag(&list, &HSTRING::from("wake"))?;
-            let constraints = recognizer.Constraints()?;
-            constraints.Clear()?;
-            constraints.Append(&constraint.cast::<ISpeechRecognitionConstraint>()?)?;
-            if recognizer.CompileConstraintsAsync()?.join()?.Status()? != SpeechRecognitionResultStatus::Success {
-                return Err(VoiceError::Service("Windows could not use those wake words.".into()));
-            }
-        }
-        let session = recognizer.ContinuousRecognitionSession()?;
-        session.SetAutoStopSilenceTimeout(QUIET_ALLOWED)?;
-        session.ResultGenerated(&TypedEventHandler::new(
-            move |_, args: Ref<SpeechContinuousRecognitionResultGeneratedEventArgs>| {
-                if let Some(result) = args.as_ref().and_then(|args| args.Result().ok()) {
-                    if result.Status()? == SpeechRecognitionResultStatus::Success {
-                        let spoken_ms = (result.PhraseDuration()?.Duration / 10_000).max(0) as u64;
-                        heard(Heard { text: result.Text()?.to_string(), confidence: result.Confidence()?, raw: result.RawConfidence()?, spoken_ms });
-                    }
-                }
-                Ok(())
-            },
-        ))?;
-        session.Completed(&TypedEventHandler::new(move |_, _: Ref<SpeechContinuousRecognitionCompletedEventArgs>| {
-            stopped();
-            Ok(())
-        }))?;
-        session.StartAsync()?.join()?;
-        Ok(Self { recognizer, session })
-    }
-}
-
-impl Drop for Listener {
-    fn drop(&mut self) {
-        let _ = self.session.CancelAsync().and_then(|stop| stop.join());
-        let _ = self.recognizer.Close();
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use SpeechRecognitionConfidence as C;
 
-    #[test]
-    fn a_wake_word_is_english_letters_and_single_spaces() {
-        assert_eq!(clean("  Hey   Meridian "), Some("Hey Meridian".into()));
-        assert_eq!(clean("Suno Mira"), Some("Suno Mira".into()));
-        assert_eq!(clean("   "), None);
-        assert_eq!(clean("सुनो मीरा"), None);
-        assert_eq!(clean("hey <mira>"), None);
-        assert_eq!(clean(&"a".repeat(41)), None);
-    }
-
-    #[test]
-    fn how_easily_it_wakes_changes_what_counts() {
-        const ALONE: u64 = 800;
-        assert!(accepted("sure", C::High, 0.9, ALONE) && !accepted("sure", C::Medium, 0.9, ALONE));
-        assert!(accepted("balanced", C::Low, 0.3, ALONE) && !accepted("balanced", C::Rejected, 0.3, ALONE));
-        assert!(!accepted("balanced", C::Low, 0.008, ALONE), "this is what noise scored");
-        assert!(accepted("easily", C::Low, 0.002, ALONE) && !accepted("easily", C::Rejected, 0.3, ALONE));
-    }
-
-    #[test]
-    fn a_click_is_not_a_voice() {
-        let mut clicks = vec![0.003_f32; 200];
-        clicks[40] = 0.8;
-        clicks[41] = 0.7;
-        assert!(held_level(clicks) < 0.01);
-        let mut voice = vec![0.003_f32; 200];
-        voice[40..60].fill(0.5);
-        assert_eq!(held_level(voice), 0.5);
-        assert_eq!(held_level(Vec::new()), 0.0);
-    }
-
-    #[test]
-    fn talk_in_the_room_does_not_wake_it() {
-        const TALK: u64 = 3000;
-        assert!(!accepted("balanced", C::Low, 0.5, TALK) && !accepted("balanced", C::Medium, 0.5, TALK));
-        assert!(accepted("balanced", C::High, 0.9, TALK), "a clear name and a command still works");
-        assert!(accepted("balanced", C::Low, 0.28, 780), "the faintest real name on the reference machine");
-        assert!(!accepted("balanced", C::Low, 0.0065, 3270), "what a long sentence scored there");
-        assert!(!accepted("easily", C::Low, 0.5, TALK));
-    }
-
-    #[test]
-    fn saying_the_name_any_natural_way_counts() {
-        let all = phrases(&["Hey Meridian".to_string()]);
-        for said in ["hey meridian", "meridian", "hi meridian", "okay meridian", "ok meridian", "hello meridian"] {
-            assert!(all.iter().any(|p| p == said), "{said}");
+    /// A made-up word: tones that rise or fall, with gaps, which is enough to tell two apart.
+    fn word(rising: bool, seed: f32) -> Vec<u8> {
+        let mut pcm = Vec::new();
+        for i in 0..14_000 {
+            let t = i as f32 / 16_000.0;
+            let sweep = if rising { 300.0 + 900.0 * t } else { 1500.0 - 900.0 * t };
+            let swell = ((t * 9.0 + seed * 0.02).sin()).abs();
+            let sample = ((t * sweep * std::f32::consts::TAU).sin() * 0.35 + (t * sweep * 2.3 * std::f32::consts::TAU).sin() * 0.25) * swell;
+            pcm.extend_from_slice(&((sample * 28_000.0) as i16).to_le_bytes());
         }
-        let mine = phrases(&["Suno Mira".to_string()]);
-        assert!(mine.iter().any(|p| p == "suno mira") && mine.iter().any(|p| p == "hey suno mira"));
+        pcm
+    }
+
+    fn silence(seconds: usize) -> Vec<u8> {
+        vec![0; seconds * 32_000]
     }
 
     #[test]
-    fn the_grammar_finds_a_phrase_anywhere_in_a_sentence() {
-        let text = grammar(&["hey meridian".to_string(), "bob's name".to_string()], "en-IN");
-        assert!(text.contains(r#"xml:lang="en-IN""#));
-        assert_eq!(text.matches(r#"special="GARBAGE""#).count(), 2);
-        assert!(text.contains("<item>hey meridian</item>") && text.contains("bob&apos;s name"));
+    fn finds_a_learned_word_in_pieces_of_any_size_and_nothing_else() {
+        let pattern = learn("hey mira", &[word(true, 0.0), word(true, 1.0), word(true, 2.0)]).unwrap();
+        let mut spotter = Spotter::new("balanced", &[("hey mira".to_string(), pattern)]).unwrap();
+        let mut heard = |pcm: &[u8]| pcm.chunks(3_200).filter_map(|piece| spotter.hear(piece)).collect::<Vec<_>>();
+        assert!(heard(&silence(2)).is_empty(), "silence");
+        assert!(heard(&word(false, 0.0)).is_empty(), "another word");
+        assert!(heard(&silence(2)).is_empty());
+        let mut sound = word(true, 0.5);
+        sound.extend(silence(2));
+        assert_eq!(heard(&sound), ["hey mira"]);
     }
 
     #[test]
-    fn the_phrase_is_found_in_what_came_back() {
-        let all = phrases(&["Hey Meridian".to_string()]);
-        assert_eq!(phrase_in("... Hey Meridian ...", &all).as_deref(), Some("hey meridian"));
-        assert_eq!(phrase_in("meridian", &all).as_deref(), Some("meridian"));
-        assert_eq!(phrase_in("", &all), None);
+    fn a_word_can_be_in_any_language() {
+        let pattern = learn("सुनो मीरा", &[word(true, 0.0), word(true, 1.0)]).unwrap();
+        assert!(Spotter::new("sure", &[("सुनो मीरा".to_string(), pattern)]).is_ok());
+    }
+
+    #[test]
+    fn how_easily_it_wakes_changes_how_close_it_must_be() {
+        assert!(closeness("sure") > closeness("balanced") && closeness("balanced") > closeness("easily"));
+        assert_eq!(closeness("anything else"), closeness("balanced"));
     }
 
     const ON: Conditions = Conditions {
@@ -401,7 +221,6 @@ mod tests {
         monitoring_paused: false,
         has_words: true,
         testing: false,
-        talking: false,
         charger_only: false,
         on_battery: false,
         pause_when_locked: true,
@@ -428,7 +247,6 @@ mod tests {
     fn each_pause_closes_the_microphone_and_says_why() {
         for paused in [
             Conditions { monitoring_paused: true, ..ON },
-            Conditions { talking: true, ..ON },
             Conditions { locked: true, ..ON },
             Conditions { others_on_microphone: true, ..ON },
             Conditions { charger_only: true, on_battery: true, ..ON },
@@ -446,7 +264,6 @@ mod tests {
 
     #[test]
     fn our_own_use_of_the_microphone_is_not_a_call() {
-        assert!(is_ours("C:#Windows#System32#Speech_OneCore#Common#SpeechRuntime.exe", "meridian.exe"));
         assert!(is_ours("C:#Users#me#AppData#Local#Meridian#meridian.exe", "meridian.exe"));
         assert!(!is_ours("C:#Program Files#Zoom#Zoom.exe", "meridian.exe"));
     }

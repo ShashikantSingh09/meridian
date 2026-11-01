@@ -52,43 +52,53 @@ export function speakable(markdown: string): string {
     .trim();
 }
 
-/** Spoken ways of ending a conversation. Only as a whole sentence, so "stop the build" is not one. */
-export const isGoodbye = (words: string) =>
-  /^(that'?s all|that is all|thanks|thank you|stop|goodbye|bye|never mind|nothing|bas|bas karo|bas itna hi|shukriya|dhanyavaad|बस|बस करो|बस इतना ही|शुक्रिया|धन्यवाद)[\s।.!]*$/iu.test(words.trim());
+/** Ways of saying you are finished, without apostrophes or punctuation, because those are taken out first. */
+const GOODBYES = [
+  "thats all", "that is all", "thats it", "that is it", "thatll be all", "that will be all", "thats everything", "that is everything", "thats enough", "that is enough",
+  "nothing else", "nothing more", "nothing", "no more", "not now", "never mind", "nevermind", "forget it", "leave it",
+  "im done", "i am done", "were done", "we are done", "all done", "done", "im good", "i am good", "im all set", "i am all set", "all set", "im finished", "i am finished", "finished",
+  "stop", "stop listening", "you can stop", "you can stop listening", "you can stop now", "you can go", "you can go now", "go to sleep", "go away", "exit", "quit", "close", "cancel",
+  "thanks", "thank you", "thanks a lot", "thanks so much", "thank you so much", "thank you very much",
+  "bye", "bye bye", "goodbye", "good bye", "good night", "goodnight", "see you", "see ya", "see you later", "talk to you later", "catch you later", "later",
+  "bas", "bas karo", "bas kar", "bas itna hi", "bas yahi", "ho gaya", "hogaya", "aur kuch nahi", "aur kuch nahin", "kuch nahi", "kuch nahin", "rehne do", "chhodo", "chodo", "band karo",
+  "alvida", "shukriya", "dhanyavaad", "dhanyawad", "dhanyavad",
+  "बस", "बस करो", "बस इतना ही", "हो गया", "और कुछ नहीं", "कुछ नहीं", "रहने दो", "छोड़ो", "बंद करो", "अलविदा", "शुक्रिया", "धन्यवाद",
+];
 
-/** What was said without the name it was called by, which the AI has no need to hear. */
+/** Said around a goodbye without changing it, such as the ok in "ok that's it". None is a goodbye alone, because each can answer a question. */
+const AROUND_GOODBYE = [
+  "ok", "okay", "alright", "all right", "right", "yeah", "yes", "yep", "no", "nope", "nah", "hmm", "well", "so", "fine", "good", "great", "cool", "perfect", "nice", "awesome",
+  "please", "now", "then", "for now", "for today", "for the day", "haan", "han", "ji", "accha", "acha", "theek hai", "thik hai", "chalo", "ab",
+  "ठीक है", "अच्छा", "हाँ", "हां", "जी", "चलो", "अब",
+];
+
+/** A wake word without its greeting. */
+const bareName = (phrase: string) => phrase.toLowerCase().replace(/^(hey|hi|hello|okay|ok|oye)\s+/, "");
+
+/**
+ * Whether someone has finished talking to it. Every word has to be part of saying so, however it is
+ * put, so "ok that's it, thanks" is one and "stop the build" is not. `names` are what it answers to.
+ */
+export function isGoodbye(words: string, names: string[] = []): boolean {
+  let left = words.toLowerCase().replace(/['’]/g, "").replace(/[^\p{L}\p{M}\p{N}\s]/gu, " ").replace(/\s+/g, " ").trim();
+  const phrases = [...GOODBYES, ...AROUND_GOODBYE, ...names.map(bareName).filter(Boolean)].sort((a, b) => b.length - a.length);
+  let finished = false;
+  for (let phrase = phrases.find((p) => left === p || left.startsWith(`${p} `) || left.endsWith(` ${p}`)); phrase; phrase = phrases.find((p) => left === p || left.startsWith(`${p} `) || left.endsWith(` ${p}`))) {
+    left = (left.startsWith(phrase) ? left.slice(phrase.length) : left.slice(0, -phrase.length)).trim();
+    finished ||= GOODBYES.includes(phrase);
+  }
+  return finished && !left;
+}
+
+/** What was said without the name it was called by, which the AI has no need to hear. People who get no answer say it again. */
 export function withoutWakeWord(words: string, wakeWords: string[]): string {
-  const name = (phrase: string) => phrase.toLowerCase().replace(/^(hey|hi|hello|okay|ok|oye)\s+/, "");
   for (const phrase of wakeWords) {
-    const called = new RegExp(`^\\W*(?:(?:hey|hi|hello|okay|ok|oye)[\\s,]+)?${name(phrase).replace(/[^a-z' ]/g, "")}\\b[\\s,.!?:;-]*`, "i");
-    if (called.test(words)) return words.replace(called, "");
+    const name = bareName(phrase).replace(/[^\p{L}\p{M}' ]/gu, "");
+    if (!name) continue;
+    const called = new RegExp(`^[\\s\\p{P}]*(?:(?:hey|hi|hello|okay|ok|oye)[\\s,]+)?${name}(?![\\p{L}\\p{M}])[\\s\\p{P}]*`, "iu");
+    if (called.test(words)) return withoutWakeWord(words.replace(called, ""), wakeWords);
   }
   return words;
-}
-
-/** Letters apart, so a name written slightly differently by the hearing still counts. */
-function apart(a: string, b: string): number {
-  let row = Array.from({ length: b.length + 1 }, (_, i) => i);
-  for (let i = 1; i <= a.length; i++) {
-    const next = [i];
-    for (let j = 1; j <= b.length; j++) next[j] = Math.min(row[j]! + 1, next[j - 1]! + 1, row[j - 1]! + (a[i - 1] === b[j - 1] ? 0 : 1));
-    row = next;
-  }
-  return row[b.length]!;
-}
-
-/** Meridian as Hindi hearing writes it. */
-const MERIDIAN_IN_HINDI = /म[ेै]?र[िीे]?ड[िी]?[यए]न/u;
-
-/** Whether the words really hold a wake word. The check that talk in the room was not meant for it. */
-export function calledByName(words: string, wakeWords: string[]): boolean {
-  const said = words.toLowerCase().split(/[^\p{L}']+/u).filter(Boolean);
-  return wakeWords.some((phrase) => {
-    const name = phrase.toLowerCase().replace(/^(hey|hi|hello|okay|ok|oye)\s+/, "");
-    if (name === "meridian" && MERIDIAN_IN_HINDI.test(words)) return true;
-    const parts = name.split(/\s+/);
-    return parts.every((part) => said.some((word) => (part.length < 5 ? word === part : apart(word, part) <= 2)));
-  });
 }
 
 /** Yes or no, for a request that needs a decision. Anything else is not an answer. */

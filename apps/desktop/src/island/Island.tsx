@@ -113,6 +113,7 @@ export function Island() {
   const waiting = waitingApproval(snapshot.sessions);
   const active = activeSessions(snapshot.sessions);
   const opened = hovered || (view === "working" && stagesOpen);
+  const playerOpen = mediaOpen || hovered;
 
   useEffect(() => reportView(view), [view]);
 
@@ -128,7 +129,7 @@ export function Island() {
     sliver,
     actions: (snapshot.notices[0]?.actions?.length ?? 0) > 0 || snapshot.notices[0]?.eventId !== undefined,
     tab,
-    mediaOpen,
+    mediaOpen: playerOpen,
     battery,
     voiceLong,
     greeting,
@@ -177,7 +178,7 @@ export function Island() {
   const glow = view === "media" ? artTint ?? "#ff7a9c" : `var(${stateToken(view, snapshot)})`;
   // A waiting request looks the same either way, and swapping it would lose the answers so far.
   const opensOnHover = view === "idle" || view === "live" || (view === "working" && waiting === null);
-  const contentKey = expanded ? "panel" : view + (opened && opensOnHover ? "-hover" : "") + (view === "media" && mediaOpen ? "-open" : "");
+  const contentKey = expanded ? "panel" : view + (opened && opensOnHover ? "-hover" : "") + (view === "media" && playerOpen ? "-open" : "");
 
   return (
     <motion.div
@@ -204,7 +205,7 @@ export function Island() {
         <span className="island-tint" aria-hidden="true" />
         <AnimatePresence initial={false}>
           <motion.div key={contentKey} className="island-content" style={{ width: target.w, height: target.h }} initial={enter.initial} animate={enter.animate} exit={enter.exit}>
-            {expanded ? <Panel /> : <CompactContent view={view} reduced={reduced} hovered={opened} sliver={sliver} mediaOpen={mediaOpen} />}
+            {expanded ? <Panel /> : <CompactContent view={view} reduced={reduced} hovered={opened} sliver={sliver} mediaOpen={playerOpen} />}
           </motion.div>
         </AnimatePresence>
         {wakeOn && <span className="wake-dot" role="img" aria-label="Listening for a wake word" title="Listening for a wake word" />}

@@ -30,7 +30,6 @@ import type {
   Track,
   Level,
   WakeStatus,
-  WakeTested,
   LimitWindow,
 } from "./types";
 import type { Mood } from "../island/faces";
@@ -179,7 +178,7 @@ export interface AppState {
   /** A spoken conversation, while there is one. */
   voice: VoiceState | null;
   wake: WakeStatus;
-  wakeTest: { phase: "idle" | "waiting" | "heard" | "missed"; word: string; microphone?: WakeTested };
+  wakeTest: { phase: "idle" | "waiting" | "heard" | "missed"; word: string };
   /** The volume, brightness or battery, for a moment after it changes. */
   level: Level | null;
   /** The last one of the same kind, so a key press can be told up from down. */
@@ -203,11 +202,18 @@ export interface AppState {
 const LOG_LIMIT = 500;
 const NOTICE_MS = 6000;
 const FINISHED_MS = 12_000;
+const ERROR_MS = 15_000;
+const SUGGESTION_MS = 20_000;
+/** Something urgent stays longest, and is still in My day after it goes. */
+const URGENT_MS = 60_000;
+/** A pointer can rest on the island with nobody reading, so holding something open has a limit. */
+const LONGEST_HOLD_MS = 20_000;
 const PAST_NOTICES = 40;
 const GREETING_MS = 2600;
 /** A little longer than the core listens, so a late match still lands. */
 const HOVER_IN_MS = 180;
 const HOVER_OUT_MS = 240;
+const WAKE_TEST_MS = 11_000;
 const ANSWER_GAP_MS = 400;
 const SIGN_IN_POLLS = 60;
 const SIGN_IN_POLL_MS = 2000;
@@ -437,21 +443,32 @@ export function setListening(listening: boolean) {
 /** What is kept when notices leave the island. Sample ones never reach the real list. */
 const keptNotices = (gone: Notice[]) => (state.preview ? state.pastNotices : [...gone.filter((n) => n.finished), ...state.pastNotices].slice(0, PAST_NOTICES));
 
+/** Takes something off the island after a while. Someone reading it with the pointer there keeps it for a bit longer. */
+function leaveAfter(ms: number, leave: () => void) {
+  const latest = Date.now() + ms + LONGEST_HOLD_MS;
+  const expire = () => {
+    if (getState().hovered && Date.now() < latest) setTimeout(expire, 1500);
+    else leave();
+  };
+  setTimeout(expire, ms);
+}
+
 export function pushNotice(notice: Omit<Notice, "id">, ms = NOTICE_MS) {
   const id = newId();
   set({ notices: [...state.notices, { ...notice, id }] });
-  const expire = () => {
-    // Someone reading it with the pointer on the island keeps it open.
-    if (getState().hovered) setTimeout(expire, 1500);
-    else dismissNotice(id);
-  };
-  setTimeout(expire, ms);
+  leaveAfter(ms, () => dismissNotice(id));
 }
 
 export const dismissNotice = (id: string) => set({ notices: state.notices.filter((n) => n.id !== id), pastNotices: keptNotices(state.notices.filter((n) => n.id === id)) });
 
 export function pushError(error: Omit<IslandError, "id">) {
-  set({ errors: [...state.errors, { ...error, id: newId() }] });
+  const id = newId();
+  set({ errors: [...state.errors, { ...error, id }] });
+  // An agent that failed gets longer, and stays listed under Notifications after it goes.
+  leaveAfter(error.sessionId ? URGENT_MS : ERROR_MS, () => {
+    if (error.sessionId && state.errors.some((e) => e.id === id)) set({ pastNotices: keptNotices([{ id, tone: "urgent", title: error.title, body: error.body, sessionId: error.sessionId, finished: true }]) });
+    dismissError(id);
+  });
 }
 
 export const dismissError = (id: string) => set({ errors: state.errors.filter((e) => e.id !== id) });
@@ -528,7 +545,7 @@ function patchLastMessage(fn: (text: string) => string) {
 }
 
 /** Told to the AI on a spoken turn, and kept out of what the user sees. */
-const SPOKEN = "\n\n(This is a spoken conversation. Reply in one or two short, plain sentences, with no lists or formatting.)";
+const SPOKEN = "\n\n(This is a spoken conversation. Reply in one or two short, plain sentences, with no lists or formatting. After doing something, say only the outcome, such as Done or Chrome is closed. Never mention commands, tools or the steps you took.)";
 
 export async function sendChat(text: string, images: string[] = [], spoken = false) {
   const provider = usableProvider();
@@ -837,8 +854,8 @@ export function applyAgentEvent(envelope: AgentEnvelope) {
       }));
       if (event.status === "completed") feel("done", 2400);
       if (event.status === "failed") feel("error", 3000);
-      // A reply in Chat is already in front of the reader, or being spoken.
-      if (event.status === "completed" && !(state.panelOpen && session.surface === "chat")) {
+      // A reply in Chat is the assistant answering, which is in front of the reader or being spoken, not work to review.
+      if (event.status === "completed" && session.surface !== "chat") {
         // The only ending with a message is a terminal that went silent, which is not news of work done.
         if (event.message) pushNotice({ tone: "info", title: `${session.project} went quiet`, body: event.message, sessionId });
         else pushNotice({ tone: "success", title: `${session.project} is done`, body: lastMessage(session) ?? session.title, sessionId, finished: true }, FINISHED_MS);
@@ -1032,7 +1049,7 @@ function onReminders(reminders: Reminder[]) {
       sticky: urgent,
     };
     set({ notices: [...state.notices.filter((n) => n.id !== notice.id), notice] });
-    if (!notice.sticky) setTimeout(() => dismissNotice(notice.id), NOTICE_MS);
+    leaveAfter(notice.sticky ? URGENT_MS : NOTICE_MS, () => dismissNotice(notice.id));
   }
 }
 
@@ -1245,7 +1262,6 @@ function tintOf(src: string, done: (tint: string) => void) {
 export function setVoice(voice: VoiceState | null) {
   // The panel steps aside for a conversation, so its window must not catch clicks meanwhile.
   if (!voice !== !state.voice) {
-    void bridge.wakeTalking(!!voice);
     if (state.panelOpen) void bridge.setInteractive(!voice);
   }
   set({ voice });
@@ -1253,25 +1269,19 @@ export function setVoice(voice: VoiceState | null) {
 
 export const setWake = (wake: WakeStatus) => set({ wake });
 
+let wakeTestEnds: ReturnType<typeof setTimeout> | undefined;
+
 /** Listens for a few seconds whether or not the switch is on, and starts no conversation. */
 export function testWake() {
+  clearTimeout(wakeTestEnds);
   set({ wakeTest: { phase: "waiting", word: "" } });
-  const missed = (microphone?: WakeTested) => {
-    if (state.wakeTest.phase === "waiting") set({ wakeTest: { phase: "missed", word: "", microphone } });
-  };
-  bridge.wakeTest().then(missed, () => missed());
+  void bridge.wakeTest();
+  wakeTestEnds = setTimeout(() => set({ wakeTest: { phase: "missed", word: "" } }), WAKE_TEST_MS);
 }
 
 export function wakeTestHeard(word: string) {
+  clearTimeout(wakeTestEnds);
   set({ wakeTest: { phase: "heard", word } });
-}
-
-/** A Windows setting, so only the button that says so calls this. */
-export function raiseMicrophone() {
-  bridge.wakeRaiseMicrophone().then(
-    () => set({ wakeTest: { phase: "idle", word: "" } }),
-    (err) => pushError({ title: "Could not raise the microphone", body: describe(err) }),
-  );
 }
 
 let feelingTimer: ReturnType<typeof setTimeout> | undefined;
@@ -1389,7 +1399,9 @@ const suggestionFrom = (s: ScreenSuggestion): Suggestion => ({
 
 function onScreenSuggestion(s: ScreenSuggestion) {
   if (state.suggestions.some((x) => x.key === s.key)) return;
-  set({ suggestions: [...state.suggestions, suggestionFrom(s)] });
+  const suggestion = suggestionFrom(s);
+  set({ suggestions: [...state.suggestions, suggestion] });
+  leaveAfter(SUGGESTION_MS, () => dismissSuggestion(suggestion.id));
 }
 
 export function ignoreSuggestion(suggestion: Suggestion) {

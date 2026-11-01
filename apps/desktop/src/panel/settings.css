@@ -656,11 +656,6 @@
   opacity: 0.45;
 }
 
-.device-warning {
-  justify-content: flex-end;
-  gap: 8px;
-}
-
 /* ── Screen ──────────────────────────────────────────────────────────── */
 
 .settings .aware {

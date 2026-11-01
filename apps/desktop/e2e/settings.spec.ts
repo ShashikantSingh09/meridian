@@ -299,7 +299,7 @@ test.describe("microphone and headphones", () => {
     await choose(page, "Headphones or speakers", "Speakers (Realtek Audio)");
     expect(await app(page).get("voiceMicrophone")).toBe("mic-headset");
     expect(await app(page).get("voiceOutput")).toBe("out-speakers");
-    await expect.poll(async () => (await mics(page)).asked.at(-1)).toEqual({ autoGainControl: false, echoCancellation: false, noiseSuppression: false, deviceId: { exact: "mic-headset" } });
+    await expect.poll(async () => (await mics(page)).asked.at(-1)).toEqual({ deviceId: { exact: "mic-headset" } });
     await expect.poll(async () => (await mics(page)).active).toBe(1);
 
     await choose(page, "Microphone", "Same as Windows");
@@ -314,18 +314,6 @@ test.describe("microphone and headphones", () => {
     await page.getByRole("button", { name: "Play sound" }).click();
     await expect.poll(async () => (await mics(page)).tones).toBe(before + 1);
     expect((await mics(page)).sink).toBe("out-headset");
-  });
-
-  test("names the Windows default, and warns only when the choice differs from it", async ({ page }) => {
-    await openDevices(page);
-    const warning = page.getByText("different from your Windows default");
-    await expect(page.getByText("which is Capture Input terminal (AC Interface) right now")).toBeVisible();
-    await expect(warning).toHaveCount(0);
-    await choose(page, "Microphone", "Headset (MiSuperBass)");
-    await expect(warning).toBeVisible();
-    await choose(page, "Microphone", "Capture Input terminal (AC Interface)");
-    await expect(warning).toHaveCount(0);
-    await expect(page.getByRole("button", { name: "Open Windows sound settings" })).toBeVisible();
   });
 
   test("a device that vanishes shows as unplugged, opens nothing, and is not swapped", async ({ page }) => {

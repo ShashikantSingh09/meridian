@@ -1,9 +1,7 @@
-// Which microphone and speakers a conversation uses, and a way to try them. The microphone opens
-// only while this section is open, and closes with it. Wake words are the exception: Windows picks
-// that microphone, whatever is chosen here.
+// Which microphone and speakers Meridian uses, and a way to try them. The microphone opens only
+// while this section is open, and closes with it.
 
 import { useEffect, useRef, useState } from "react";
-import { bridge } from "../lib/bridge";
 import { Icon, type IconName } from "../lib/icons";
 import { setSettingsSection, updateSettings, useApp } from "../lib/store";
 import { Menu } from "./Menu";
@@ -22,12 +20,6 @@ const deviceName = (device: MediaDeviceInfo) => device.label.replace(/ \([0-9a-f
 function isUnplugged(devices: MediaDeviceInfo[], kind: Kind, chosen: string | null) {
   if (!chosen || devices.some((d) => d.kind === kind && !d.deviceId)) return false;
   return !realDevices(devices, kind).some((d) => d.deviceId === chosen);
-}
-
-/** The device behind Windows' default entry, which carries its name after a prefix. */
-function windowsDefault(devices: MediaDeviceInfo[]) {
-  const entry = devices.find((d) => d.kind === "audioinput" && d.deviceId === "default");
-  return realDevices(devices, "audioinput").find((d) => d.label && entry?.label.endsWith(d.label));
 }
 
 function DevicePick({ kind, icon, label, hint, devices, chosen, onPick }: { kind: Kind; icon: IconName; label: string; hint: string; devices: MediaDeviceInfo[]; chosen: string | null; onPick: (id: string | null) => void }) {
@@ -55,7 +47,7 @@ function DevicePick({ kind, icon, label, hint, devices, chosen, onPick }: { kind
 
 const MICROPHONE = {
   opening: "Opening the microphone.",
-  open: "The microphone is open while this section is. The bar shows its real level, and one that barely moves is too quiet for wake words.",
+  open: "The microphone is open while this section is. Speak and watch the bar move, or play a short sound.",
   blocked: "Meridian is not allowed to use the microphone. Check microphone privacy in Windows settings.",
   failed: "The microphone would not open. Another app may be holding it.",
 };
@@ -71,8 +63,7 @@ function TryThem({ microphone, output, microphoneGone, outputGone, onOpened }: {
     let live = true;
     let close = () => {};
     setState("opening");
-    // Without the gain a conversation gets, because that would make a quiet microphone look fine.
-    navigator.mediaDevices.getUserMedia({ audio: { autoGainControl: false, echoCancellation: false, noiseSuppression: false, ...(microphone ? { deviceId: { exact: microphone } } : {}) } }).then(
+    navigator.mediaDevices.getUserMedia({ audio: microphone ? { deviceId: { exact: microphone } } : true }).then(
       (stream) => {
         const stopTracks = () => stream.getTracks().forEach((track) => track.stop());
         if (!live) return stopTracks();
@@ -159,7 +150,6 @@ export function DevicesSection() {
   const [known, setDevices] = useState<MediaDeviceInfo[] | null>(null);
   const devices = known ?? [];
   const [open, setOpen] = useState(openOnArrival);
-  const [cannotOpen, setCannotOpen] = useState(false);
   const box = useRef<HTMLDetailsElement>(null);
 
   const refresh = () => navigator.mediaDevices.enumerateDevices().then(setDevices, () => {});
@@ -173,15 +163,6 @@ export function DevicesSection() {
 
   const microphoneGone = !!known && isUnplugged(known, "audioinput", microphone);
   const outputGone = !!known && isUnplugged(known, "audiooutput", output);
-  const fallback = windowsDefault(devices);
-  const chosen = realDevices(devices, "audioinput").find((d) => d.deviceId === microphone);
-  const differs = !!fallback && !!chosen && fallback.deviceId !== chosen.deviceId;
-
-  const openSettings = () => {
-    setCannotOpen(false);
-    bridge.openSoundSettings().catch(() => setCannotOpen(true));
-  };
-
   return (
     <details ref={box} className="devices" open={open} onToggle={(e) => setOpen(e.currentTarget.open)}>
       <summary className="stack">
@@ -197,19 +178,10 @@ export function DevicesSection() {
       {open && (
         <div className="stack-lg devices-body">
           <div className="stack">
-            <DevicePick kind="audioinput" icon="mic" label="Microphone" hint="What you speak into during a conversation." devices={devices} chosen={microphone} onPick={(voiceMicrophone) => void updateSettings({ voiceMicrophone })} />
+            <DevicePick kind="audioinput" icon="mic" label="Microphone" hint="What you speak into, for conversations and wake words." devices={devices} chosen={microphone} onPick={(voiceMicrophone) => void updateSettings({ voiceMicrophone })} />
             <DevicePick kind="audiooutput" icon="music" label="Headphones or speakers" hint="What Meridian speaks through." devices={devices} chosen={output} onPick={(voiceOutput) => void updateSettings({ voiceOutput })} />
           </div>
           {known && <TryThem microphone={microphone} output={output} microphoneGone={microphoneGone} outputGone={outputGone} onOpened={() => void refresh()} />}
-          <div className="stack card-block">
-            <span className="label">Wake words</span>
-            <p className="meta">Wake words listen through your Windows default microphone{fallback ? `, which is ${deviceName(fallback)} right now` : ""}. Windows does not let an app point its recognizer at another one, so to use a different microphone for wake words, make it the default in Windows.</p>
-            <div className="row device-warning">
-              {differs && <span className="grow warn">Your microphone above is different from your Windows default.</span>}
-              <button className="ghost" onClick={openSettings}>Open Windows sound settings</button>
-            </div>
-            {cannotOpen && <p className="meta bad" role="alert">Could not open it. In Windows, go to Settings, then System, then Sound.</p>}
-          </div>
           <div className="stack">
             <p className="fact"><Icon name="check" size={14} />If your chosen microphone is unplugged, it says so and waits. It never switches to another microphone by itself.</p>
           </div>

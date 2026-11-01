@@ -1376,6 +1376,11 @@ textarea::placeholder {
   color: var(--ink-1);
 }
 
+/* Inside the button, because the bar has no room around it for a ring. */
+.segmented button:focus-visible {
+  outline-offset: -2px;
+}
+
 .toggle input {
   appearance: none;
   width: 36px;
@@ -2009,26 +2014,31 @@ textarea::placeholder {
   place-items: center;
   border-radius: 13px;
   color: var(--ink-3);
-  transition: translate 0.22s cubic-bezier(0.3, 1.8, 0.5, 1), scale 0.22s cubic-bezier(0.3, 1.8, 0.5, 1), color 0.15s ease;
+  transition: color 0.15s ease;
 }
 
 .dock-item:hover {
-  translate: 0 -4px;
-  scale: 1.18;
   color: var(--ink-1);
-}
-
-.dock-item:active:not(:disabled) {
-  transform: none;
-  scale: 1.04;
 }
 
 .dock-item[aria-current="page"] {
   color: var(--ink-1);
 }
 
+/* Only the icon grows. The highlight behind it has to stay inside the bar. */
 .dock-item > svg {
   position: relative;
+  transition: translate 0.22s cubic-bezier(0.3, 1.8, 0.5, 1), scale 0.22s cubic-bezier(0.3, 1.8, 0.5, 1);
+}
+
+.dock-item:hover > svg {
+  translate: 0 -2px;
+  scale: 1.18;
+}
+
+.dock-item:active:not(:disabled) > svg {
+  translate: none;
+  scale: 1.04;
 }
 
 .dock-pill {

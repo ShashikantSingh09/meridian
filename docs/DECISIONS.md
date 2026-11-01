@@ -490,7 +490,27 @@ side by side in the real window before it counts as done.
 Apple-style glass, themes, limits and models, the assistant's name and personality, and wake words are on the canvas and held for review.
 Wake words would reverse the part of D51 that left them out, and only because the owner asked for them.
 
+## D59. Wake words learn the user's voice, and the Windows recognizer is gone
+
+Replaces D55 and D57. The Windows recognizer could not be made reliable on the owner's PC. Over a day of traces it heard them in some runs and nothing in others,
+with their voice reaching every audio stream at full strength, with Windows' voice filter on and off, alone and beside other streams, and fresh or long running.
+No cause was found, and a recognizer that cannot be fed its sound cannot be fixed from outside.
+
+Wake words now use rustpotter, which is Apache-2.0, written in Rust, and needs no download or separate library. The user says a word four times, and it compares
+the microphone against those recordings on this PC.
+
+- It listens to the microphone chosen in Meridian, which the Windows recognizer could never do, so the same stream goes on to the conversation with nothing lost.
+- A word can be in any language, and this works on a Mac too.
+- Recordings stay in memory for the lesson. Only a pattern of them is kept, and removing a word deletes it.
+- It knows the voices that taught it and no others, which is what keeps other people out, but every user has to teach it.
+- Nothing proves the name before speech goes to the hearing any more. D57's proof depended on the recognizer's own timing, and missed commands were the worse failure.
+  Someone's own speech that sounds close can wake it, and what they say next is then treated as a request.
+- candle 0.2, which rustpotter depends on, does not compile with newer versions of `half`, so `Cargo.lock` holds `half` at 2.3.1.
+- Its licence text has to ship with a public release.
+
 ## D55. Wake words are heard by the recognizer in Windows, and only on this PC
+
+Replaced by D59.
 
 The owner asked for wake words on 2026-10-31 and accepted a microphone that stays open, as a switch that is off until they turn it on. This
 reverses the part of D51 that left them out, which is the only reason the microphone may open with no click or key.
@@ -538,6 +558,8 @@ tested, so the panel is an opaque sheet carrying its own light, with frosted lay
 island stays black in every theme. It looks the same over any app, and it is always readable.
 
 ## D57. Wake words need more proof the longer the speech
+
+Replaced by D59.
 
 The first wake grammar matched exact phrases, so a command in the same breath was refused, and it missed quiet names. A grammar that finds the
 name inside speech fixed that, and accepting Low confidence fixed the misses, but together they fired on people talking near the microphone,

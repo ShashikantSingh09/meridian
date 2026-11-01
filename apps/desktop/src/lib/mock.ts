@@ -26,7 +26,6 @@ import type {
   Level,
   Track,
   WakeStatus,
-  WakeTested,
 } from "./types";
 import { defaultSettings } from "./types";
 
@@ -49,8 +48,7 @@ const voiceKeys = new Set<string>();
 let heardWords = "";
 const spokenWords: string[] = [];
 let wakeState: ((status: WakeStatus) => void) | null = null;
-let wakeTestEnds: ((tested: WakeTested) => void) | null = null;
-let microphoneRaised = false;
+const taughtWords = new Set<string>();
 let wakeHeard: ((heard: { word: string; test: boolean; spokenMs: number }) => void) | null = null;
 let updateStatus = { current: "0.3.0", latest: "v0.3.0", available: false, notes: "", published: null as string | null, message: "You are on the latest version." };
 let updateInstalled = false;
@@ -242,10 +240,9 @@ export const mock = {
   onWakeState: (handler: (status: WakeStatus) => void) => void (wakeState = handler),
   onWakeHeard: (handler: (heard: { word: string; test: boolean; spokenMs: number }) => void) => void (wakeHeard = handler),
   setWakeState: (status: WakeStatus) => wakeState?.(status),
-  wakeTest: () => new Promise<WakeTested>((resolve) => (wakeTestEnds = resolve)),
-  endWakeTest: (tested: WakeTested) => wakeTestEnds?.(tested),
-  wakeRaiseMicrophone: async () => void (microphoneRaised = true),
-  microphoneRaised: () => microphoneRaised,
+  wakeTaught: async (words: string[]) => words.filter((word) => taughtWords.has(word)),
+  wakeTeachEnd: async (word: string | null) => void (word && taughtWords.add(word)),
+  wakeForget: async (word: string) => void taughtWords.delete(word),
   hearWake: (word: string, test = false, spokenMs = 700) => wakeHeard?.({ word, test, spokenMs }),
   setPacks: (ids: string[]) => {
     voicePacks.clear();

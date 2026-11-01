@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { filler, isGoodbye, looksFinished, sentences, silenceFor, speakable, yesOrNo, withoutWakeWord, calledByName } from "./turns";
+import { filler, isGoodbye, looksFinished, sentences, silenceFor, speakable, yesOrNo, withoutWakeWord } from "./turns";
 
 describe("knowing when someone has finished", () => {
   it("hears a whole thought", () => {
@@ -60,6 +60,19 @@ describe("short answers", () => {
     expect(isGoodbye("thanks, now open the file")).toBe(false);
   });
 
+  it("hears a goodbye however it is put", () => {
+    for (const bye of ["Ok, that's it.", "I am done.", "I'm done for now", "Bye!", "Thanks, that's all.", "okay bye", "no thanks", "ok thank you so much", "that's it thanks", "All done, thank you.", "you can stop listening now", "nothing else", "good night", "no that's all for now", "theek hai bas", "bas ho gaya", "aur kuch nahi", "ठीक है, बस।"]) {
+      expect(isGoodbye(bye), bye).toBe(true);
+    }
+    expect(isGoodbye("thanks Mira", ["Hey Mira"])).toBe(true);
+  });
+
+  it("leaves anything that still asks for something, and any answer to a question", () => {
+    for (const asking of ["ok open Chrome", "that's all wrong", "I am done with the report, send it", "close the window", "thank you for finding that, what's next", "ok", "yes", "no", "alright", "now what", "is it done"]) {
+      expect(isGoodbye(asking), asking).toBe(false);
+    }
+  });
+
   it("takes yes or no as a decision, and nothing else", () => {
     expect(yesOrNo("Yes.")).toBe(true);
     expect(yesOrNo("go ahead")).toBe(true);
@@ -86,6 +99,10 @@ describe("the name it is called by", () => {
   });
   it("leaves nothing when only the name was said", () => {
     expect(withoutWakeWord("Hey Meridian.", words)).toBe("");
+    expect(withoutWakeWord("सुनो मीरा, गाना चलाओ", ["सुनो मीरा"])).toBe("गाना चलाओ");
+    expect(withoutWakeWord("गाना चलाओ", ["सुनो मीरा"])).toBe("गाना चलाओ");
+    expect(withoutWakeWord("Hey Meridian, hey Meridian, open Chrome", words)).toBe("open Chrome");
+    expect(withoutWakeWord("Hey Meridian. Hey Meridian. Meridian.", words)).toBe("");
   });
 });
 
@@ -96,19 +113,5 @@ describe("answers in Hindi", () => {
   });
   it("can end a conversation", () => {
     for (const bye of ["bas", "बस", "शुक्रिया", "धन्यवाद"]) expect(isGoodbye(bye), bye).toBe(true);
-  });
-});
-
-describe("proving it was called", () => {
-  const words = ["Hey Meridian", "Meridian", "Suno Mira"];
-  it("accepts the name however the hearing wrote it", () => {
-    for (const said of ["Hey Meridian, open Chrome", "meridian what's the time", "Maridian open Spotify", "Meridien play music", "मेरिडियन गाना चलाओ", "मेरीडियन समय क्या है", "suno mira gaana chalao"]) {
-      expect(calledByName(said, words), said).toBe(true);
-    }
-  });
-  it("refuses talk that never said it", () => {
-    for (const said of ["हां वो देखना पड़ेगा तेरे साथ", "Quando você me explica essa? Do, que ela não posta", "what's for dinner tonight", "the meeting is at nine", ""]) {
-      expect(calledByName(said, words), said).toBe(false);
-    }
   });
 });

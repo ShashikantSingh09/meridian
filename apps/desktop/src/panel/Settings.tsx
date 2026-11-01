@@ -13,9 +13,10 @@ import { useState, useEffect } from "react";
 import { Face, FACES, type Mood } from "../island/faces";
 import { bridge } from "../lib/bridge";
 import { Brand } from "../lib/brands";
-import { checkForUpdates, clearHistory, feel, installUpdate, PREVIEWS, raiseMicrophone, refreshAuth, setSettingsSection, showPreview, testWake, updateSettings, useApp, type SettingsSection } from "../lib/store";
+import { checkForUpdates, clearHistory, feel, installUpdate, PREVIEWS, refreshAuth, setSettingsSection, showPreview, testWake, updateSettings, useApp, type SettingsSection } from "../lib/store";
 import { Icon, type IconName } from "../lib/icons";
-import type { AgentInfo, Settings, WakeTested, WakeWord } from "../lib/types";
+import { teachWakeWord } from "../lib/voice";
+import type { AgentInfo, Settings, WakeWord } from "../lib/types";
 import { Integrations } from "./Integrations";
 import { Providers } from "./Providers";
 
@@ -284,21 +285,6 @@ function UpdatesSection() {
 }
 
 const MOST_WAKE_WORDS = 8;
-/** Below this a voice held on the meter did not reach the recognizer. It failed at 0.15 and worked at 0.6. */
-const QUIET_LEVEL = 0.3;
-
-const tooQuiet = (microphone?: WakeTested) => !!microphone && (microphone.muted || microphone.level < QUIET_LEVEL);
-
-/** Why a test heard nothing, as far as can be told. */
-function whyMissed(microphone?: WakeTested) {
-  if (!tooQuiet(microphone)) return "Heard you, but not the word. Try again, or set How easily it wakes to Easily.";
-  const { name, muted, percent } = microphone!;
-  if (muted) return `${name} is muted in Windows, so wake words hear nothing.`;
-  return percent < 100
-    ? `${name} is too quiet for wake words. Windows has it at ${percent}%.`
-    : `Did not hear you on ${name}. If you spoke, it is too quiet even at 100%. Move closer to it, or make another microphone the Windows default.`;
-}
-
 /** The switch for the always-on microphone, and what it listens for. */
 function WakeSection() {
   const words = useApp((s) => s.settings.wakeWords);
@@ -306,10 +292,28 @@ function WakeSection() {
   const test = useApp((s) => s.wakeTest);
   const [text, setText] = useState("");
   const phrase = text.trim().replace(/\s+/g, " ");
-  const usable = /^[a-z' ]{1,40}$/i.test(phrase);
+  const usable = /^[\p{L}\p{M}' ]{1,40}$/u.test(phrase);
   const taken = words.some((w) => w.text.toLowerCase() === phrase.toLowerCase());
-  const first = words.find((w) => w.on)?.text;
+  const [taught, setTaught] = useState<string[]>([]);
+  const [lesson, setLesson] = useState<{ word: string; say: string } | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+  const first = words.find((w) => w.on && taught.includes(w.text))?.text;
   const save = (wakeWords: WakeWord[]) => void updateSettings({ wakeWords });
+  const check = () => void bridge.wakeTaught(words.map((w) => w.text)).then(setTaught);
+  useEffect(check, [words]);
+  const teach = (word: string) => {
+    setProblem(null);
+    teachWakeWord(word, (recording, of) => setLesson({ word, say: `Say ${word}. ${recording} of ${of}.` }))
+      .catch((err: unknown) => setProblem(String(err).replace(/^Error: /, "")))
+      .finally(() => {
+        setLesson(null);
+        check();
+      });
+  };
+  const remove = (word: WakeWord) => {
+    save(words.filter((w) => w !== word));
+    void bridge.wakeForget(word.text);
+  };
   const add = (e: React.FormEvent) => {
     e.preventDefault();
     if (!usable || taken || words.length >= MOST_WAKE_WORDS) return;
@@ -322,14 +326,14 @@ function WakeSection() {
       : test.phase === "heard"
         ? `Heard ${test.word}.`
         : test.phase === "missed"
-          ? whyMissed(test.microphone)
-          : first ? `Press Test, then say ${first}.` : "Turn on a wake word first.";
+          ? "Did not hear it. Try again, teach it again, or set How easily it wakes to Easily."
+          : first ? `Press Test, then say ${first}.` : "Teach it a wake word first.";
 
   return (
     <section className="stack-lg">
       <header className="settings-head">
         <h1>Wake words</h1>
-        <p className="meta">Say its name and it starts listening, with no keys to press.</p>
+        <p className="meta">Teach it your voice, then say its name and it starts listening, with no keys to press.</p>
       </header>
       <div className="stack">
         <Toggle name="wakeEnabled" label="Listen for wake words" hint="Keeps the microphone on. Off until you turn it on. The island shows a dot for as long as it is listening." />
@@ -339,8 +343,12 @@ function WakeSection() {
         {words.map((word) => (
           <div className="setting toggle wake-word" key={word.text}>
             <Icon name="mic" size={15} />
-            <span className="label grow">{word.text}</span>
-            <button className="ghost wake-remove" aria-label={`Remove ${word.text}`} title="Remove" onClick={() => save(words.filter((w) => w !== word))}>
+            <span className="stacked grow">
+              <span className="label">{word.text}</span>
+              <span className="meta" role="status">{lesson?.word === word.text ? lesson.say : taught.includes(word.text) ? "Knows your voice" : "Not taught yet"}</span>
+            </span>
+            <button className="ghost" disabled={lesson !== null} onClick={() => teach(word.text)}>{taught.includes(word.text) ? "Teach again" : "Teach"}</button>
+            <button className="ghost wake-remove" aria-label={`Remove ${word.text}`} title="Remove" onClick={() => remove(word)}>
               <Icon name="close" size={13} />
             </button>
             <input type="checkbox" role="switch" aria-label={word.text} checked={word.on} onChange={(e) => save(words.map((w) => (w === word ? { ...w, on: e.target.checked } : w)))} />
@@ -351,7 +359,8 @@ function WakeSection() {
           <input className="grow" aria-label="Add a wake word" placeholder="Add a wake word, two or three words work best" maxLength={40} value={text} onChange={(e) => setText(e.target.value)} />
           <button className="ghost" disabled={!usable || taken || words.length >= MOST_WAKE_WORDS}>Add</button>
         </form>
-        {phrase && !usable && <p className="meta">Use English letters, even for a Hindi word, such as Suno Mira.</p>}
+        {phrase && !usable && <p className="meta">Use letters only.</p>}
+        {problem && <p className="meta bad" role="alert">{problem}</p>}
       </div>
       <div className="stack">
         <div className="setting wake-word">
@@ -359,7 +368,6 @@ function WakeSection() {
             <span className="label">Try it</span>
             <span className="meta" role="status">{trying}</span>
           </span>
-          {test.phase === "missed" && tooQuiet(test.microphone) && (test.microphone!.muted || test.microphone!.percent < 100) && <button className="solid" onClick={raiseMicrophone}>Raise to 100%</button>}
           <button className="ghost" disabled={!first || test.phase === "waiting"} onClick={testWake}>Test</button>
         </div>
       </div>
@@ -367,7 +375,7 @@ function WakeSection() {
         <button className="setting link-row" onClick={showDevices}>
           <span className="stacked grow">
             <span className="label">Microphone and headphones</span>
-            <span className="meta">Wake words always listen through your Windows default microphone.</span>
+            <span className="meta">Wake words listen through the microphone chosen here.</span>
           </span>
           <Icon name="chevron" size={12} />
         </button>
@@ -382,7 +390,7 @@ function WakeSection() {
       <div className="stack">
         <Fact text="Listening for the name happens on this PC." />
         <Fact text="Nothing is saved, and nothing is sent, until it hears its name. After that, your words go to the hearing you chose under Voice." />
-        <Fact text="Uses the speech recognizer built into Windows, so there is nothing to download." />
+        <Fact text="It learns a word from your voice and keeps a pattern of it, not the recordings." />
       </div>
     </section>
   );
