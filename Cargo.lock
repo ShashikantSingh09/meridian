@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "activity"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -28,7 +28,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "agent-adapters"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -48,7 +48,7 @@ dependencies = [
 
 [[package]]
 name = "ai-core"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "async-trait",
  "futures-util",
@@ -2454,7 +2454,7 @@ dependencies = [
 
 [[package]]
 name = "mcp"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "activity",
  "ai-core",
@@ -2469,7 +2469,7 @@ dependencies = [
 
 [[package]]
 name = "media"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "base64 0.22.1",
  "serde",
@@ -2504,7 +2504,7 @@ dependencies = [
 
 [[package]]
 name = "meridian"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "activity",
  "agent-adapters",
@@ -2669,7 +2669,7 @@ dependencies = [
 
 [[package]]
 name = "notes"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -3848,7 +3848,7 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "screen"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "serde",
  "thiserror 2.0.21",
@@ -5196,7 +5196,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "voice"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "futures-util",
  "libloading 0.8.9",
