@@ -1,5 +1,60 @@
 # Development ledger
 
+## 2026-11-02: An island that can be moved, and a laptop's charge
+
+The owner wanted to move the island off their browser tabs, and picked dragging it anywhere. See `docs/DECISIONS.md`, D65.
+
+- **Capturing the pointer on every press broke ten tests.** It took the click from the buttons inside the island: Stop, the media
+  controls, the stage card. Capture now starts only when a press has become a drag.
+- **A drag that never ends was the risk worth guarding.** The core checks the mouse button itself while dragging.
+
+### Proved
+
+Placement maths in unit tests: near the top it is the notch, high it grows down, low it grows up, it stays on the screen whatever was
+kept, and a second display is measured from its own corner. In the browser build: a moving press drags and is not a click, a still
+one opens the panel, floating it is a closed shape with its shadow, low on the screen the panel grows upwards, Back to top center
+returns it, and the charge shows beside the clock, with a bolt and in red as it should. In the built app the settings loaded with
+the new fields and the island reported the notch. Rust 641 passed, 0 failed. Vitest 186. Playwright 148.
+
+### Not proved
+
+- A real drag with the mouse, which moves the window itself. Waiting on the owner.
+- The charge on a real laptop. The reference PC has no battery, and correctly shows none.
+
+## 2026-11-02: Wake words heard by Windows' own engine, updates with no sign-in, and My day from Gmail through Claude
+
+The owner reported wake words not answering again, that updates still needed `gh` after making the repository public, that Add did not
+add a wake word, and that My day stayed empty with Gmail connected. See `docs/DECISIONS.md`, D62 to D64.
+
+- **Add worked, and said nothing when it would not.** Real typing and a real click added a word in the built app. A word already in the
+  list left the button off with no reason, and "Hey, Jarvis!" was refused for its comma. Punctuation now reads as a space, and every
+  refusal says why.
+- **My day never asked Claude.** Only direct sign-ins fed it, so with Gmail connected through Claude it said to connect an account.
+
+- **The microphone was fine.** Windows showed the app's audio service capturing from the chosen microphone the whole time, so the sound
+  was arriving and the comparison was missing it. The recordings' margin was 0.05 between a real voice and a near miss.
+- **The old recognizer's flaw was its own microphone.** SAPI's OneCore classes take a stream instead, so the same engine now hears the
+  app's sound. Desktop SAPI was measured first and rejected: with its grammar alone it woke on 111 of 270 sentences without the name.
+- **One breath survives.** Exact phrases still split the name out of a sentence, and the conversation takes in what was said after it.
+- **A trap found before it shipped.** A conversation takes the microphone mid-phrase, and the engine would have finished that phrase when
+  the microphone came back, calling the assistant with nobody there. A second of quiet when the sound stops, and dropping anything older, prevents it.
+- **Updates read the public API first**, with `gh` only for a private repository, and say on the island when a version is ready.
+
+### Proved
+
+Offline, with synthesized speech: the engine caught the name from both Indian English voices every time, alone and with a command, and woke
+on none of the sentences without it. It made no network connection while listening. A replay test fails without the replay and passes with
+it. The public API found v0.5.0 and its installer with no `gh`, and the installer downloaded through the release's links and matched its
+checksum. In the built app with `gh` hidden, the update check said it was on the latest version, wake words reported listening with
+Windows' speech engine loaded in the process, and the owner's first Hey Meridian through it opened a conversation. Through the real Claude
+account, 14 days of Gmail gave 11 copies in 66 seconds, every date readable. A copied flight confirmation became a flight with a link to
+the message.
+
+### Not proved
+
+- The owner's own voice through the new engine. To be tried on the real microphone.
+- An update from 0.5.1 onward through the public route, which needs the next release to exist.
+
 ## 2026-11-02: Notes, and the dock as the boards drew it
 
 The owner asked for note taking like Coucou's, understood without guessing. See `docs/research/NOTETAKER_REVIEW.md` and `docs/DECISIONS.md`, D61.

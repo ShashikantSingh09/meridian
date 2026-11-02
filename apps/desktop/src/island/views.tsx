@@ -18,6 +18,7 @@ import {
   ignoreSuggestion,
   openLink,
   openPanel,
+  openSettings,
   openSession,
   openStages,
   setListening,
@@ -82,6 +83,24 @@ export function Clock({ className = "rest-time tabular" }: { className?: string 
   return <span className={className}>{now.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>;
 }
 
+/** A laptop's charge at rest: how full, and a bolt while the charger is in. Low and off the charger turns it red. */
+function ChargeGlyph() {
+  const charge = useApp((s) => s.charge);
+  if (!charge) return null;
+  const said = `Battery ${charge.percent}%${charge.plugged ? ", charging" : ""}`;
+  return (
+    <span className="charge tabular" role="img" aria-label={said} title={said} data-plugged={charge.plugged || undefined} data-low={(!charge.plugged && charge.percent <= 20) || undefined}>
+      <svg viewBox="0 0 24 12" aria-hidden="true">
+        <rect className="charge-case" x="0.75" y="0.75" width="19.5" height="10.5" rx="3" />
+        <rect className="charge-fill" x="2.5" y="2.5" width={Math.max(1.5, (16 * Math.min(100, charge.percent)) / 100)} height="7" rx="1.5" />
+        <path className="charge-tip" d="M21.5 4.2v3.6c.9-.2 1.5-1 1.5-1.8s-.6-1.6-1.5-1.8z" />
+        {charge.plugged && <path className="charge-bolt" d="M11.6 1.2 6.9 6.6h3.2l-1.3 4.2 4.9-5.6h-3.3z" />}
+      </svg>
+      <span className="charge-percent">{charge.percent}%</span>
+    </span>
+  );
+}
+
 function Peek({ reduced }: { reduced: boolean }) {
   const next = useApp((s) => (s.settings.showNextMeeting ? s.activity.next : null));
   const sessions = useApp((s) => s.sessions);
@@ -113,6 +132,7 @@ function Peek({ reduced }: { reduced: boolean }) {
 
 export function IdleView({ reduced, hovered, sliver }: { reduced: boolean; hovered: boolean; sliver: boolean }) {
   const clock = useApp((s) => s.settings.showClock);
+  const charged = useApp((s) => s.settings.showBattery && s.charge !== null);
   const greeting = useApp((s) => s.greeting);
   const [tired, setTired] = useState<Mood>("rest");
 
@@ -148,6 +168,7 @@ export function IdleView({ reduced, hovered, sliver }: { reduced: boolean; hover
     <div className="rest ambient">
       <Mine mood={tired} reduced={reduced} />
       {clock && <Clock />}
+      {charged && <ChargeGlyph />}
     </div>
   );
 }
@@ -506,7 +527,7 @@ export function NotificationView({ reduced }: { reduced: boolean }) {
         <Mine mood={mood} scale={0.56} reduced={reduced} />
         {notice.tone === "success" && !reduced && <Sparks />}
       </span>
-      <button className="grow text-button stacked" onClick={() => { dismissNotice(notice.id); openPanel(notice.sessionId ? (sessions.find((s) => s.id === notice.sessionId)?.surface === "chat" ? "chat" : "agents") : undefined); }}>
+      <button className="grow text-button stacked" onClick={() => { dismissNotice(notice.id); if (notice.update) openSettings("updates"); openPanel(notice.sessionId ? (sessions.find((s) => s.id === notice.sessionId)?.surface === "chat" ? "chat" : "agents") : undefined); }}>
         <span className="label truncate">{notice.title}</span>
         <span className="meta truncate">{notice.body}</span>
       </button>

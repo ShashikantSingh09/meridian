@@ -11,7 +11,7 @@ use serde::Serialize;
 use tauri::ipc::Channel;
 use base64::Engine;
 use screen::{Frame, Signal, WindowInfo};
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tokio_util::sync::CancellationToken;
 
 use crate::following::Following;
@@ -44,6 +44,55 @@ pub fn island_set_rect(core: State<'_, Core>, rect: Rect) {
     *core.gate.rect.lock().unwrap() = rect;
 }
 
+/// A press on the island that moved starts a drag, and its release ends it.
+#[tauri::command]
+pub fn island_drag(app: AppHandle, core: State<'_, Core>, start: bool) -> Result<(), String> {
+    if start {
+        island::start_drag(&core.gate);
+    } else if let Some(win) = app.get_webview_window(island::LABEL) {
+        island::finish_drag(&app, &win, &core.gate);
+    }
+    Ok(())
+}
+
+/// Back to the middle of the top edge on the island's display.
+#[tauri::command]
+pub fn island_reset(app: AppHandle, core: State<'_, Core>) -> Result<(), String> {
+    let win = app.get_webview_window(island::LABEL).ok_or("The island is missing.")?;
+    let settings = {
+        let mut settings = core.settings.lock().unwrap();
+        if let Some(key) = island::monitor_key(&app, &win, &settings.island_monitor) {
+            settings.island_spots.remove(&key);
+        }
+        settings.island_align = "center".into();
+        settings.clone()
+    };
+    if let Some(path) = settings::path(&app) {
+        settings::save(&path, &settings).map_err(stringify)?;
+    }
+    island::place(&app, &win, &core.gate, &settings);
+    let _ = app.emit_to(island::LABEL, "settings-changed", settings);
+    Ok(())
+}
+
+/// The notch, or floating and growing "down" or "up".
+#[tauri::command]
+pub fn island_placement(core: State<'_, Core>) -> &'static str {
+    island::placement(&core.gate)
+}
+
+#[derive(serde::Serialize)]
+pub struct Charge {
+    percent: u8,
+    plugged: bool,
+}
+
+/// A laptop's charge right now, or nothing on a PC with no battery.
+#[tauri::command]
+pub fn battery_now() -> Option<Charge> {
+    media::levels::battery_now().map(|(percent, plugged)| Charge { percent, plugged })
+}
+
 #[tauri::command]
 pub fn island_set_interactive(app: AppHandle, core: State<'_, Core>, on: bool) {
     if let Some(win) = app.get_webview_window(island::LABEL) {
@@ -73,15 +122,27 @@ pub fn settings_get(core: State<'_, Core>) -> Settings {
 }
 
 #[tauri::command]
-pub fn settings_save(app: AppHandle, core: State<'_, Core>, settings: Settings) -> Result<(), String> {
+pub fn settings_save(app: AppHandle, core: State<'_, Core>, mut settings: Settings) -> Result<(), String> {
     let path = settings::path(&app).ok_or("No settings folder")?;
+    let win = app.get_webview_window(island::LABEL);
+    {
+        let current = core.settings.lock().unwrap();
+        // Only a drag moves the island, so the page's copy of where it went is never the newer one.
+        settings.island_spots = current.island_spots.clone();
+        // Choosing a side again puts it back on the top edge there.
+        if current.island_align != settings.island_align {
+            if let Some(key) = win.as_ref().and_then(|win| island::monitor_key(&app, win, &settings.island_monitor)) {
+                settings.island_spots.remove(&key);
+            }
+        }
+    }
     settings::save(&path, &settings).map_err(stringify)?;
-    let (monitor, align) = (settings.island_monitor.clone(), settings.island_align.clone());
     core.sessions.set_assistant(crate::actions::setup(&core.tools_url, &settings));
+    let placed = settings.clone();
     let previous = std::mem::replace(&mut *core.settings.lock().unwrap(), settings);
-    if previous.island_monitor != monitor || previous.island_align != align {
-        if let Some(win) = app.get_webview_window(island::LABEL) {
-            island::place(&app, &win, &core.gate, &monitor, &align);
+    if previous.island_monitor != placed.island_monitor || previous.island_align != placed.island_align || previous.island_spots != placed.island_spots {
+        if let Some(win) = win {
+            island::place(&app, &win, &core.gate, &placed);
         }
     }
     Ok(())

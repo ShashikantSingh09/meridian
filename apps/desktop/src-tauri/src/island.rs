@@ -8,18 +8,21 @@ use std::time::{Duration, Instant};
 
 use serde::Deserialize;
 use tauri::{AppHandle, Emitter, Manager, Monitor, PhysicalPosition, PhysicalSize, WebviewWindow};
+
+use crate::settings::{Settings, Spot};
 use webview2_com::Microsoft::Web::WebView2::Win32::{
     COREWEBVIEW2_PERMISSION_KIND, COREWEBVIEW2_PERMISSION_KIND_MICROPHONE, COREWEBVIEW2_PERMISSION_STATE_ALLOW,
     COREWEBVIEW2_PERMISSION_STATE_DENY,
 };
 use webview2_com::PermissionRequestedEventHandler;
 use windows::Win32::Foundation::{HWND, POINT};
+use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_LBUTTON, VK_RBUTTON};
 use windows::Win32::UI::Shell::{
     SHQueryUserNotificationState, QUNS_BUSY, QUNS_PRESENTATION_MODE, QUNS_RUNNING_D3D_FULL_SCREEN,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetCursorPos, GetForegroundWindow, GetWindowLongPtrW, SetForegroundWindow, SetWindowDisplayAffinity,
-    SetWindowLongPtrW, ShowWindow, GWL_EXSTYLE, SW_SHOWNOACTIVATE, WDA_EXCLUDEFROMCAPTURE, WDA_NONE, WS_EX_LAYERED,
+    GetCursorPos, GetForegroundWindow, GetSystemMetrics, GetWindowLongPtrW, SetForegroundWindow, SetWindowDisplayAffinity,
+    SetWindowLongPtrW, ShowWindow, GWL_EXSTYLE, SM_SWAPBUTTON, SW_SHOWNOACTIVATE, WDA_EXCLUDEFROMCAPTURE, WDA_NONE, WS_EX_LAYERED,
     WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_EX_TRANSPARENT,
 };
 
@@ -43,6 +46,14 @@ const SLOW_EVERY: u32 = 40;
 const GAZE_EVERY: Duration = Duration::from_millis(66);
 const GAZE_STEP: f64 = 10.0;
 const GAZE_RANGE: f64 = 900.0;
+/// Floating, the island sits this far inside its window, so its shadow is not cut off. Matches the styles.
+const FLOAT_INSET: f64 = 12.0;
+/// The middle of the island stays this far from a side, so its widest compact form stays on screen.
+const SIDE_KEEP: f64 = 230.0;
+/// Dropped this close to the top of the screen, it becomes the notch again.
+const SNAP: f64 = 40.0;
+/// The island's height at rest.
+const REST_H: f64 = 34.0;
 
 /// The island in CSS pixels with the ratio that turns them into physical ones.
 #[derive(Debug, Clone, Copy, Default, Deserialize)]
@@ -80,6 +91,20 @@ pub struct Gate {
     fullscreen: AtomicBool,
     user_hidden: AtomicBool,
     hidden: AtomicBool,
+    /// The pointer and the window where a drag began, both in physical pixels.
+    drag: Mutex<Option<((f64, f64), (f64, f64))>>,
+    /// Where the window was before the panel moved it to fit on the screen.
+    home: Mutex<Option<(f64, f64)>>,
+    /// "top" for the notch, or floating and growing "down" or "up". Empty until placed, which is the notch.
+    place: Mutex<&'static str>,
+}
+
+/// How the island sits: the notch, or floating and growing down or up.
+pub fn placement(gate: &Gate) -> &'static str {
+    match *gate.place.lock().unwrap() {
+        "" => "top",
+        place => place,
+    }
 }
 
 pub fn hwnd(win: &WebviewWindow) -> Option<HWND> {
@@ -140,8 +165,12 @@ pub fn set_interactive(win: &WebviewWindow, gate: &Gate, on: bool) {
     }
     apply_style(win, gate);
     if on {
+        fit_on_screen(win, gate);
         let _ = win.set_focus();
-    } else if mine == Some(foreground) {
+    } else {
+        back_home(win, gate);
+    }
+    if !on && mine == Some(foreground) {
         let previous = HWND(gate.previous.swap(0, Ordering::Relaxed) as *mut _);
         if !previous.is_invalid() {
             unsafe {
@@ -178,22 +207,153 @@ fn chosen_monitor(app: &AppHandle, win: &WebviewWindow, pref: &str) -> Option<Mo
 /// Puts the window at the top of the chosen display, inside its work area so a
 /// taskbar moved to the top is respected. Sized from that display's scale, so
 /// moving between displays keeps the same logical size.
-pub fn place(app: &AppHandle, win: &WebviewWindow, gate: &Gate, pref: &str, align: &str) {
-    let Some(monitor) = chosen_monitor(app, win, pref) else { return };
-    let scale = monitor.scale_factor();
-    let (w, h) = ((WINDOW_W * scale).round() as u32, (WINDOW_H * scale).round() as u32);
+/// A work area in physical pixels: left, top, width, height.
+type Area = (f64, f64, f64, f64);
+
+fn area_of(monitor: &Monitor) -> Area {
     let area = monitor.work_area();
-    let x = match align {
-        "left" => area.position.x,
-        "right" => area.position.x + area.size.width as i32 - w as i32,
-        _ => area.position.x + (area.size.width as i32 - w as i32) / 2,
+    (area.position.x as f64, area.position.y as f64, area.size.width as f64, area.size.height as f64)
+}
+
+/// Where the window goes for a spot, and how the island sits in it. Physical pixels, for a window `size` big.
+fn spot_position(spot: Spot, (ax, ay, aw, ah): Area, scale: f64, (w, h): (f64, f64)) -> (f64, f64, &'static str) {
+    let keep = SIDE_KEEP * scale;
+    let middle = if aw > 2.0 * keep { (ax + spot.x * aw).clamp(ax + keep, ax + aw - keep) } else { ax + aw / 2.0 };
+    let x = middle - w / 2.0;
+    if spot.y <= 0.0 {
+        return (x, ay, "top");
+    }
+    let (inset, rest, snap) = (FLOAT_INSET * scale, REST_H * scale, SNAP * scale);
+    let low = (ay + ah - inset).max(ay + snap + rest);
+    if spot.up {
+        let bottom = (ay + spot.y * ah).clamp(ay + snap + rest, low);
+        (x, bottom + inset - h, "up")
+    } else {
+        let top = (ay + spot.y * ah).clamp(ay + snap, low - rest);
+        (x, top - inset, "down")
+    }
+}
+
+/// The spot an island dropped here makes: left, top, right and bottom on this work area, in physical pixels.
+/// Near the top it is the notch again. Otherwise it floats, hanging from whichever edge keeps it growing
+/// towards the middle of the screen.
+fn spot_at((left, top, right, bottom): (f64, f64, f64, f64), (ax, ay, aw, ah): Area, scale: f64) -> Spot {
+    let x = (((left + right) / 2.0 - ax) / aw).clamp(0.0, 1.0);
+    if top - ay < SNAP * scale {
+        return Spot { x, y: 0.0, up: false };
+    }
+    let up = (top + bottom) / 2.0 > ay + ah / 2.0;
+    let edge = if up { bottom } else { top };
+    Spot { x, y: ((edge - ay) / ah).clamp(0.0, 1.0), up }
+}
+
+/// The name a display's spot is kept under.
+pub fn monitor_key(app: &AppHandle, win: &WebviewWindow, pref: &str) -> Option<String> {
+    chosen_monitor(app, win, pref)?.name().cloned()
+}
+
+fn move_to(win: &WebviewWindow, gate: &Gate, (x, y): (f64, f64)) {
+    let _ = win.set_position(PhysicalPosition::new(x.round() as i32, y.round() as i32));
+    *gate.origin.lock().unwrap() = (x.round(), y.round());
+}
+
+pub fn place(app: &AppHandle, win: &WebviewWindow, gate: &Gate, settings: &Settings) {
+    let Some(monitor) = chosen_monitor(app, win, &settings.island_monitor) else { return };
+    let scale = monitor.scale_factor();
+    let (w, h) = (WINDOW_W * scale, WINDOW_H * scale);
+    let area = area_of(&monitor);
+    let spot = monitor.name().and_then(|name| settings.island_spots.get(name)).copied();
+    let (x, y, place) = match spot {
+        Some(spot) => spot_position(spot, area, scale, (w, h)),
+        None => {
+            let x = match settings.island_align.as_str() {
+                "left" => area.0,
+                "right" => area.0 + area.2 - w.round(),
+                _ => area.0 + ((area.2 - w.round()) / 2.0).trunc(),
+            };
+            (x, area.1, "top")
+        }
     };
-    let _ = win.set_size(PhysicalSize::new(w, h));
-    let _ = win.set_position(PhysicalPosition::new(x, area.position.y));
+    let size = PhysicalSize::new(w.round() as u32, h.round() as u32);
+    let _ = win.set_size(size);
+    move_to(win, gate, (x, y));
     // Crossing into a display of another scale can resize the window.
-    let _ = win.set_size(PhysicalSize::new(w, h));
-    *gate.origin.lock().unwrap() = (x as f64, area.position.y as f64);
+    let _ = win.set_size(size);
+    *gate.home.lock().unwrap() = None;
+    if gate.interactive.load(Ordering::Relaxed) {
+        fit_on_screen(win, gate);
+    }
     apply_style(win, gate);
+    *gate.place.lock().unwrap() = place;
+    let _ = app.emit_to(LABEL, "island-placed", place);
+}
+
+/// The panel is far bigger than the island, so where the island sits it may not fit. It moves onto the
+/// screen while open, and back when it closes.
+fn fit_on_screen(win: &WebviewWindow, gate: &Gate) {
+    let Ok(Some(monitor)) = win.current_monitor() else { return };
+    let scale = monitor.scale_factor();
+    let (ax, ay, aw, ah) = area_of(&monitor);
+    let (w, h) = (WINDOW_W * scale, WINDOW_H * scale);
+    let at = *gate.origin.lock().unwrap();
+    let fitted = (at.0.clamp(ax, (ax + aw - w).max(ax)), at.1.clamp(ay, (ay + ah - h).max(ay)));
+    if fitted != at {
+        gate.home.lock().unwrap().get_or_insert(at);
+        move_to(win, gate, fitted);
+    }
+}
+
+fn back_home(win: &WebviewWindow, gate: &Gate) {
+    let home = gate.home.lock().unwrap().take();
+    if let Some(home) = home {
+        move_to(win, gate, home);
+    }
+}
+
+/// From a press on the island that moved: the window follows the pointer until `end_drag`.
+pub fn start_drag(gate: &Gate) {
+    if let Some(at) = cursor() {
+        *gate.drag.lock().unwrap() = Some((at, *gate.origin.lock().unwrap()));
+    }
+}
+
+/// Whether the main mouse button is still down, which a left-handed setup swaps.
+fn holding() -> bool {
+    let key = if unsafe { GetSystemMetrics(SM_SWAPBUTTON) } != 0 { VK_RBUTTON } else { VK_LBUTTON };
+    (unsafe { GetAsyncKeyState(i32::from(key.0)) } as u16 & 0x8000) != 0
+}
+
+/// Ends a drag: the spot is kept for that display, a drag onto another display makes that the island's
+/// display, and the island settles there. Safe to call when nothing is being dragged.
+pub fn finish_drag(app: &AppHandle, win: &WebviewWindow, gate: &Gate) {
+    let Some((display, spot)) = end_drag(app, gate) else { return };
+    let core = app.state::<crate::commands::Core>();
+    let primary = app.primary_monitor().ok().flatten().and_then(|monitor| monitor.name().cloned());
+    let settings = {
+        let mut settings = core.settings.lock().unwrap();
+        settings.island_monitor = if primary.as_deref() == Some(display.as_str()) { "primary".into() } else { display.clone() };
+        settings.island_spots.insert(display, spot);
+        settings.clone()
+    };
+    if let Some(path) = crate::settings::path(app) {
+        let _ = crate::settings::save(&path, &settings);
+    }
+    place(app, win, gate, &settings);
+    let _ = app.emit_to(LABEL, "settings-changed", settings);
+}
+
+/// Where the island was let go, as a display's name and the spot it makes there.
+fn end_drag(app: &AppHandle, gate: &Gate) -> Option<(String, Spot)> {
+    gate.drag.lock().unwrap().take()?;
+    let (origin, rect) = (*gate.origin.lock().unwrap(), *gate.rect.lock().unwrap());
+    let (left, top) = (origin.0 + rect.x * rect.dpr, origin.1 + rect.y * rect.dpr);
+    let (right, bottom) = (left + rect.w * rect.dpr, top + rect.h * rect.dpr);
+    let (mx, my) = ((left + right) / 2.0, (top + bottom) / 2.0);
+    let monitor = app.available_monitors().ok()?.into_iter().find(|m| {
+        let (p, s) = (m.position(), m.size());
+        (p.x as f64..p.x as f64 + s.width as f64).contains(&mx) && (p.y as f64..p.y as f64 + s.height as f64).contains(&my)
+    })?;
+    Some((monitor.name()?.clone(), spot_at((left, top, right, bottom), area_of(&monitor), monitor.scale_factor())))
 }
 
 pub fn monitor_names(app: &AppHandle) -> Vec<String> {
@@ -278,7 +438,7 @@ pub fn spawn_poll(app: AppHandle, gate: Arc<Gate>) {
                 if now != displays {
                     displays = now;
                     let settings = app.state::<crate::commands::Core>().settings.lock().unwrap().clone();
-                    place(&app, &win, &gate, &settings.island_monitor, &settings.island_align);
+                    place(&app, &win, &gate, &settings);
                 }
             }
             tick = tick.wrapping_add(1);
@@ -287,6 +447,22 @@ pub fn spawn_poll(app: AppHandle, gate: Arc<Gate>) {
                 std::thread::sleep(FAR);
                 continue;
             };
+            // Being dragged: the window follows the pointer, and keeps the mouse so the release arrives.
+            let dragging = *gate.drag.lock().unwrap();
+            if let Some((from, start)) = dragging {
+                // A release the page never reported still ends it.
+                if !holding() {
+                    finish_drag(&app, &win, &gate);
+                    continue;
+                }
+                let to = (start.0 + cx - from.0, start.1 + cy - from.1);
+                if (to.0.round(), to.1.round()) != *gate.origin.lock().unwrap() {
+                    move_to(&win, &gate, to);
+                }
+                apply_click_through(&win, &gate, true);
+                std::thread::sleep(NEAR);
+                continue;
+            }
             let origin = *gate.origin.lock().unwrap();
             let (x, y) = (cx - origin.0, cy - origin.1);
             let rect = *gate.rect.lock().unwrap();
@@ -333,5 +509,57 @@ mod tests {
     #[test]
     fn an_undrawn_island_takes_no_clicks() {
         assert!(!Rect::default().contains(0.0, 0.0, 8.0));
+    }
+
+    /// A 1920 by 1032 work area at 1.25, which is a common laptop.
+    const AREA: Area = (0.0, 0.0, 1920.0, 1032.0);
+    const SCALE: f64 = 1.25;
+    const WINDOW: (f64, f64) = (WINDOW_W * SCALE, WINDOW_H * SCALE);
+
+    #[test]
+    fn let_go_near_the_top_it_is_the_notch_again() {
+        let spot = spot_at((800.0, 20.0, 985.0, 62.0), AREA, SCALE);
+        assert_eq!((spot.y, spot.up), (0.0, false));
+        let (x, y, place) = spot_position(spot, AREA, SCALE, WINDOW);
+        assert_eq!((y, place), (0.0, "top"));
+        assert!((x + WINDOW.0 / 2.0 - 892.5).abs() < 0.01, "its middle stays where it was let go");
+    }
+
+    #[test]
+    fn floating_it_grows_towards_the_middle_of_the_screen() {
+        let high = spot_at((800.0, 300.0, 985.0, 342.0), AREA, SCALE);
+        assert!(!high.up);
+        let (_, y, place) = spot_position(high, AREA, SCALE, WINDOW);
+        assert_eq!(place, "down");
+        assert!((y + FLOAT_INSET * SCALE - 300.0).abs() < 0.01, "its top edge stays put");
+
+        let low = spot_at((800.0, 900.0, 985.0, 942.0), AREA, SCALE);
+        assert!(low.up);
+        let (_, y, place) = spot_position(low, AREA, SCALE, WINDOW);
+        assert_eq!(place, "up");
+        assert!((y + WINDOW.1 - FLOAT_INSET * SCALE - 942.0).abs() < 0.01, "its bottom edge stays put");
+    }
+
+    #[test]
+    fn it_stays_on_the_screen_whatever_was_kept() {
+        for spot in [Spot { x: 0.0, y: 0.5, up: false }, Spot { x: 1.0, y: 1.0, up: true }, Spot { x: -3.0, y: 9.0, up: false }] {
+            let (x, y, place) = spot_position(spot, AREA, SCALE, WINDOW);
+            let middle = x + WINDOW.0 / 2.0;
+            assert!(middle >= SIDE_KEEP * SCALE - 0.01 && middle <= AREA.2 - SIDE_KEEP * SCALE + 0.01, "{spot:?}");
+            let (top, bottom) = match place {
+                "up" => (y + WINDOW.1 - FLOAT_INSET * SCALE - REST_H * SCALE, y + WINDOW.1 - FLOAT_INSET * SCALE),
+                _ => (y + FLOAT_INSET * SCALE, y + FLOAT_INSET * SCALE + REST_H * SCALE),
+            };
+            assert!(top >= 0.0 && bottom <= AREA.3, "{spot:?} rests on screen, from {top} to {bottom}");
+        }
+    }
+
+    #[test]
+    fn a_second_display_is_measured_from_its_own_corner() {
+        let right: Area = (1920.0, 0.0, 2560.0, 1400.0);
+        let spot = spot_at((3000.0, 1200.0, 3185.0, 1242.0), right, 1.0);
+        assert!(spot.up && (spot.x - (3092.5 - 1920.0) / 2560.0).abs() < 1e-9);
+        let (x, _, _) = spot_position(spot, right, 1.0, (WINDOW_W, WINDOW_H));
+        assert!((x + WINDOW_W / 2.0 - 3092.5).abs() < 0.01);
     }
 }

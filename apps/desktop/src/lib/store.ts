@@ -32,6 +32,8 @@ import type {
   WakeStatus,
   LimitWindow,
   NotesState,
+  Charge,
+  IslandPlace,
 } from "./types";
 import type { Mood } from "../island/faces";
 import type { VoiceState } from "./voice";
@@ -127,6 +129,8 @@ export interface ActivityState {
   next: ContextEvent | null;
   /** Everything current, which is what live activities come from. */
   all: ContextEvent[];
+  /** Gmail read through the Claude account, for a PC with no Google sign-in. */
+  claudeMail: { reading: boolean; said: string; failed: boolean; at: number };
 }
 
 export interface AppState {
@@ -187,6 +191,10 @@ export interface AppState {
   level: Level | null;
   /** The last one of the same kind, so a key press can be told up from down. */
   levelBefore: Level | null;
+  /** A laptop's charge, kept current for the island at rest. Nothing on a PC with no battery. */
+  charge: Charge | null;
+  /** The notch, or floating where it was dragged. */
+  islandPlace: IslandPlace;
   /** The colour of the album, to light the island with. */
   artTint: string | null;
   islandView: IslandView;
@@ -228,7 +236,7 @@ const PREVIEW_MS = 8000;
 
 let state: AppState = {
   panelOpen: false,
-  activity: { category: "today", events: [], accounts: [], log: [], next: null, all: [] },
+  activity: { category: "today", events: [], accounts: [], log: [], next: null, all: [], claudeMail: { reading: false, said: "", failed: false, at: 0 } },
   media: { current: null, sessions: [], reportedAt: 0, recent: [] },
   screen: { capture: null, capturing: false, includeImage: true, refused: null },
   tab: "home",
@@ -270,6 +278,8 @@ let state: AppState = {
   wakeTest: { phase: "idle", word: "" },
   level: null,
   levelBefore: null,
+  charge: null,
+  islandPlace: "top",
   artTint: null,
   islandView: "idle",
   watching: false,
@@ -1028,6 +1038,28 @@ export const renameEvent = (id: string, title: string) => activityAction(() => b
 export const addReminder = (title: string, startsAt: EventTime) =>
   activityAction(() => bridge.activityAddReminder(title, startsAt))();
 
+/** Each read is a run on the user's Claude plan that takes about a minute, so My Day asks at most this often. */
+const CLAUDE_MAIL_EVERY_MS = 30 * 60_000;
+
+/** My Day reads Gmail through the Claude account when Google has no sign-in of its own and Claude Code is here. */
+export const mailThroughClaude = (s: AppState) =>
+  !s.settings.localOnly && !s.activity.accounts.some((a) => a.provider === "google") && s.agents.some((a) => a.id === "claude-code" && a.installed);
+
+/** Only from My Day, when it opens or is asked to read again. */
+export async function readMailThroughClaude(again = false) {
+  const { claudeMail } = state.activity;
+  if (!mailThroughClaude(state) || claudeMail.reading) return;
+  if (!again && claudeMail.at > 0 && Date.now() - claudeMail.at < CLAUDE_MAIL_EVERY_MS) return;
+  setActivity({ claudeMail: { ...claudeMail, reading: true } });
+  try {
+    const said = await bridge.activityClaudeMail();
+    setActivity({ claudeMail: { reading: false, said, failed: false, at: Date.now() } });
+    await refreshActivity();
+  } catch (err) {
+    setActivity({ claudeMail: { reading: false, said: describe(err), failed: true, at: Date.now() } });
+  }
+}
+
 export async function importEmail(subject: string, from: string, body: string) {
   const found = await bridge.activityImport(subject, from, body);
   await refreshActivity();
@@ -1231,6 +1263,21 @@ export async function disconnectIntegration(integration: Integration) {
 }
 
 const FETCH_EVERY_MS = 15 * 60_000;
+/** A PC left on for days still hears about a new version. */
+const UPDATE_EVERY_MS = 6 * 60 * 60_000;
+/** The charge moves slowly, and the charger coming and going arrives at once as a level. */
+const CHARGE_EVERY_MS = 60_000;
+
+export async function refreshCharge() {
+  const charge = await bridge.batteryNow().catch(() => null);
+  if (charge?.percent !== state.charge?.percent || charge?.plugged !== state.charge?.plugged) set({ charge });
+}
+
+/** Back to the middle of the top edge, from wherever it was dragged. */
+export async function resetIslandPlace() {
+  await bridge.islandReset();
+  if (state.settings.islandAlign !== "center") await updateSettings({ islandAlign: "center" });
+}
 
 function fetchInBackground() {
   if (state.settings.monitoringPaused) return;
@@ -1342,6 +1389,7 @@ function hideLevel() {
 }
 
 function onLevel(level: Level) {
+  if (level.kind === "battery") set({ charge: { percent: level.percent, plugged: level.plugged } });
   const levelBefore = lastLevels.get(level.kind) ?? null;
   lastLevels.set(level.kind, level);
   clearTimeout(levelTimer);
@@ -1528,7 +1576,10 @@ const clear: Partial<AppState> = {
   media: { current: null, sessions: [], reportedAt: 0, recent: [] },
 };
 
-export async function checkForUpdates() {
+/** A check nobody asked for says so on the island, once for each new version. */
+let announced: string | null = null;
+
+export async function checkForUpdates(announce = false) {
   if (state.updating) return;
   if (state.settings.localOnly) {
     set({ update: { ...state.update, available: false, message: "Update checks are off in local-only mode." } });
@@ -1536,7 +1587,12 @@ export async function checkForUpdates() {
   }
   set({ updating: "checking" });
   try {
-    set({ update: await bridge.checkUpdate() });
+    const update = await bridge.checkUpdate();
+    set({ update });
+    if (announce && update.available && update.latest && update.latest !== announced) {
+      announced = update.latest;
+      pushNotice({ tone: "info", title: "Update ready", body: `Meridian ${update.latest.replace(/^v/, "")} is ready to install.`, update: true });
+    }
   } catch {
     set({ update: { ...state.update, available: false, message: "Could not check for updates." } });
   } finally {
@@ -1719,7 +1775,11 @@ export async function boot() {
   void bridge.builtInClients().then((builtInClients) => set({ builtInClients }));
   void bridge.watchStatus().then((watching) => set({ watching }));
   void bridge.appVersion().then((version) => set({ version }));
-  void checkForUpdates();
+  void checkForUpdates(true);
+  setInterval(() => void checkForUpdates(true), UPDATE_EVERY_MS);
+  void bridge.islandPlacement().then((islandPlace) => set({ islandPlace }));
+  void refreshCharge();
+  setInterval(() => void refreshCharge(), CHARGE_EVERY_MS);
   setInterval(fetchInBackground, FETCH_EVERY_MS);
   for (const a of agents) if (a.installed) void refreshAuth(a.id);
   await Promise.all([
@@ -1735,6 +1795,7 @@ export async function boot() {
     bridge.onOpenTab((tab) => openPanel(tab as Tab)),
     bridge.onMedia(onMedia),
     bridge.onLevel(onLevel),
+    bridge.onIslandPlaced((islandPlace) => set({ islandPlace })),
     bridge.onReminders(onReminders),
     bridge.onActivityChanged(() => void refreshActivity()),
     bridge.onSettingsChanged((changed) => {

@@ -11,6 +11,7 @@ import type {
   AuthStatus,
   Capture,
   Category,
+  Charge,
   ChatEvent,
   ChatMessage,
   ConnectedAccount,
@@ -18,6 +19,7 @@ import type {
   Digest,
   EventTime,
   Integration,
+  IslandPlace,
   LocalServer,
   MediaAction,
   MediaSnapshot,
@@ -73,6 +75,10 @@ export const bridge = {
   setIslandRect: (rect: IslandRect) =>
     native ? invoke<void>("island_set_rect", { rect: { ...rect, dpr: window.devicePixelRatio || 1 } }) : Promise.resolve(),
   setInteractive: (on: boolean) => (native ? invoke<void>("island_set_interactive", { on }) : Promise.resolve()),
+  islandDrag: (start: boolean) => (native ? invoke<void>("island_drag", { start }) : mock.islandDrag(start)),
+  islandReset: () => (native ? invoke<void>("island_reset") : mock.islandReset()),
+  islandPlacement: () => (native ? invoke<IslandPlace>("island_placement") : mock.islandPlacement()),
+  batteryNow: () => (native ? invoke<Charge | null>("battery_now") : mock.batteryNow()),
 
   getSettings: () => (native ? invoke<Settings>("settings_get") : mock.getSettings()),
   saveSettings: (settings: Settings) =>
@@ -127,6 +133,7 @@ export const bridge = {
     native ? invoke<void>("activity_add_reminder", { title, startsAt }) : mock.activityAddReminder(title, startsAt),
   activityImport: (subject: string, from: string, body: string) =>
     native ? invoke<number>("activity_import", { subject, from, body }) : mock.activityImport(subject),
+  activityClaudeMail: () => (native ? invoke<string>("activity_claude_mail") : mock.activityClaudeMail()),
   activityContext: (agent: boolean, media: boolean, screen: boolean) =>
     native ? invoke<void>("activity_context", { agent, media, screen }) : Promise.resolve(),
   reminderLog: () => (native ? invoke<ReminderLogEntry[]>("reminder_log") : Promise.resolve([])),
@@ -325,13 +332,17 @@ export const bridge = {
     if (!native) return Promise.resolve(mock.onWakeState(handler));
     return listen<WakeStatus>("wake-state", (e) => handler(e.payload)).then(() => {});
   },
-  onWakeHeard(handler: (heard: { word: string; test: boolean; spokenMs: number }) => void) {
+  onWakeHeard(handler: (heard: { word: string; test: boolean; afterMs: number }) => void) {
     if (!native) return Promise.resolve(mock.onWakeHeard(handler));
-    return listen<{ word: string; test: boolean; spokenMs: number }>("wake-heard", (e) => handler(e.payload)).then(() => {});
+    return listen<{ word: string; test: boolean; afterMs: number }>("wake-heard", (e) => handler(e.payload)).then(() => {});
   },
   onVoiceKey(handler: (down: boolean) => void) {
     if (!native) return Promise.resolve(() => {});
     return listen<boolean>("voice-key", (e) => handler(e.payload)).then((un) => un);
+  },
+  onIslandPlaced(handler: (place: IslandPlace) => void) {
+    if (!native) return Promise.resolve(mock.onIslandPlaced(handler));
+    return listen<IslandPlace>("island-placed", (e) => handler(e.payload)).then((un) => un);
   },
   onLevel(handler: (level: Level) => void) {
     if (!native) return mock.onLevel(handler);

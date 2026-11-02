@@ -55,6 +55,14 @@ const BEFORE_WORD_CHUNKS = 2;
 let ear: Capture | null = null;
 let earOpening = false;
 let teaching = false;
+/** The last few seconds the ear heard, in memory only, so a command said in the same breath as the name is heard whole. */
+const RECENT_MS = 3000;
+let recent: Int16Array[] = [];
+
+function remember(chunk: Int16Array) {
+  recent.push(chunk);
+  if (recent.length * CHUNK_MS > RECENT_MS) recent.shift();
+}
 
 let session: {
   mode: VoiceMode;
@@ -74,6 +82,8 @@ let session: {
   before: unknown;
   /** The assistant heard them say they were finished, so this reply is the last. */
   closing?: boolean;
+  /** Called by name: what the microphone sends before the conversation is ready, kept to be heard first. */
+  early?: Int16Array[];
 } | null = null;
 /** The microphone is on its way. There is no `session` until it arrives. */
 let opening = false;
@@ -183,20 +193,23 @@ async function captureMicrophone(handle: (chunk: Int16Array) => void, settings =
   }
 }
 
-async function openMicrophone(mode: VoiceMode) {
+async function openMicrophone(mode: VoiceMode, woken: boolean) {
   // Already open for wake words, so nothing said after the name is lost to reopening it.
   const capture = ear ?? (await captureMicrophone(onAudio));
   capture.node.port.onmessage = (event: MessageEvent<Int16Array>) => onAudio(event.data);
   ear = null;
-  session = { mode, stream: capture.stream, context: capture.context, sent: Promise.resolve(), floor: 0.01, heardSpeech: false, quietMs: 0, waitedMs: 0, loudMs: 0, listenedMs: 0, turn: 0, deciding: null, before: null };
+  session = { mode, stream: capture.stream, context: capture.context, sent: Promise.resolve(), floor: 0.01, heardSpeech: false, quietMs: 0, waitedMs: 0, loudMs: 0, listenedMs: 0, turn: 0, deciding: null, before: null, early: woken ? [] : undefined };
 }
 
-/** Passes sound on for the name to be found in. None of it is kept. */
+/** Passes sound on for the name to be found in. Only the last few seconds are held, in memory. */
 async function openEar() {
   if (ear || earOpening || session || teaching) return;
   earOpening = true;
   try {
-    const capture = await captureMicrophone((chunk) => void bridge.wakeAudio(new Uint8Array(chunk.buffer.slice(0))));
+    const capture = await captureMicrophone((chunk) => {
+      remember(chunk);
+      void bridge.wakeAudio(new Uint8Array(chunk.buffer.slice(0)));
+    });
     // It may have been turned off while the microphone opened.
     if (getState().wake.state === "listening" && !session && !teaching) ear = capture;
     else closeMicrophone(capture.stream, capture.context);
@@ -232,6 +245,7 @@ export function closeNoteMicrophone() {
 function closeEar() {
   if (ear) closeMicrophone(ear.stream, ear.context);
   ear = null;
+  recent = [];
 }
 
 const loudnessOf = (chunk: Int16Array) => {
@@ -348,6 +362,10 @@ async function listen(mode: VoiceMode, woken = false) {
 function onAudio(chunk: Int16Array) {
   const now = session;
   if (!now) return;
+  if (now.early && !getState().voice) {
+    if (now.early.length * CHUNK_MS < RECENT_MS) now.early.push(chunk);
+    return;
+  }
   const loudness = loudnessOf(chunk);
   micLevel = micLevel * 0.5 + Math.min(1, loudness * 8) * 0.5;
   // The room's own noise sets the bar for what counts as speech.
@@ -532,17 +550,30 @@ async function followReply(turn: number, spoken = 0, answered: string | null = n
   else endConversation();
 }
 
-/** Starts a conversation, as the hotkey does. `woken` says it was called by name. */
-export async function startVoice(mode: VoiceMode, woken = false) {
+const currentSession = () => session;
+
+/** Starts a conversation, as the hotkey does. `woken` says it was called by name, and `afterMs`
+ *  how much had been said after the name by the time it was heard. */
+export async function startVoice(mode: VoiceMode, woken = false, afterMs = 0) {
   if (opening) return;
   if (session) {
     if (getState().voice?.phase === "speaking") await interrupted();
     return;
   }
   opening = true;
+  // One piece more than was said after the name, because a piece can be on its way while the name is found.
+  const said = woken && afterMs > 0 ? recent.slice(-(Math.ceil(afterMs / CHUNK_MS) + 1)) : [];
+  recent = [];
   try {
-    await openMicrophone(mode);
+    await openMicrophone(mode, woken);
     await listen(mode, woken);
+    // Read again, because a conversation can end while it starts.
+    const now = currentSession();
+    if (now?.early) {
+      const early = now.early;
+      now.early = undefined;
+      for (const chunk of [...said, ...early]) onAudio(chunk);
+    }
   } catch (err) {
     failed(/permission|notallowed|notfound|overconstrained/i.test(String(err)) ? "No microphone" : "Voice is not set up yet", /overconstrained/i.test(String(err)) ? "The microphone you chose is not connected. Plug it in, or choose another under Settings, Voice." : err);
   } finally {
@@ -602,5 +633,5 @@ export function wireVoice() {
     setWake(status);
     if (status.state === "listening") void openEar();
   });
-  void bridge.onWakeHeard(({ word, test }) => (test ? wakeTestHeard(word) : void startVoice(getState().settings.wakeAfter, true)));
+  void bridge.onWakeHeard(({ word, test, afterMs }) => (test ? wakeTestHeard(word) : void startVoice(getState().settings.wakeAfter, true, afterMs)));
 }

@@ -9,7 +9,7 @@ Scope is M3. Anything that reads more of the desktop must extend this before it 
 | API keys | Windows Credential Manager only. No command returns one to the webview. Logged nowhere. |
 | Chat text | Sent only to the provider the user picked. |
 | Prompts to agents | Sent over stdin, so they never appear in a process list. |
-| Microphone | Opens on a click or while the voice key is used. It stays open only if the user turns on wake words, which are off by default, and then the island shows a dot for as long as it is open. That listening happens on this PC, by comparing the chosen microphone with a pattern of the user's own voice. The sound is compared and dropped, a lesson's recordings stay in memory until the pattern is made, and nothing is sent until the word is found. After that, what is said goes to the hearing service, including anything said by mistake after a false wake. In a conversation the island shows Listening, with a stop button. Audio stays in memory and is never saved. With local hearing it stays on this PC. With a cloud service, the recorded turn is sent to that service at the end of the turn. |
+| Microphone | Opens on a click or while the voice key is used. It stays open only if the user turns on wake words, which are off by default, and then the island shows a dot for as long as it is open. That listening happens on this PC, by comparing the chosen microphone with a pattern of the user's own voice, and by Windows' own speech engine running inside the app on the same sound. The sound is compared and dropped, apart from the last three seconds held in memory to hand a command said with the name to the conversation, a lesson's recordings stay in memory until the pattern is made, and nothing is sent until the word is found. After that, what is said goes to the hearing service, including anything said by mistake after a false wake. In a conversation the island shows Listening, with a stop button. Audio stays in memory and is never saved. With local hearing it stays on this PC. With a cloud service, the recorded turn is sent to that service at the end of the turn. |
 | Calls | Only on a click, never by itself, never by voice and never by the assistant. The island shows a red dot and a clock for as long as it records, over every other view. Microphone and PC sound go to files on this PC, then to the hearing service the user chose, then the audio is deleted. Local only refuses it. Pausing all monitoring stops it. It stops by itself after four hours. |
 | Assistant actions | Tools run on a loopback server with a random token in the path, reachable only by this app's own runs. Opening things, media, volume and reminders run without asking. Reading the screen, starting an agent, commands and edits always ask first. A file that runs a program cannot be opened by the open tool. |
 | Voice keys | Windows Credential Manager, like API keys. No command returns one to the webview. |
@@ -83,10 +83,11 @@ process. It downloads only when asked for, over TLS, and must match a SHA-256 pi
 running. This trusts that the pinned build was clean, and the app does not sign or sandbox it. A same-user process could replace the
 unpacked DLL, which is outside this model. Packs are unpacked with Windows' own `tar`.
 
-**Updates run an installer.** An update is a program run with the user's rights. It comes through `gh` from a private repository, and
-must match the release's `SHA256SUMS.txt`. Both come from the same place, so the checksum proves the download is whole and not who made
-it. Anyone able to publish to the repository can therefore reach every PC that updates. This is acceptable for one owner. Customers need
-a signed update, see `docs/DECISIONS.md`, D52.
+**Updates run an installer.** An update is a program run with the user's rights. It comes over HTTPS from the repository's public
+GitHub releases, or through `gh` if the repository is private, and must match the release's `SHA256SUMS.txt`. Both come from the same
+place, so the checksum proves the download is whole and not who made it. Anyone able to publish to the repository can therefore reach
+every PC that updates, and with the repository public that is every installed copy, each of which is told about the release. Each still
+needs its user's click. Customers need a signed update, see `docs/DECISIONS.md`, D52 and D62.
 
 **The hook token stays out of the webview.** The preview of what following changes in the Claude Code settings file reads only the `hooks` section, with every header value hidden, in both directions.
 

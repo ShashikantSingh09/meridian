@@ -1,6 +1,7 @@
 //! Listens for a word in the user's own voice. It compares the microphone they chose against a few
 //! recordings they made, here on this PC, so it works for any word in any language. Only the pattern
 //! of those recordings is kept, never the sound, and what the microphone hears goes no further.
+//! Words in English letters are also listened for by Windows' own speech engine, in `recognizer`.
 
 use std::collections::{HashMap, VecDeque};
 
@@ -8,6 +9,7 @@ use rustpotter::{Rustpotter, RustpotterConfig, SampleFormat, VADMode, WakewordLo
 use windows::Win32::System::Power::{GetSystemPowerStatus, SYSTEM_POWER_STATUS};
 use windows::Win32::System::StationsAndDesktops::{CloseDesktop, OpenInputDesktop, DESKTOP_CONTROL_FLAGS, DESKTOP_READOBJECTS};
 
+use crate::recognizer::{self, Recognized, Recognizer};
 use crate::{to_wav, VoiceError};
 
 const MICROPHONE_USERS: &str = r"Software\Microsoft\Windows\CurrentVersion\CapabilityAccessManager\ConsentStore\microphone";
@@ -84,12 +86,14 @@ pub fn learn(word: &str, recordings: &[Vec<u8>]) -> Result<Vec<u8>, VoiceError> 
     pattern_of(word, &recordings.iter().collect::<Vec<_>>())?.save_to_buffer().map_err(VoiceError::Service)
 }
 
-/// Finds learned words in sound as it arrives.
+/// Finds learned words in sound as it arrives, by the user's own recordings and, for words in
+/// English letters, by Windows' own speech engine too. Either one hearing it is enough.
 pub struct Spotter {
     detector: Rustpotter,
     waiting: Vec<i16>,
     /// Whether each recent piece of sound was as loud as a voice.
     voiced: VecDeque<bool>,
+    recognizer: Option<Recognizer>,
 }
 
 impl Spotter {
@@ -109,11 +113,34 @@ impl Spotter {
             let pattern = WakewordRef::load_from_buffer(pattern).map_err(VoiceError::Service)?;
             detector.add_wakeword_ref(word, pattern).map_err(VoiceError::Service)?;
         }
-        Ok(Self { detector, waiting: Vec::new(), voiced: VecDeque::new() })
+        Ok(Self { detector, waiting: Vec::new(), voiced: VecDeque::new(), recognizer: None })
+    }
+
+    /// Adds Windows' own engine for those of `words` it can spell. A PC without English speech
+    /// keeps listening by the recordings alone, and says why.
+    pub fn with_windows_speech(mut self, words: &[String], easiness: &str) -> (Self, Option<String>) {
+        match Recognizer::start(words, recognizer::cutoff(easiness)) {
+            Ok(found) => {
+                self.recognizer = found;
+                (self, None)
+            }
+            Err(err) => (self, Some(err.to_string())),
+        }
+    }
+
+    /// The microphone went away. What was said before it is not a call when it comes back.
+    pub fn settle(&mut self) {
+        self.detector.reset();
+        self.waiting.clear();
+        self.voiced.clear();
+        if let Some(recognizer) = &self.recognizer {
+            recognizer.settle();
+        }
     }
 
     /// Takes 16-bit mono sound, in pieces of any size, and says which word it found, if one.
-    pub fn hear(&mut self, pcm: &[u8]) -> Option<String> {
+    pub fn hear(&mut self, pcm: &[u8]) -> Option<Recognized> {
+        let recognized = self.recognizer.as_ref().and_then(|recognizer| recognizer.hear(pcm));
         self.waiting.extend(pcm.chunks_exact(2).map(|sample| i16::from_le_bytes([sample[0], sample[1]])));
         let frame = self.detector.get_samples_per_frame();
         let mut found = None;
@@ -129,7 +156,8 @@ impl Spotter {
                 found = hit.map(|hit| hit.name).or(found);
             }
         }
-        found
+        // The recordings find a word as it ends, so nothing has been said after it yet.
+        recognized.or(found.map(|word| Recognized { word, after_ms: 0 }))
     }
 }
 
@@ -253,7 +281,7 @@ mod tests {
     fn finds_a_learned_word_in_pieces_of_any_size_and_nothing_else() {
         let pattern = learn("hey mira", &[word(true, 0.0), word(true, 1.0), word(true, 2.0)]).unwrap();
         let mut spotter = Spotter::new("balanced", &[("hey mira".to_string(), pattern)]).unwrap();
-        let mut heard = |pcm: &[u8]| pcm.chunks(3_200).filter_map(|piece| spotter.hear(piece)).collect::<Vec<_>>();
+        let mut heard = |pcm: &[u8]| pcm.chunks(3_200).filter_map(|piece| spotter.hear(piece).map(|found| found.word)).collect::<Vec<_>>();
         assert!(heard(&silence(2)).is_empty(), "silence");
         assert!(heard(&word(false, 0.0)).is_empty(), "another word");
         assert!(heard(&silence(2)).is_empty());

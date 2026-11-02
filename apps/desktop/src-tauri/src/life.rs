@@ -36,6 +36,9 @@ const BUILT_IN_MICROSOFT: Option<&str> = option_env!("MERIDIAN_MICROSOFT_CLIENT_
 /// Credential Manager caps one secret at 2560 bytes of UTF-16, so 1280
 /// characters, and an access token alone can pass that. Tokens go in pieces.
 const CHUNK: usize = 1200;
+/// How far back My Day reads Gmail through the user's Claude account, and the name its items carry.
+const CLAUDE_MAIL_DAYS: u32 = 14;
+const THROUGH_CLAUDE: &str = "Gmail, through Claude";
 
 fn stringify(err: impl std::fmt::Display) -> String {
     err.to_string()
@@ -318,6 +321,45 @@ pub fn activity_import(life: State<'_, Life>, subject: String, from: String, bod
     Ok(count)
 }
 
+/// A message Claude copied, in the form the extractor reads. Its link is made here, and only from an
+/// id that is letters and digits, because the id came back through a model.
+fn copied_message(copy: &agent_adapters::google::Copied) -> Message {
+    let received_at = chrono::DateTime::parse_from_rfc3339(copy.date.trim()).map(|date| date.to_utc()).unwrap_or_else(|_| Utc::now());
+    let id = copy.id.trim();
+    let link = id.chars().all(|c| c.is_ascii_alphanumeric()).then(|| format!("https://mail.google.com/mail/#all/{id}"));
+    Message {
+        from: copy.from.clone(),
+        source_ref: SourceRef { account: THROUGH_CLAUDE.into(), message_id: format!("claude-gmail:{id}"), subject: copy.subject.clone(), received_at, link },
+        subject: copy.subject.clone(),
+        received_at,
+        text: Some(copy.text.clone()),
+        html: None,
+        calendar: None,
+    }
+}
+
+/// Gmail for My Day when it has no direct sign-in: Claude copies the mail that could hold plans, and the
+/// same extractor as a connected mailbox reads it here. Only when My Day asks, because each read is a run on
+/// the user's Claude plan.
+#[tauri::command]
+pub async fn activity_claude_mail(core: State<'_, Core>, life: State<'_, Life>) -> Result<String, String> {
+    refuse_if_local(&core)?;
+    let copies = agent_adapters::google::copies(CLAUDE_MAIL_DAYS).await?;
+    // An order placed and then shipped is one plan, told twice.
+    let mut plans = std::collections::HashSet::new();
+    for copy in &copies {
+        for event in extract(&copied_message(copy)) {
+            plans.insert(event.dedupe_key.clone());
+            life.store.upsert(event).map_err(stringify)?;
+        }
+    }
+    Ok(match (copies.len(), plans.len()) {
+        (0, _) => format!("No mail from the last {CLAUDE_MAIL_DAYS} days looks like a plan."),
+        (read, 0) => format!("Read {read} {} through Claude. None held a booking, delivery or order it could be sure of.", if read == 1 { "message" } else { "messages" }),
+        (read, found) => format!("Read {read} {} through Claude, and found {found} {}.", if read == 1 { "message" } else { "messages" }, if found == 1 { "plan" } else { "plans" }),
+    })
+}
+
 #[tauri::command]
 pub fn activity_context(life: State<'_, Life>, agent: bool, media: bool, screen: bool) {
     let mut context = life.context.lock().unwrap();
@@ -431,6 +473,30 @@ mod tests {
         assert_eq!(client_id("mine", Some("built-in")).as_deref(), Some("mine"));
         assert_eq!(client_id("", Some("built-in")).as_deref(), Some("built-in"));
         assert_eq!(client_id("", None), None);
+    }
+
+    /// What Claude copies is read by the same extractor as a connected mailbox, and links only to Gmail.
+    #[test]
+    fn mail_copied_through_claude_becomes_plans() {
+        let copy = |id: &str, date: &str| agent_adapters::google::Copied {
+            id: id.into(),
+            from: "Northwind Airways <bookings@northwind-air.example>".into(),
+            subject: "Your booking confirmation - QX7K2M".into(),
+            date: date.into(),
+            text: "Thank you for booking with Northwind Airways.\n\nBooking reference: QX7K2M\nAirline: Northwind Airways\n\nFlight NW204\nBoston (BOS) to Reykjavik (KEF)\nDeparts: Fri, 20 Nov 2026 19:40\nArrives: Sat, 21 Nov 2026 05:05".into(),
+        };
+        let message = copied_message(&copy("18c2f0a9", "2026-10-02T08:15:00+00:00"));
+        assert_eq!(message.source_ref.account, THROUGH_CLAUDE);
+        assert_eq!(message.source_ref.link.as_deref(), Some("https://mail.google.com/mail/#all/18c2f0a9"));
+        assert_eq!(message.received_at.to_rfc3339(), "2026-10-02T08:15:00+00:00");
+        let found = extract(&message);
+        assert_eq!(found.len(), 1, "{found:?}");
+        assert_eq!(found[0].kind, EventKind::Flight);
+        assert!(found[0].suggested_actions.iter().any(|action| action.url.as_deref() == Some("https://mail.google.com/mail/#all/18c2f0a9")));
+
+        let odd = copied_message(&copy("../../evil?x=1", "yesterday"));
+        assert_eq!(odd.source_ref.link, None, "an id that is not letters and digits gets no link");
+        assert!(odd.received_at > Utc::now() - TimeDelta::minutes(1), "a date that does not read is taken as now");
     }
 
     #[test]

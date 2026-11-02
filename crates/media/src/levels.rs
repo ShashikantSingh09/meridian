@@ -173,6 +173,11 @@ fn power() -> Option<(Power, Option<u32>)> {
     Some((Power { percent: status.BatteryLifePercent, plugged: status.ACLineStatus == 1, saver: status.SystemStatusFlag == SAVER_ON }, left))
 }
 
+/// The charge in percent and whether the charger is in, or nothing on a PC with no battery. One cheap call.
+pub fn battery_now() -> Option<(u8, bool)> {
+    power().map(|(power, _)| (power.percent, power.plugged))
+}
+
 /// Charge rate and capacity, which Windows gives only through this report.
 fn details() -> Option<(Option<u32>, Option<u32>, Option<u8>)> {
     let report = Battery::AggregateBattery().ok()?.GetReport().ok()?;

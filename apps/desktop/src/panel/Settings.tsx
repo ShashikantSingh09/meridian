@@ -13,7 +13,7 @@ import { useState, useEffect } from "react";
 import { Face, FACES, type Mood } from "../island/faces";
 import { bridge } from "../lib/bridge";
 import { Brand } from "../lib/brands";
-import { checkForUpdates, clearHistory, feel, installUpdate, PREVIEWS, refreshAuth, setSettingsSection, showPreview, testWake, updateSettings, useApp, type SettingsSection } from "../lib/store";
+import { checkForUpdates, clearHistory, feel, installUpdate, PREVIEWS, refreshAuth, resetIslandPlace, setSettingsSection, showPreview, testWake, updateSettings, useApp, type SettingsSection } from "../lib/store";
 import { Icon, type IconName } from "../lib/icons";
 import { teachWakeWord } from "../lib/voice";
 import type { AgentInfo, Settings, WakeWord } from "../lib/types";
@@ -40,7 +40,7 @@ function Choice<K extends keyof Settings>({ name, label, options }: {
   );
 }
 
-type Flag = "wakeEnabled" | "wakePauseCalls" | "wakePauseLocked" | "ambient" | "autostart" | "localOnly" | "showClock" | "islandAutoHide" | "mediaEnabled" | "monitoringPaused" | "showNextMeeting" | "sounds";
+type Flag = "wakeEnabled" | "wakePauseCalls" | "wakePauseLocked" | "ambient" | "autostart" | "localOnly" | "showClock" | "showBattery" | "islandAutoHide" | "mediaEnabled" | "monitoringPaused" | "showNextMeeting" | "sounds";
 
 function Toggle({ name, label, hint }: { name: Flag; label: string; hint: string }) {
   const value = useApp((s) => s.settings[name]);
@@ -121,6 +121,7 @@ function IslandSection() {
   const monitor = useApp((s) => s.settings.islandMonitor);
   const monitors = useApp((s) => s.monitors);
   const preview = useApp((s) => s.preview);
+  const dragged = useApp((s) => s.islandPlace !== "top" || Object.keys(s.settings.islandSpots ?? {}).length > 0);
   return (
     <section className="stack-lg">
       <h1>Island</h1>
@@ -131,6 +132,13 @@ function IslandSection() {
           { value: "center", label: "Center" },
           { value: "right", label: "Right" },
         ]} />
+        <div className="setting">
+          <span className="stacked grow">
+            <span className="label">Move it anywhere</span>
+            <span className="meta">Drag the island. Off the top edge it floats, and near the top it becomes the notch again.</span>
+          </span>
+          <button className="ghost" disabled={!dragged} onClick={() => void resetIslandPlace()}>Back to top center</button>
+        </div>
         {monitors.length > 1 && (
           <div className="setting">
             <span className="label grow">Display</span>
@@ -150,6 +158,7 @@ function IslandSection() {
       </div>
       <div className="stack">
         <Toggle name="showClock" label="Show the time" hint="Beside the line while idle." />
+        <Toggle name="showBattery" label="Show the battery" hint="On a laptop: the charge beside the time, with a bolt while it charges." />
         <Toggle name="mediaEnabled" label="Show what is playing" hint="Any player that publishes to Windows media controls." />
         <Toggle name="showNextMeeting" label="Show the next meeting" hint="On the island when you point at it." />
         <Toggle name="islandAutoHide" label="Hide when idle" hint="Shrinks to a sliver, and returns on hover or activity." />
@@ -234,7 +243,7 @@ function Privacy() {
         <Fact text="The microphone opens only while the listening view is on screen, for wake words if you turn them on, or while Microphone and headphones is open under Voice. Nothing is recorded." />
         <Fact text="The island shows a dot for as long as it is listening for wake words." />
         <Fact text="Chat goes only to the engine you pick. Providers are read with read-only tools, and what they return stays on this PC." />
-        <Fact text="Gmail and Google Calendar connected through your Claude account are read only when you ask, and what is read goes through Claude." />
+        <Fact text="Gmail and Google Calendar connected through your Claude account are read only when you ask, or when My Day opens, at most every half hour. What is read goes through Claude." />
         <Fact text="Notes record your microphone and this PC's sound only after you press Record, with a red dot on the island the whole time. The audio goes to your hearing service to be written down, then it is deleted." />
         <Fact text="A call's transcript goes to the AI you chose for Chat, to write the summary. The notes themselves stay on this PC." />
         <Fact text="No telemetry." />
@@ -282,7 +291,7 @@ function UpdatesSection() {
           </>
         )}
       </div>
-      <p className="meta">Updating ends any agent running here, so nothing installs until you press Update now. Downloads come from your private GitHub releases through the GitHub command line, and each one is checked against its published checksum.</p>
+      <p className="meta">Updating ends any agent running here, so nothing installs until you press Update now. Meridian looks for new versions when it starts and every few hours. Downloads come from its releases on GitHub, and each one is checked against its published checksum.</p>
     </section>
   );
 }
@@ -294,9 +303,12 @@ function WakeSection() {
   const status = useApp((s) => s.wake);
   const test = useApp((s) => s.wakeTest);
   const [text, setText] = useState("");
-  const phrase = text.trim().replace(/\s+/g, " ");
+  // Typed the way a name is written, "Hey, Jarvis!" is the phrase Hey Jarvis.
+  const phrase = text.replace(/[’‘]/g, "'").replace(/[.,!?;:"“”()\-–—]+/g, " ").trim().replace(/\s+/g, " ");
   const usable = /^[\p{L}\p{M}' ]{1,40}$/u.test(phrase);
   const taken = words.some((w) => w.text.toLowerCase() === phrase.toLowerCase());
+  const full = words.length >= MOST_WAKE_WORDS;
+  const why = !phrase ? null : !usable ? "Use letters only." : taken ? `${phrase} is already on the list.` : full ? `${MOST_WAKE_WORDS} is the most. Remove one to add another.` : null;
   const [taught, setTaught] = useState<string[]>([]);
   const [lesson, setLesson] = useState<{ word: string; say: string } | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
@@ -319,7 +331,7 @@ function WakeSection() {
   };
   const add = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!usable || taken || words.length >= MOST_WAKE_WORDS) return;
+    if (!phrase || why) return;
     save([...words, { text: phrase, on: true }]);
     setText("");
   };
@@ -360,9 +372,9 @@ function WakeSection() {
         <form className="setting wake-word" onSubmit={add}>
           <Icon name="plus" size={15} />
           <input className="grow" aria-label="Add a wake word" placeholder="Add a wake word, two or three words work best" maxLength={40} value={text} onChange={(e) => setText(e.target.value)} />
-          <button className="ghost" disabled={!usable || taken || words.length >= MOST_WAKE_WORDS}>Add</button>
+          <button className="ghost" disabled={!phrase || why !== null}>Add</button>
         </form>
-        {phrase && !usable && <p className="meta">Use letters only.</p>}
+        {why && <p className="meta" role="status">{why}</p>}
         {problem && <p className="meta bad" role="alert">{problem}</p>}
       </div>
       <div className="stack">

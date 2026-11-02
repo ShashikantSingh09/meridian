@@ -37,7 +37,7 @@ The 20 criteria from the enhancement brief, as they stand.
 | Reverse engineer TwoCode and compare | Done | `docs/research/TWOCODE_TEARDOWN.md`. Static only, the app was never run |
 | macOS-style notch, not a pill | Done | Real app on this desktop, UI tests for shape and edge |
 | Providers column under Settings, MCP vendors, animated results | Done, against a local server | 144 tests, 56 of them over real sockets, plus UI tests. **No real vendor account was used** |
-| Gmail in that column | Shows connected through the Claude account, with no feed, because it reads only when asked | Same state as criterion 12 |
+| Gmail in that column | Shows connected through the Claude account. My day reads it when it opens, at most every half hour | Same state as criterion 12 |
 | Rendering problems | Fixed the ones found. See below | Screenshots of every state, no console errors |
 | Shippable to customers | Not yet. See Shipping | Installer built and tested: installs, runs, uninstalls cleanly, keeps settings |
 
@@ -85,7 +85,7 @@ What stands between this build and a stranger installing it. Only the owner can 
 | Blocker | Why it matters |
 |---|---|
 | **Code-signing certificate** | Without one, SmartScreen warns on the installer, and customers cannot tell it from a tampered copy |
-| **Public update host and a signing key** | Updates work only for a PC signed in to `gh` with access to this private repository. Customers need the signed path back. See `docs/DECISIONS.md`, D52 |
+| **A signing key for updates** | Updates now come from the public GitHub releases with no sign-in, checked only against a checksum published beside them. Customers need a signed update. See `docs/DECISIONS.md`, D52 and D62 |
 | **Name and bundle ID** | Meridian is a working title with no clearance, and `dev.meridian.companion` is a placeholder. Changing the ID later orphans settings and stored tokens |
 | **Claude subscription decision** | See above |
 | **Google verification** | `gmail.readonly` is a restricted scope. A published app needs Google's verification and a security assessment, which takes weeks. Until then Gmail needs each user's own registration |
@@ -130,7 +130,9 @@ What stands between this build and a stranger installing it. Only the owner can 
 
 - **Claude Code has to be signed in** to the Claude account that holds the connector, or the row says to connect it.
 - **Only on request.** An answer takes 7 to 15 seconds and uses plan usage, about 0.11 USD equivalent for a broad mail search on 2026-11-01. So
-  nothing polls, mail raises no alerts, and My day is not fed.
+  nothing polls and mail raises no alerts. My day reads Gmail when it opens, at most every half hour, which took 66 seconds for 11 messages.
+- **My day gets text.** Claude copies messages as text, so booking details that sit only in a message's HTML are lost, and a direct sign-in
+  finds more. The copies pass through a model, which is told to copy word for word; the extractor here still needs real identifiers.
 - **Built on one version.** The server addresses are fixed in `google.rs`, and the flags and settings it depends on were proved on Claude Code
   2.1.316. If an address moves the row says not connected, which fails closed but says the wrong thing.
 - **A link can open unasked** if a crafted email fools two models. See `docs/security/THREAT_MODEL.md`.
@@ -167,7 +169,7 @@ What stands between this build and a stranger installing it. Only the owner can 
 
 ## Not built yet
 
-- **Writing down speech with the Windows recognizer.** Left out on purpose. See `docs/DECISIONS.md`, D51. Wake words do not use it, see D59.
+- **Writing down speech with the Windows recognizer.** Left out on purpose. See `docs/DECISIONS.md`, D51. Wake words use its engine, fed the app's own sound, see D63.
 - **Restored sessions are read-only.** Chat and finished sessions survive a restart, but a session's process does not, so it
   cannot be continued. Quitting ends every agent the app started. Agents in your own terminal carry on.
 - **Following Codex.** Claude Code only.
@@ -189,7 +191,8 @@ What stands between this build and a stranger installing it. Only the owner can 
 
 ## Behaviour to be aware of
 
-- Wake words have to be taught, and they know only the voices that taught them. Someone's own speech that sounds close can wake it.
+- Wake words have to be taught. Words in English letters are also heard by Windows' engine in any voice, and the rest only in the voices
+  that taught them. Speech that sounds close can still wake it.
 - An approval answered in the terminal clears from the island when the tool finishes, or at once if Claude Code hangs up its hook, so a long command can leave it showing until then.
 
 - The assistant's actions work with Claude Code as the AI. API models and Codex can chat but have no tool loop yet, so they cannot act.

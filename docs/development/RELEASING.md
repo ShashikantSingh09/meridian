@@ -21,7 +21,7 @@ them as they are, so write subjects for the person using the app.
 To try a build without publishing anything, open the Actions tab, choose Release, and press Run workflow. The files stay on that
 run for 7 days. Commit your work first: the script refuses to run with uncommitted changes.
 
-This repository is private, so its releases can be downloaded only by people with access to it.
+This repository is public, so anyone can download its releases, and every installed copy is offered each new one.
 
 Before publishing, scan the installers with Windows Defender. A new unsigned build can trip its machine-learning model, and the MSI
 is the fallback if the setup exe is flagged.
@@ -36,13 +36,16 @@ Nothing, for a working unsigned build. These optional secrets, set under Setting
 
 ## How installed copies update
 
-Settings, Updates checks for a newer release and installs it on a click. It works while this repository is private, and only on a PC
-signed in to the GitHub CLI with access to it. Run `gh auth login` once on each PC. Nobody else can update, because nobody else can see
-the releases.
+Meridian looks for a newer release when it starts and every six hours, and says so on the island when it finds one. Settings, Updates
+installs it on a click.
 
-The app asks GitHub for the latest release through `gh`, downloads the setup file and `SHA256SUMS.txt`, and refuses a file that does not
-match. It then quits, runs the installer silently, and starts again. A restart ends running agents, so nothing installs without the
-click. See `docs/DECISIONS.md`, D52.
+The app reads the latest release from GitHub's public API, downloads the setup file and `SHA256SUMS.txt` from the release's own links,
+and refuses a file that does not match. It then quits, runs the installer silently, and starts again. A restart ends running agents, so
+nothing installs without the click. Nothing needs signing in while the repository is public. If it goes private again, the app falls back
+to the GitHub CLI, which then has to be signed in on each PC with `gh auth login`. See `docs/DECISIONS.md`, D52 and D62.
+
+Copies from 0.5.0 and earlier update only through `gh`. A PC without it installs the next version once by hand, from the Releases page,
+and updates by itself from then on.
 
 The checksum catches a damaged download. It proves nothing about who built the file. Updating customers needs a public host and a
 signed update, so it needs the plan in D52 first.

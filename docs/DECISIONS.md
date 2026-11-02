@@ -490,6 +490,77 @@ side by side in the real window before it counts as done.
 Apple-style glass, themes, limits and models, the assistant's name and personality, and wake words are on the canvas and held for review.
 Wake words would reverse the part of D51 that left them out, and only because the owner asked for them.
 
+## D65. The island can be dragged anywhere, and shows a laptop's charge
+
+The owner asked on 2026-11-02, choosing option A of three: the island sat over browser tabs, and they wanted to move it.
+
+- A press that moves 6 pixels is a drag, and anything less is still a click, so buttons inside the island keep working. The page
+  only says when a drag starts and ends. The core moves the window with the pointer at the poll's frame rate, and ends the drag
+  itself if the button is up, so a lost release cannot leave the window following the pointer.
+- Along the top edge it stays the notch. Anywhere else it floats as a shape of its own, closed all the way round, 12 pixels inside
+  its window so its shadow shows. In the upper half it grows down, and in the lower half up, so it always grows towards the middle
+  of the screen. Dropped within 40 pixels of the top, it is the notch again.
+- Where it goes is kept per display, as shares of the work area, so a change of resolution keeps it in the same place. Its middle
+  stays 230 pixels from a side, so its widest compact form stays on the screen. Dropped on another display, that becomes its display.
+- The panel is far bigger than the island. Where it would not fit, the window moves onto the screen while the panel is open, and
+  back when it closes.
+- Only a drag moves it, so the page never overwrites where it went. Choosing Left, Center or Right again, or Back to top center,
+  returns it to the top edge.
+- A laptop shows its charge beside the time, with a bolt while the charger is in, and red at 20% or less off the charger. Windows
+  is asked once a minute, which is one cheap call, and the charger coming or going arrives at once. A PC with no battery shows
+  nothing, and Show the battery turns it off.
+
+## D64. My Day reads Gmail through the Claude account when it opens
+
+Adds to D60. With no Google sign-in, My Day showed nothing even with Gmail connected in Claude, because only direct sign-ins fed it. Opening
+My Day now asks Claude Code to copy the last 14 days of mail that could hold a plan, word for word, as JSON, with the same read-only tools
+as a question. The extractor on this PC reads the copies as it reads any mailbox, so a flight still needs its booking reference and flight
+number, and nothing is made up on the way. The copies are not kept, only what the extractor finds, marked Gmail, through Claude.
+
+- It runs when My Day opens, at most every half hour, and on Read again. Never in the background, because each read is a run on the
+  user's Claude plan, measured at 66 seconds for 11 messages.
+- Links to a message are made here, and only from an id of letters and digits, because the id came back through a model.
+- Local only, a direct Google sign-in, or no Claude Code turns it off.
+- Copies are text, so booking data that only sits in a message's HTML is lost, and fewer plans can be found than with a direct sign-in.
+
+## D63. Wake words are also heard by Windows' own engine, fed the app's sound
+
+Adds to D59. On 2026-11-02 wake words stopped answering the owner again, with the microphone open and its sound reaching the app. The recordings
+scored a real voice at about 0.55 against a cutoff of 0.5, and a sentence that only sounded close at 0.54, so a little more distance, gain or
+noise loses the word.
+
+D59 dropped the Windows recognizer because it opens the microphone itself, and heard nothing in some runs. Its OneCore engine can instead be
+fed through SAPI's in-process recognizer in `sapi_onecore.dll`, from a stream the app writes. It then hears exactly what the recordings hear,
+from the chosen microphone, and nothing is downloaded.
+
+- It listens for the taught words that are spelled in English letters, as exact phrases, with the English recognizer for the user's country
+  first, so India gets Indian English. Words in other scripts stay with the recordings.
+- 360 clips of synthesized speech, fed as one continuous stream: the two Indian English voices were caught 15 times in 15, US voices 13 or 14,
+  an old British voice 4, and none of 270 sentences without the name woke it at the 0.5 cutoff. Sentences that only sounded close scored at
+  most 0.45. How easily it wakes moves the cutoff to 0.6, 0.5 or 0.4.
+- Exact phrases still find the name inside a sentence, about 300 ms after it ends, so a command in one breath works. The engine says how
+  much was said after the name, and the conversation takes that in first, from the last three seconds the ear keeps in memory.
+- Either the recordings or the engine hearing the name is enough.
+- When the microphone goes to a conversation, a second of quiet lets the engine finish what it was halfway through, and anything from before
+  that is dropped, so half a name cannot call it after the conversation ends.
+- The engine reads 10 to 25 ms at a time, takes about 1% of a core, and opened no network connection while listening. Windows has no
+  offline dictation here, so ordinary speech cannot compete for the phrase, and the cutoff does that work.
+- A PC without an English recognizer keeps listening by the recordings alone.
+
+## D62. Updates read the public releases first
+
+Adds to D52. The owner made the repository public on 2026-11-02. The app now asks GitHub's public API for the latest release, and downloads
+the setup file and `SHA256SUMS.txt` from the release's own links, so no PC needs `gh` or a sign-in. If the API answers not found, the
+repository is private again, and the app falls back to `gh` as in D52. A public repository that cannot be reached says why, rather than
+asking for `gh`.
+
+It checks when it starts and every six hours, and says so on the island once for each new version. That opens Updates, and nothing installs
+without Update now.
+
+The trust is unchanged: TLS to github.com and a checksum from the same release. Every installed copy now sees each release, so publishing
+is shipping. A signed update is still needed for customers. Copies from 0.5.0 and earlier know only `gh`, so a PC without it installs the
+next version once by hand.
+
 ## D61. Notes use the hearing service, not a model on the PC
 
 Coucou's Notetaker runs Parakeet and a diarizer on the PC. Parakeet has no Hindi, Hindi is required here, and it is a 670 MB download. Meridian's local hearing is English only and has

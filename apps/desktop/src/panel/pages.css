@@ -1347,6 +1347,17 @@ html[data-motion="reduced"] .live-dot {
   padding-left: 98px;
 }
 
+/* Gmail through the Claude account: one quiet line above the timeline. */
+.day-claude {
+  flex: none;
+  gap: 10px;
+  padding-left: 98px;
+}
+
+.day-claude .meta {
+  margin: 0;
+}
+
 .day-paste {
   flex: none;
   padding: 12px;

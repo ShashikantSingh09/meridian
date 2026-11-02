@@ -217,6 +217,28 @@ describe("a wake word", () => {
     h.state({ state: "off", why: "" });
   });
 
+  it("hears a command said in the same breath as the name from where the name ended", async () => {
+    h.app.wake.state = "listening";
+    h.state({ state: "listening", why: "" });
+    micOpens();
+    await settled();
+    const ear = h.node.port.onmessage!;
+    for (let i = 1; i <= 8; i++) ear({ data: new Int16Array(1600).fill(i * 100) });
+    // 250 ms after the name is three pieces, and one more for a piece that was on its way.
+    h.wake({ word: "Hey Meridian", test: false, afterMs: 250 } as never);
+    await settled();
+    await settled();
+    await vi.waitFor(() => expect(bridge.voiceHear).toHaveBeenCalledTimes(4));
+    const heard = vi.mocked(bridge.voiceHear).mock.calls.map(([bytes]) => new Int16Array((bytes as Uint8Array).buffer)[0]);
+    expect(heard).toEqual([500, 600, 700, 800]);
+    expect(h.app.voice).toMatchObject({ phase: "listening", woken: true });
+    endConversation();
+    micOpens();
+    await settled();
+    h.app.wake.state = "off";
+    h.state({ state: "off", why: "" });
+  });
+
   it("waits for the question when only its name was said, even twice", async () => {
     vi.mocked(bridge.voiceHearEnd).mockResolvedValue("Hey Meridian. Hey Meridian.");
     h.wake({ word: "hey meridian", test: false });

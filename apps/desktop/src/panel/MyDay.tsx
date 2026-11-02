@@ -5,8 +5,10 @@ import {
   describeTime,
   dismissEvent,
   importEmail,
+  mailThroughClaude,
   openLink,
   openSettings,
+  readMailThroughClaude,
   refreshActivity,
   renameEvent,
   timeToday,
@@ -202,14 +204,33 @@ function PasteEmail({ onClose }: { onClose: () => void }) {
   );
 }
 
+/** Gmail through the Claude account: what it is doing, what it found, and a way to read again. */
+function ClaudeMail() {
+  const { reading, said, failed } = useApp((s) => s.activity.claudeMail);
+  return (
+    <div className="row day-claude">
+      <p className="meta grow" aria-live="polite">
+        {reading ? "Reading Gmail through your Claude account. This takes about a minute." : said || "Gmail is read through your Claude account."}
+      </p>
+      {!reading && <button className="ghost" onClick={() => void readMailThroughClaude(true)}>{failed ? "Try again" : "Read again"}</button>}
+    </div>
+  );
+}
+
 export function MyDay() {
-  const { category, events, accounts } = useApp((s) => s.activity);
+  const { category, events, accounts, claudeMail, all } = useApp((s) => s.activity);
+  const throughClaude = useApp(mailThroughClaude);
   const [pasting, setPasting] = useState(false);
-  const from = `From ${accounts.length} connected ${accounts.length === 1 ? "account" : "accounts"} and your own reminders.`;
+  const sources = [
+    accounts.length > 0 && `${accounts.length} connected ${accounts.length === 1 ? "account" : "accounts"}`,
+    throughClaude && !claudeMail.failed && claudeMail.at > 0 && "Gmail through your Claude account",
+  ].filter(Boolean);
+  const from = `From ${[...sources, "your own reminders"].join(", ").replace(/, ([^,]*)$/, " and $1")}.`;
+  const connected = sources.length > 0;
 
   useEffect(() => {
-    void refreshActivity(category);
-    // Each visit reads the current state of the store.
+    // Each visit reads the current state of the store, and Gmail through Claude when it is due.
+    void refreshActivity(category).then(() => readMailThroughClaude());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -222,17 +243,22 @@ export function MyDay() {
       </div>
 
       <div className="day-list">
+        {throughClaude && <ClaudeMail />}
         {pasting && <PasteEmail onClose={() => setPasting(false)} />}
         {events.map((e, i) => (
           <EventCard key={e.id} event={e} last={i === events.length - 1} />
         ))}
-        {events.length > 0 && accounts.length > 0 && <p className="meta day-note">{from}</p>}
+        {events.length > 0 && connected && <p className="meta day-note">{from}</p>}
         {events.length === 0 && !pasting && (
           <div className="page-rest">
             <Icon name="calendar" size={34} />
             <p className="page-rest-title">Nothing here</p>
-            <p className="meta">{accounts.length > 0 ? from : "Connect an account in Settings, or paste an email below."}</p>
-            {accounts.length === 0 && <button className="solid" onClick={() => openSettings("providers")}>Connect an account</button>}
+            <p className="meta">
+              {all.length > 0
+                ? `Nothing under ${CATEGORIES.find((c) => c.value === category)?.label ?? "this"}. ${all.length} ${all.length === 1 ? "item is" : "items are"} under the other headings.`
+                : connected ? from : throughClaude ? "Nothing yet from Gmail. Add a reminder, or paste an email below." : "Connect an account in Settings, or paste an email below."}
+            </p>
+            {!connected && !throughClaude && <button className="solid" onClick={() => openSettings("providers")}>Connect an account</button>}
           </div>
         )}
       </div>

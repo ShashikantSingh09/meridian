@@ -13,6 +13,18 @@ pub struct WakeWord {
     pub on: bool,
 }
 
+/// Where the island was dragged to on one display, as shares of the display's work area.
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+pub struct Spot {
+    /// The middle of the island, from the left.
+    pub x: f64,
+    /// The edge it hangs from. 0 is the top of the screen, as the notch. Otherwise it floats, and this
+    /// is its top edge, or its bottom edge when `up` is set.
+    pub y: f64,
+    /// It floats in the lower half, so it grows upwards.
+    pub up: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Settings {
@@ -28,9 +40,13 @@ pub struct Settings {
     pub island_monitor: String,
     /// "left", "center" or "right" along the top of the display.
     pub island_align: String,
+    /// Where the island was dragged to, by display name. A display with none uses `island_align`.
+    pub island_spots: HashMap<String, Spot>,
     /// Shrink to a sliver when idle, and come back on hover or activity.
     pub island_auto_hide: bool,
     pub show_clock: bool,
+    /// A laptop's charge beside the clock.
+    pub show_battery: bool,
     /// Multiplies every spring. 1 is the designed speed.
     pub animation_speed: f64,
     pub agent_default_dir: Option<String>,
@@ -101,8 +117,10 @@ impl Default for Settings {
             local_only: false,
             island_monitor: "primary".into(),
             island_align: "center".into(),
+            island_spots: HashMap::new(),
             island_auto_hide: false,
             show_clock: true,
+            show_battery: true,
             animation_speed: 1.0,
             agent_default_dir: None,
             screen_mode: "ondemand".into(),

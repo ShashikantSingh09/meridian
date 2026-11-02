@@ -146,7 +146,7 @@ fn setup(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     app.manage(notetaker::state(app)?);
     let path = settings::path(&handle).ok_or("no config directory")?;
     let settings = settings::load(&path);
-    let placement = (settings.island_monitor.clone(), settings.island_align.clone());
+    let placement = settings.clone();
     let settings = Mutex::new(settings);
 
     let emitter = handle.clone();
@@ -183,7 +183,7 @@ fn setup(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
 
     let win = app.get_webview_window(island::LABEL).ok_or("island window missing")?;
     island::restrict_permissions(&win);
-    island::place(&handle, &win, &gate, &placement.0, &placement.1);
+    island::place(&handle, &win, &gate, &placement);
     island::prepare(&win, &gate);
     island::show_quietly(&win);
     island::spawn_poll(handle.clone(), gate);
@@ -212,6 +212,10 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::island_set_rect,
+            commands::island_drag,
+            commands::island_reset,
+            commands::island_placement,
+            commands::battery_now,
             commands::island_set_interactive,
             commands::settings_get,
             commands::settings_save,
@@ -241,6 +245,7 @@ pub fn run() {
             life::activity_correct,
             life::activity_add_reminder,
             life::activity_import,
+            life::activity_claude_mail,
             life::activity_context,
             life::reminder_log,
             life::accounts_list,

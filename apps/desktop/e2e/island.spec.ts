@@ -197,6 +197,89 @@ test("a tired face is startled awake by the pointer", async ({ page }) => {
   await expect(page.locator(".island .peek-face .face")).toHaveAttribute("data-mood", "needs");
 });
 
+type Hooks = {
+  __mock: { setCharge(c: unknown): void; islandDrags(): boolean[]; placeIsland(p: string): void; islandResets(): number };
+  __meridian: { refreshCharge(): Promise<void> };
+};
+/** Runs `call` in the page with its test hooks, as `call(window)`. */
+const hooks = (page: Page, call: (w: Hooks) => unknown) => page.evaluate(`(${call.toString()})(window)`);
+
+test("a laptop shows its charge beside the clock, with a bolt while it charges", async ({ page }) => {
+  await expect(island(page)).toHaveAttribute("data-view", "idle");
+  await expect(page.locator(".charge")).toHaveCount(0);
+  const plain = (await island(page).boundingBox())!.width;
+
+  await hooks(page, (w) => (w.__mock.setCharge({ percent: 64, plugged: false }), w.__meridian.refreshCharge()));
+  await expect(page.locator(".charge")).toHaveAttribute("aria-label", "Battery 64%");
+  await expect(page.locator(".charge-percent")).toHaveText("64%");
+  await expect(page.locator(".charge-bolt")).toHaveCount(0);
+  await expect.poll(async () => (await island(page).boundingBox())!.width).toBeGreaterThan(plain);
+
+  await hooks(page, (w) => (w.__mock.setCharge({ percent: 64, plugged: true }), w.__meridian.refreshCharge()));
+  await expect(page.locator(".charge")).toHaveAttribute("aria-label", "Battery 64%, charging");
+  await expect(page.locator(".charge-bolt")).toHaveCount(1);
+
+  await hooks(page, (w) => (w.__mock.setCharge({ percent: 12, plugged: false }), w.__meridian.refreshCharge()));
+  await expect(page.locator(".charge")).toHaveAttribute("data-low", "true");
+});
+
+test("the island is dragged, not clicked, when the press moves", async ({ page }) => {
+  await expect(island(page)).toHaveAttribute("data-view", "idle");
+  await settled(page);
+  const box = (await island(page).boundingBox())!;
+  const [x, y] = [box.x + box.width / 2, box.y + box.height / 2];
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x + 40, y + 60, { steps: 6 });
+  await expect(island(page)).toHaveAttribute("data-dragging", "true");
+  await page.mouse.up();
+  expect(await hooks(page, (w) => w.__mock.islandDrags())).toEqual([true, false]);
+  await expect(island(page)).not.toHaveAttribute("data-dragging", "true");
+  await page.waitForTimeout(300);
+  await expect(island(page)).toHaveAttribute("data-view", "idle");
+
+  // A press that stays put is still a click.
+  await island(page).click();
+  await expect(island(page)).toHaveAttribute("data-view", "expanded");
+});
+
+test("floating it is a shape of its own, growing up from low on the screen, and goes back to the top", async ({ page }) => {
+  await hooks(page, (w) => w.__mock.placeIsland("up"));
+  await expect(island(page)).toHaveAttribute("data-place", "up");
+  await expect(page.locator(".island-body path")).toHaveAttribute("d", /Z$/);
+  await expect.poll(async () => { const b = (await island(page).boundingBox())!; return Math.round(b.y + b.height); }).toBe(660 - 12);
+
+  await hooks(page, (w) => w.__mock.placeIsland("down"));
+  await expect.poll(async () => Math.round((await island(page).boundingBox())!.y)).toBe(12);
+
+  await island(page).click();
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await page.getByRole("button", { name: "Island", exact: true }).click();
+  await page.getByRole("button", { name: "Back to top center" }).click();
+  await expect(island(page)).toHaveAttribute("data-place", "top");
+  expect(await hooks(page, (w) => w.__mock.islandResets())).toBe(1);
+  await expect(page.locator(".island-body path")).not.toHaveAttribute("d", /Z$/);
+});
+
+test("a new version found in the background says so once, and opens Updates", async ({ page }) => {
+  await page.clock.install();
+  await page.goto("/");
+  await expect(island(page)).toHaveAttribute("data-view", "idle");
+  await page.evaluate(() => (window as never as { __mock: { setUpdate(s: unknown): void } }).__mock.setUpdate({ available: true, latest: "v0.9.0", message: "Version 0.9.0 is ready to install." }));
+  await page.clock.fastForward(6 * 60 * 60_000);
+  await expect(island(page)).toHaveAttribute("data-view", "notification");
+  await expect(island(page)).toContainText("Meridian 0.9.0 is ready to install.");
+  await island(page).getByText("Update ready").click();
+  await expect(page.getByRole("heading", { name: "Updates" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Update now" })).toBeVisible();
+
+  await page.keyboard.press("Escape");
+  await expect(island(page)).toHaveAttribute("data-view", "idle");
+  await page.clock.fastForward(6 * 60 * 60_000);
+  await page.clock.runFor(1000);
+  await expect(island(page)).toHaveAttribute("data-view", "idle");
+});
+
 test("a sleeping face snores a little, then stops drawing", async ({ page }) => {
   await page.clock.install();
   await page.goto("/");
@@ -1039,6 +1122,13 @@ test.describe("panel", () => {
     await expect(page.getByRole("switch", { name: "सुनो मीरा" })).toBeChecked();
     await page.getByLabel("Add a wake word").fill("suno mira");
     await expect(add).toBeDisabled();
+    await expect(page.getByText("suno mira is already on the list.")).toBeVisible();
+    // Written the way a name is written, it is still the phrase.
+    await page.getByLabel("Add a wake word").fill("Hey, Jarvis!");
+    await expect(add).toBeEnabled();
+    await page.getByLabel("Add a wake word").press("Enter");
+    await expect(page.getByRole("switch", { name: "Hey Jarvis" })).toBeChecked();
+    await expect(page.getByLabel("Add a wake word")).toHaveValue("");
 
     await page.getByRole("button", { name: "Test", exact: true }).click();
     await expect(page.getByText("Getting ready.")).toBeVisible();
@@ -1143,6 +1233,28 @@ test.describe("panel", () => {
       await page.getByLabel("When").fill("2026-11-02T09:30");
       await page.getByRole("button", { name: "Add", exact: true }).click();
       await expect(page.locator(".event", { hasText: "Call the bank" })).toContainText("Added by you");
+    });
+
+    test("reads Gmail through the Claude account when Google has no sign-in, at most every half hour", async ({ page }) => {
+      const reads = () => page.evaluate(() => (window as never as { __mock: { claudeMailReads(): number } }).__mock.claudeMailReads());
+      await expect(page.getByText("Read 2 messages through Claude, and found 1 plan.")).toBeVisible();
+      await page.getByRole("button", { name: "Important dates" }).click();
+      await expect(page.getByText(/^Nothing under Important dates\. \d+ items are under the other headings\.$/)).toBeVisible();
+      await page.getByRole("button", { name: "Upcoming" }).click();
+      await expect(page.locator(".event", { hasText: "Order 112-4455" })).toContainText("From Gmail, through Claude: Your order has shipped");
+      await expect(page.getByText(/^From Gmail through your Claude account and your own reminders\.$/)).toBeVisible();
+      expect(await reads()).toBe(1);
+
+      await page.getByRole("button", { name: "Home", exact: true }).click();
+      await page.getByRole("button", { name: "My day" }).click();
+      await expect(page.getByText("Read 2 messages through Claude, and found 1 plan.")).toBeVisible();
+      expect(await reads()).toBe(1);
+
+      await page.evaluate(() => (window as never as { __mock: { failClaudeMail(why: string): void } }).__mock.failClaudeMail("Gmail is not connected. It connects at claude.ai/customize/connectors, in the Claude account Claude Code is signed in to."));
+      await page.getByRole("button", { name: "Read again" }).click();
+      await expect(page.getByText(/^Gmail is not connected\./)).toBeVisible();
+      await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
+      expect(await reads()).toBe(2);
     });
 
     test("reading an email says when it finds nothing", async ({ page }) => {

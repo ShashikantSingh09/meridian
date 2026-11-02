@@ -192,8 +192,12 @@ export interface Settings {
   localOnly: boolean;
   islandMonitor: string;
   islandAlign: "left" | "center" | "right";
+  /** Where the island was dragged to, by display. Kept by the core, which is the only one that moves it. */
+  islandSpots: Record<string, { x: number; y: number; up: boolean }>;
   islandAutoHide: boolean;
   showClock: boolean;
+  /** A laptop's charge beside the clock. */
+  showBattery: boolean;
   animationSpeed: number;
   agentDefaultDir: string | null;
   voiceProvider: string;
@@ -431,6 +435,15 @@ export interface ReminderLogEntry {
   at: string;
 }
 
+/** A laptop's charge, and whether the charger is in. */
+export interface Charge {
+  percent: number;
+  plugged: boolean;
+}
+
+/** The notch on the top edge, or floating and growing down or up. */
+export type IslandPlace = "top" | "down" | "up";
+
 export interface ConnectedAccount {
   id: string;
   provider: "google" | "microsoft";
@@ -464,8 +477,10 @@ export const defaultSettings: Settings = {
   localOnly: false,
   islandMonitor: "primary",
   islandAlign: "center",
+  islandSpots: {},
   islandAutoHide: false,
   showClock: true,
+  showBattery: true,
   animationSpeed: 1,
   agentDefaultDir: null,
   voiceProvider: "windows",

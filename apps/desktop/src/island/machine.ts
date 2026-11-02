@@ -51,6 +51,8 @@ export interface Notice {
   finished?: boolean;
   /** Notes are ready, so the island offers to open them. */
   note?: string;
+  /** A new version can be installed, so clicking opens Updates. */
+  update?: boolean;
 }
 
 export interface Suggestion {
@@ -202,6 +204,9 @@ const FINISHED_BRIEF: Geometry = { w: 344, h: 126, r: 22 };
 const STOPPED: Geometry = { w: 344, h: 164, r: 22 };
 
 const IDLE_CLOCK: Geometry = { w: 148, h: 34, r: 15 };
+/** With a laptop's charge beside the clock, or on its own. */
+const IDLE_CLOCK_CHARGE: Geometry = { w: 214, h: 34, r: 15 };
+const IDLE_CHARGE: Geometry = { w: 124, h: 34, r: 15 };
 const SLIVER: Geometry = { w: 96, h: 6, r: 3 };
 const REMINDER: Geometry = { w: 420, h: 112, r: 24 };
 const NOTE_STOP: Geometry = { w: 262, ...BAR };
@@ -216,6 +221,8 @@ export interface GeometryContext {
   /** What is waiting, when it needs more room than a command does. */
   asking?: Approval | null;
   clock?: boolean;
+  /** A laptop's charge is shown at rest. */
+  charge?: boolean;
   /** Idle with auto-hide on: only a sliver remains until the pointer arrives. */
   sliver?: boolean;
   /** A notice with actions needs room for its buttons. */
@@ -251,7 +258,8 @@ export function geometryFor(view: IslandView, ctx: GeometryContext): Geometry {
   if (view === "idle" && ctx.greeting) return GREETING;
   if (view === "idle" && ctx.hovered) return IDLE_HOVER;
   if (view === "idle" && ctx.sliver) return SLIVER;
-  if (view === "idle" && ctx.clock) return IDLE_CLOCK;
+  if (view === "idle" && ctx.clock) return ctx.charge ? IDLE_CLOCK_CHARGE : IDLE_CLOCK;
+  if (view === "idle" && ctx.charge) return IDLE_CHARGE;
   // Whoever else is at work stays on show under a question, with what needs the user first.
   const others = Math.max(0, Math.min(ctx.rows, MULTITASK_MAX_ROWS) - 1) * OTHER_ROW;
   if (view === "working" && ctx.asking?.plan) return { ...PLAN, h: PLAN.h + others };

@@ -80,6 +80,28 @@ textarea {
   cursor: pointer;
 }
 
+/* Dragged off the top edge, it floats: a shape of its own, a little inside its window so the shadow shows.
+   The inset matches FLOAT_INSET in island.rs. */
+.island[data-place="down"],
+.island[data-place="up"] {
+  left: 50%;
+  right: auto;
+  translate: -50% 0;
+}
+
+.island[data-place="down"] {
+  top: 12px;
+}
+
+.island[data-place="up"] {
+  top: auto;
+  bottom: 12px;
+}
+
+.island[data-dragging] {
+  cursor: grabbing;
+}
+
 .island-content {
   position: absolute;
   top: 0;
@@ -1552,6 +1574,17 @@ textarea::placeholder {
   pointer-events: none;
 }
 
+/* Floating, it does not hang from the edge either, and grown upwards it sits level with the bottom. */
+.island[data-place="down"] .bubble,
+.island[data-place="up"] .bubble {
+  border-radius: 18px;
+}
+
+.island[data-place="up"] .bubble {
+  top: auto;
+  bottom: 0;
+}
+
 .island[data-align="right"] .bubble {
   left: auto;
   right: calc(100% + 18px);
@@ -1574,6 +1607,55 @@ textarea::placeholder {
   align-items: center;
   justify-content: center;
   gap: 10px;
+}
+
+/* A laptop's charge beside the clock. The bolt keeps an edge in the island's colour, so it reads over the fill. */
+.charge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.charge svg {
+  width: 24px;
+  height: 12px;
+  overflow: visible;
+}
+
+.charge-case {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.2;
+  opacity: 0.5;
+}
+
+.charge-tip {
+  fill: currentColor;
+  opacity: 0.5;
+}
+
+.charge-fill {
+  fill: currentColor;
+}
+
+.charge[data-plugged] .charge-fill {
+  fill: var(--state-success);
+}
+
+.charge[data-low] .charge-fill,
+.charge[data-low] .charge-percent {
+  fill: var(--state-error);
+  color: var(--state-error);
+}
+
+.charge-bolt {
+  fill: currentColor;
+  stroke: var(--island);
+  stroke-width: 1.2;
+  paint-order: stroke;
 }
 
 .rest-time,

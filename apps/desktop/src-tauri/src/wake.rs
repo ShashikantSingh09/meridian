@@ -17,6 +17,8 @@ use crate::island;
 use crate::notetaker::NoteTaker;
 
 const TICK: Duration = Duration::from_secs(1);
+/// Longer than this with no sound, and the microphone has gone away. The interface sends a piece every 100 ms.
+const GONE_QUIET: Duration = Duration::from_millis(400);
 /// How long the Test button keeps listening.
 const TEST_FOR: Duration = Duration::from_secs(10);
 const MOST_WORDS: usize = 8;
@@ -32,9 +34,12 @@ pub struct Status {
 }
 
 #[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct WakeHeard {
     word: String,
     test: bool,
+    /// How much was said after the word before it was heard, which the conversation takes in first.
+    after_ms: u64,
 }
 
 pub struct Wake {
@@ -145,17 +150,37 @@ fn build(app: &AppHandle, asked: &Asked) -> Result<Spotter, String> {
     for word in &asked.words {
         learned.push((word.clone(), std::fs::read(pattern_file(app, word)?).map_err(|err| err.to_string())?));
     }
-    Spotter::new(&asked.easiness, &learned).map_err(|err| err.to_string())
+    let (spotter, problem) = Spotter::new(&asked.easiness, &learned).map_err(|err| err.to_string())?.with_windows_speech(&asked.words, &asked.easiness);
+    if let Some(problem) = problem {
+        eprintln!("wake words: Windows speech is not listening, only the recordings are: {problem}");
+    }
+    Ok(spotter)
 }
 
 /// Sound is checked here, in the order it came, so a slow moment never holds up the interface.
 fn listen(app: AppHandle, sound: mpsc::Receiver<Vec<u8>>) {
-    for pcm in sound {
+    let mut flowing = false;
+    loop {
+        let pcm = match sound.recv_timeout(GONE_QUIET) {
+            Ok(pcm) => pcm,
+            // The interface sends sound all the time it listens, so a gap means the microphone went to a
+            // conversation or closed, and half a word from before it must not finish as a call later.
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                if std::mem::take(&mut flowing) {
+                    if let Some(spotter) = app.state::<Wake>().spotter.lock().unwrap().as_mut() {
+                        spotter.settle();
+                    }
+                }
+                continue;
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => return,
+        };
+        flowing = true;
         let wake = app.state::<Wake>();
         let found = wake.spotter.lock().unwrap().as_mut().and_then(|spotter| spotter.hear(&pcm));
-        if let Some(word) = found {
+        if let Some(heard) = found {
             let test = wake.testing_until.lock().unwrap().take().is_some();
-            let _ = app.emit_to(island::LABEL, "wake-heard", WakeHeard { word, test });
+            let _ = app.emit_to(island::LABEL, "wake-heard", WakeHeard { word: heard.word, test, after_ms: heard.after_ms });
         }
     }
 }

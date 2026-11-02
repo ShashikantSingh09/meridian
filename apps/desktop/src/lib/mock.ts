@@ -2,6 +2,8 @@
 // the Playwright suite exercises the interface. Never loaded inside Tauri paths.
 
 import type {
+  Charge,
+  IslandPlace,
   AgentEnvelope,
   AgentEvent,
   AgentId,
@@ -71,6 +73,8 @@ let authed = true;
 let pushReminders: (r: Reminder[]) => void = () => {};
 let registered = true;
 let accounts: ConnectedAccount[] = [];
+let claudeMailReads = 0;
+let claudeMailFails = "";
 const known = new Set<string>();
 const voicePacks = new Set<string>();
 const voiceKeys = new Set<string>();
@@ -78,13 +82,18 @@ let heardWords = "";
 const spokenWords: string[] = [];
 let wakeState: ((status: WakeStatus) => void) | null = null;
 const taughtWords = new Set<string>();
-let wakeHeard: ((heard: { word: string; test: boolean; spokenMs: number }) => void) | null = null;
+let wakeHeard: ((heard: { word: string; test: boolean; afterMs: number }) => void) | null = null;
 let updateStatus = { current: "0.3.0", latest: "v0.3.0", available: false, notes: "", published: null as string | null, message: "You are on the latest version." };
 let updateInstalled = false;
 let failInstalling: (why: Error) => void = () => {};
 let signInGate: Promise<void> | null = null;
 let failSigningIn: (why: Error) => void = () => {};
 let pushLevel: (level: Level) => void = () => {};
+/** A desktop unless a test says otherwise, so the island keeps its usual size. */
+let charge: Charge | null = null;
+let islandPlaced: (place: IslandPlace) => void = () => {};
+const islandDrags: boolean[] = [];
+let islandResets = 0;
 let watching = false;
 let lastAnswers: Record<string, string | string[]> | null = null;
 let integrations: Integration[] = [
@@ -194,6 +203,20 @@ export const mock = {
     return () => {};
   },
   publishLevel: (level: Level) => pushLevel(level),
+  batteryNow: async () => charge,
+  /** Sets the laptop's charge, which the island reads on its next look. */
+  setCharge: (next: Charge | null) => void (charge = next),
+  islandDrag: async (start: boolean) => void islandDrags.push(start),
+  islandDrags: () => [...islandDrags],
+  islandReset: async () => {
+    islandResets += 1;
+    islandPlaced("top");
+  },
+  islandResets: () => islandResets,
+  islandPlacement: async (): Promise<IslandPlace> => "top",
+  onIslandPlaced: (handler: (place: IslandPlace) => void) => void (islandPlaced = handler),
+  /** As the core does after a drag. */
+  placeIsland: (place: IslandPlace) => islandPlaced(place),
   async onMedia(handler: (s: MediaSnapshot) => void) {
     pushMedia = handler;
     return () => {};
@@ -214,6 +237,18 @@ export const mock = {
     events = [...events, sampleEvent(crypto.randomUUID(), subject, "order")];
     return 1;
   },
+  /** Gmail through the Claude account finds one order. Set `claudeMailFails` to see it fail. */
+  activityClaudeMail: async () => {
+    claudeMailReads += 1;
+    if (claudeMailFails) throw new Error(claudeMailFails);
+    if (!events.some((e) => e.id === "claude-order")) {
+      const sourceRef = { account: "Gmail, through Claude", messageId: "claude-gmail:18c2", subject: "Your order has shipped", receivedAt: "2026-11-01T09:00:00Z", link: null };
+      events = [...events, sampleEvent("claude-order", "Order 112-4455", "order", { sourceRef })];
+    }
+    return "Read 2 messages through Claude, and found 1 plan.";
+  },
+  claudeMailReads: () => claudeMailReads,
+  failClaudeMail: (why: string) => void (claudeMailFails = why),
   /** A build with no registered app, so Google is reached through the Claude account. */
   noRegisteredApps: () => void (registered = false),
   builtInClients: async (): Promise<[boolean, boolean]> => [registered, registered],
@@ -340,12 +375,12 @@ export const mock = {
   voiceSpeak: async (text: string) => void spokenWords.push(text),
   voiceHeard: async () => heardWords,
   onWakeState: (handler: (status: WakeStatus) => void) => void (wakeState = handler),
-  onWakeHeard: (handler: (heard: { word: string; test: boolean; spokenMs: number }) => void) => void (wakeHeard = handler),
+  onWakeHeard: (handler: (heard: { word: string; test: boolean; afterMs: number }) => void) => void (wakeHeard = handler),
   setWakeState: (status: WakeStatus) => wakeState?.(status),
   wakeTaught: async (words: string[]) => words.filter((word) => taughtWords.has(word)),
   wakeTeachEnd: async (word: string | null) => void (word && taughtWords.add(word)),
   wakeForget: async (word: string) => void taughtWords.delete(word),
-  hearWake: (word: string, test = false, spokenMs = 700) => wakeHeard?.({ word, test, spokenMs }),
+  hearWake: (word: string, test = false, afterMs = 0) => wakeHeard?.({ word, test, afterMs }),
   setPacks: (ids: string[]) => {
     voicePacks.clear();
     ids.forEach((id) => voicePacks.add(id));

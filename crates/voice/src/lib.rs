@@ -8,6 +8,7 @@
 pub mod cloud;
 pub mod local;
 pub mod packs;
+pub mod recognizer;
 pub mod wake;
 pub mod windows_voice;
 
