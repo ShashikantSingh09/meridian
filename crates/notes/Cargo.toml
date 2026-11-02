@@ -1,0 +1,11 @@
+[package]
+name = "notes"
+description = "Notes of a call: who said what, a summary and the to-dos, kept in plain files."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+uuid = { version = "1", features = ["v4"] }

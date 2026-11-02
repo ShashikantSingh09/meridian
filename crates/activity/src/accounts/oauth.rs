@@ -1,6 +1,6 @@
 //! OAuth 2.0 authorization code with PKCE over a loopback redirect. The app
 //! opens the URL in the browser; everything else happens here. Client ids come
-//! from the user's configuration and none are compiled in.
+//! from whoever calls this: the app builds them in when a release is registered.
 
 use std::collections::HashMap;
 use std::fmt;

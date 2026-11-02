@@ -13,6 +13,8 @@ pub mod approvals;
 mod claude;
 mod codex;
 mod detect;
+pub mod google;
+pub mod once;
 mod process;
 pub mod running;
 pub mod watch;

@@ -10,6 +10,7 @@ Scope is M3. Anything that reads more of the desktop must extend this before it 
 | Chat text | Sent only to the provider the user picked. |
 | Prompts to agents | Sent over stdin, so they never appear in a process list. |
 | Microphone | Opens on a click or while the voice key is used. It stays open only if the user turns on wake words, which are off by default, and then the island shows a dot for as long as it is open. That listening happens on this PC, by comparing the chosen microphone with a pattern of the user's own voice. The sound is compared and dropped, a lesson's recordings stay in memory until the pattern is made, and nothing is sent until the word is found. After that, what is said goes to the hearing service, including anything said by mistake after a false wake. In a conversation the island shows Listening, with a stop button. Audio stays in memory and is never saved. With local hearing it stays on this PC. With a cloud service, the recorded turn is sent to that service at the end of the turn. |
+| Calls | Only on a click, never by itself, never by voice and never by the assistant. The island shows a red dot and a clock for as long as it records, over every other view. Microphone and PC sound go to files on this PC, then to the hearing service the user chose, then the audio is deleted. Local only refuses it. Pausing all monitoring stops it. It stops by itself after four hours. |
 | Assistant actions | Tools run on a loopback server with a random token in the path, reachable only by this app's own runs. Opening things, media, volume and reminders run without asking. Reading the screen, starting an agent, commands and edits always ask first. A file that runs a program cannot be opened by the open tool. |
 | Voice keys | Windows Credential Manager, like API keys. No command returns one to the webview. |
 | Spoken replies | With a cloud voice, the reply text goes to that service. Local only blocks every cloud voice and cloud hearing. |
@@ -17,6 +18,8 @@ Scope is M3. Anything that reads more of the desktop must extend this before it 
 | Excluded windows | Password managers, private browsing and sign-in windows can never be captured, whatever the user's own list says. Every visible window in the captured area is checked, and the capture is refused before any pixel is read. |
 | Clipboard, keystrokes | Not read. |
 | Mail and calendars | Read-only OAuth with minimum scopes. Read on this PC. Extracted events stay in a local SQLite file. Nothing here is sent to an AI provider. |
+| Mail and calendars through Claude | With no registered Google app, the user connects both in their own Claude account, which holds the token. The app never sees it and does not look for it. Read only when the user asks, in a run of Claude Code with one server, reading tools only, no shell, files or web, no hooks and no session history. What is read goes through Claude, and the answer goes to the engine the assistant uses. Local only refuses it. |
+| Notes | Plain JSON in the app's local folder, with no encryption beyond the user's account, like Claude Code's own transcripts. A transcript goes to the engine chosen for Chat for the summary, in a run with no tools, no hooks and no history. The assistant reads them only through `my_notes`. |
 | OAuth tokens | Windows Credential Manager, never in SQLite. Disconnect removes the tokens and the events owned by that account. A booking seen in two accounts is one row, see `KNOWN_ISSUES.md`. |
 | Providers over MCP | Read-only tools only, chosen by annotation and name, with write verbs refused whatever the server claims. What a service returns stays in memory, is drawn as text, and is never sent to a model. Tokens stay in Credential Manager. |
 | Chat and session history | Plain text in the webview's storage on this PC, like Claude Code's own transcripts. Images are never kept. Privacy can clear it. |
@@ -62,8 +65,18 @@ into calling a read-sounding tool, which a server could equally do anything with
 scopes. The DNS-rebinding case is not covered: a public name resolving to a private address passes the check.
 
 **Mail is untrusted.** Senders are not authenticated, so a forged message can create an event and a link. Links open only on
-a click, only for http and https, and each button shows its real host. Extraction uses no model, so mail cannot instruct
+a click, only for http and https, and each button shows its real host. Direct extraction uses no model, so that mail cannot instruct
 anything.
+
+**Mail read through Claude does reach a model**, so there it can try to instruct one. That run loads one server, can run only tools named
+get, list, search or find, refuses write verbs by name even if the user has allowed them everywhere, and has nothing else to reach for. Its
+one output is a reply. The assistant gets that reply, is told to report it and never act on it, and its commands still ask on the island.
+What remains: `open_website` and `search_web` run without asking, so text that fools both models could open a link, and an address can
+carry what the reply held. Reading verbs are trusted by name, as with Providers over MCP. Claude's own page calls its Calendar connector
+read-only, and the Gmail connector offers send and delete, so the rule here does not rest on that wording.
+
+**A call is other people's words.** Someone on a call could say something meant for the AI. The summary run has no tools, so the most it can do is write a bad summary, and what it sends back can only
+fill in a note's fields, as text. The assistant is told to report notes and never act on them, with the same limit as mail: `open_website` and `search_web` run without asking.
 
 **Downloaded speech packs are code the app loads.** The local engine is a DLL from sherpa-onnx's releases, loaded into the app's own
 process. It downloads only when asked for, over TLS, and must match a SHA-256 pinned in the source, so a changed release fails instead of

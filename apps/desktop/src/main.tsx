@@ -20,6 +20,7 @@ import {
   openPanel,
   pushNotice,
   refreshActivity,
+  refreshIntegrations,
   selectEngine,
   sendAgentChat,
   sendChat,
@@ -31,11 +32,13 @@ import {
 } from "./lib/store";
 import { bridge } from "./lib/bridge";
 import { watchTheme } from "./lib/theme";
+import { refreshNotes, wireNotes } from "./lib/notes";
 import { endConversation, say, startVoice, wireVoice } from "./lib/voice";
 
 createRoot(document.getElementById("root")!).render(<Island />);
 
 wireVoice();
+wireNotes();
 watchTheme(() => getState().settings);
 
 void boot();
@@ -66,6 +69,8 @@ if (import.meta.env.DEV) Object.assign(window, {
     openPanel,
     pushNotice,
     refreshActivity,
+    refreshIntegrations,
+    refreshNotes,
     setHovered,
     updateSettings,
   },

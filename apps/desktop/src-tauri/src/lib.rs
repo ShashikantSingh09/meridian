@@ -17,6 +17,7 @@ mod island;
 mod life;
 mod links;
 mod log;
+mod notetaker;
 mod secrets;
 mod settings;
 mod update;
@@ -142,6 +143,7 @@ fn setup(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     app.manage(following::state(app)?);
     app.manage(voice::state(app)?);
     app.manage(wake::Wake::default());
+    app.manage(notetaker::state(app)?);
     let path = settings::path(&handle).ok_or("no config directory")?;
     let settings = settings::load(&path);
     let placement = (settings.island_monitor.clone(), settings.island_align.clone());
@@ -247,6 +249,20 @@ pub fn run() {
             life::account_sync,
             life::open_url,
             life::built_in_clients,
+            notetaker::notes_state,
+            notetaker::notes_resume,
+            notetaker::notes_start,
+            notetaker::notes_stop,
+            notetaker::note_audio,
+            notetaker::notes_rename,
+            notetaker::notes_rename_speaker,
+            notetaker::notes_toggle_todo,
+            notetaker::notes_delete,
+            notetaker::notes_retry,
+            notetaker::notes_summarize,
+            notetaker::notes_markdown,
+            notetaker::notes_export,
+            life::claude_connectors,
             commands::screen_capture,
             commands::screen_crop,
             commands::screen_discard,

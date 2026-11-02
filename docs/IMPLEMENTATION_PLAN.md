@@ -30,6 +30,44 @@ and the update path. See `docs/DEVELOPMENT_LEDGER.md`.
 6. Add a panel pin, Markdown rendering and file attachments.
 7. Follow Codex the same way as Claude Code, then Gemini CLI and Aider.
 
+## Notes: call notes, built
+
+**Goal.** Press Record on a call. Afterwards there is a transcript of who said what, in Hindi, English or a mix, with a summary and the to-dos, and the assistant can
+answer from it. What Coucou does is in `docs/research/NOTETAKER_REVIEW.md`. The boards were approved on 2026-11-02 and built. What is left to prove is in `docs/KNOWN_ISSUES.md`.
+
+**The same as Coucou.** A click starts it and nothing starts by itself. Microphone and system sound are recorded apart, the audio is deleted once the transcript is written, a
+failure keeps the audio for Try again, and a crash is recovered at the next launch. Lines break on a pause, echo is dropped by comparing words, and summaries invent
+nothing. Rename, tick to-dos, Copy as Markdown, Export, and Delete with a confirmation.
+
+**Different on purpose.**
+
+| Coucou | Meridian | Why |
+|---|---|---|
+| Parakeet on the PC | The hearing already chosen in Voice: ElevenLabs or Deepgram | Parakeet has no Hindi, and it is a 670 MB download |
+| Diarizer model on the PC | The service gives each word a speaker | No model to ship |
+| Words live while recording | Level meters and a clock | Live words would be paid for twice, about $0.44 more per hour |
+| Claude only | The engine chosen for Chat | Same rule as everything else here |
+| `cpal` for system sound | WASAPI through `windows-rs`, already in `crates/media` | No new dependency, and silence can be filled to keep one clock |
+| A pill | The island, with a red dot that stays over every view | The island is this app. Recording must never be hidden |
+| Nothing for the assistant | A read-only `my_notes` tool | "What did we decide on that call?" is the point of an assistant |
+
+**Left out, and when to add it.** AI correction of misheard words and a learned vocabulary, once real transcripts show how often they are wrong. Editing one line. Voice to start or
+stop, which needs a thought about consent. Local hearing, which is English only and has no speakers. Call detection, which Coucou does not have either.
+
+**Build order.** Each step ends in something tested.
+
+1. `crates/notes`, pure logic: the model, words to lines, echo, speakers, Markdown, the summary request and reply, the store on disk.
+2. System sound in `crates/media`: 16 kHz mono, with silence filled in by the clock. Measure what loopback delivers in silence.
+3. `transcribe_words` in `crates/voice`: word times and speakers from both services, with a timeout that suits a long file.
+4. `src-tauri/notes.rs`: start, stop, microphone chunks from the page, crash recovery, a four-hour limit, wake words paused, and refusal in Local only or with monitoring paused.
+5. Summaries through the Chat engine, with the transcript marked as content from other people.
+6. The Notes tab, the island's red dot and clock, and the Notes ready notice.
+7. `my_notes` for the assistant.
+8. Threat model, privacy page, known issues, a decision, and the ledger.
+
+**Proof before it counts as done.** Unit tests on all of step 1. A silent run and a run with sound through the real loopback. A short real recording, with the owner's say-so
+because it spends their ElevenLabs balance. Each tab compared with its board in the real window.
+
 ## M5: voice
 
 Push to talk first, with a local engine by default. Then text to speech with interruption, then voice commands. Wake word

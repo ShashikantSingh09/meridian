@@ -2,7 +2,7 @@ import { spring } from "@meridian/design-system/motion";
 import { motion } from "motion/react";
 import { useEffect } from "react";
 import { Face } from "../island/faces";
-import { Clock, greetingWord } from "../island/views";
+import { Clock, RecordingClock, greetingWord } from "../island/views";
 import { Icon, type IconName } from "../lib/icons";
 import { closePanel, dismissError, setTab, useApp, type Tab } from "../lib/store";
 import { Agents } from "./Agents";
@@ -11,6 +11,7 @@ import { Home } from "./Home";
 import { Inbox } from "./Inbox";
 import { Media } from "./Media";
 import { MyDay } from "./MyDay";
+import { Notes } from "./Notes";
 import { SettingsPage } from "./Settings";
 import { Welcome } from "./Welcome";
 import "./pages.css";
@@ -21,6 +22,7 @@ const NAV: { tab: Tab; icon: IconName; label: string }[] = [
   { tab: "agents", icon: "agents", label: "Agents" },
   { tab: "media", icon: "music", label: "Media" },
   { tab: "day", icon: "calendar", label: "My day" },
+  { tab: "notes", icon: "note", label: "Notes" },
   { tab: "inbox", icon: "bell", label: "Notifications" },
   { tab: "settings", icon: "settings", label: "Settings" },
 ];
@@ -31,6 +33,7 @@ const PAGES: Record<Tab, () => React.JSX.Element> = {
   agents: Agents,
   media: Media,
   day: MyDay,
+  notes: Notes,
   inbox: Inbox,
   settings: SettingsPage,
 };
@@ -56,6 +59,8 @@ export function Panel() {
   const feeling = useApp((s) => s.feeling);
   const running = useApp((s) => s.sessions.filter((x) => x.status === "running" || x.status === "waiting").length);
   const onboarded = useApp((s) => s.settings.onboarded);
+  const wakeOn = useApp((s) => s.wake.state === "listening");
+  const recording = useApp((s) => s.notes.notes.find((n) => n.id === s.notes.recording));
   const Page = onboarded ? PAGES[tab] : Welcome;
   const title = !onboarded ? "Welcome" : tab === "home" ? greetingWord() : NAV.find((n) => n.tab === tab)?.label;
   const date = new Date().toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
@@ -73,6 +78,8 @@ export function Panel() {
       <header className="panel-head">
         <Face id={face} mood={feeling ?? "rest"} scale={0.62} />
         <h1 className="grow truncate">{title}</h1>
+        {recording && <RecordingClock since={recording.startedAt} />}
+        {wakeOn && <span className="wake-dot-head" role="img" aria-label="Listening for a wake word" title="Listening for a wake word" />}
         <span className="meta">{date}</span>
         <Clock className="panel-time tabular" />
         <button className="round" aria-label="Close" title="Close (Esc)" onClick={closePanel}>

@@ -147,6 +147,8 @@ pub struct Conditions {
     pub locked: bool,
     pub pause_during_calls: bool,
     pub others_on_microphone: bool,
+    /// A call is being recorded, which has the microphone.
+    pub recording_notes: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -164,6 +166,9 @@ pub fn wanted(c: &Conditions) -> Wanted {
     }
     if c.monitoring_paused {
         return Wanted::Paused("Paused with all monitoring.");
+    }
+    if c.recording_notes {
+        return Wanted::Paused("Paused while a call is recording.");
     }
     if c.pause_when_locked && c.locked {
         return Wanted::Paused("Paused while the screen is locked.");
@@ -299,6 +304,7 @@ mod tests {
         locked: false,
         pause_during_calls: true,
         others_on_microphone: false,
+        recording_notes: false,
     };
 
     #[test]
@@ -321,6 +327,7 @@ mod tests {
             Conditions { monitoring_paused: true, ..ON },
             Conditions { locked: true, ..ON },
             Conditions { others_on_microphone: true, ..ON },
+            Conditions { recording_notes: true, ..ON },
             Conditions { charger_only: true, on_battery: true, ..ON },
         ] {
             assert!(matches!(wanted(&paused), Wanted::Paused(why) if !why.is_empty()), "{paused:?}");

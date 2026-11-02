@@ -490,6 +490,34 @@ side by side in the real window before it counts as done.
 Apple-style glass, themes, limits and models, the assistant's name and personality, and wake words are on the canvas and held for review.
 Wake words would reverse the part of D51 that left them out, and only because the owner asked for them.
 
+## D61. Notes use the hearing service, not a model on the PC
+
+Coucou's Notetaker runs Parakeet and a diarizer on the PC. Parakeet has no Hindi, Hindi is required here, and it is a 670 MB download. Meridian's local hearing is English only and has
+no speakers. So a call goes to the hearing the user chose, and ElevenLabs Scribe gives every word a time and a speaker. The cost is that a call leaves the PC, so the first screen says
+so before anything records, local only refuses it, and the audio is deleted once the transcript is safe.
+
+The microphone and the PC's sound stay two recordings, each sent on its own. That is what makes You certain and the others separable, and it means a call is billed twice its length.
+Both are written as raw 16-bit files, with no header to finish, so a crash loses at most a moment. Windows mixes the PC's sound down to 16 kHz by itself, which keeps resampling out of this
+code, and anything it does not deliver is filled with silence by the clock, so the two stay in step. Live words are left out, because they would be paid for a second time.
+
+Summaries go to the engine chosen for Chat, in a run with no tools, no hooks and no session history. A transcript is other people's words, so it is marked as content. Starting is a click
+and nothing else, and the island shows it for as long as it runs, so nothing here can run unseen.
+
+## D60. Gmail and Calendar can go through the user's Claude account
+
+Reading Google directly needs one app registration, and the owner has no Google Cloud console access. Their Claude account already has a Gmail
+connector, and Claude Code can use it. Taking the token from Claude Code is ruled out, so the one way in is to ask Claude Code itself. The
+connectors stay out of the assistant's own run, which stays strict and fast. Two tools start a separate run for each question instead.
+
+That run is the safety boundary, because Gmail's connector can send and delete. `allowedMcpServers` loads only that service's address, so the
+user's plugins and other servers never start. `dontAsk` refuses anything not allowed, the allow list is tools named get, list, search or find,
+and write verbs are refused by name, because a refusal beats a tool the user allowed everywhere. Tools are empty, so there is no shell, file or
+web access. Hooks are off, or a memory plugin would keep the mail, and so is session history. Rules follow names rather than a list of tools
+because Calendar's tools cannot be seen until it is connected, and this also refuses tools added later.
+
+The price is that mail goes through Claude, each answer takes seconds, and each uses plan usage. So it reads only when asked, and the
+direct route stays for any build with a registered app.
+
 ## D59. Wake words learn the user's voice, and the Windows recognizer is gone
 
 Replaces D55 and D57. The Windows recognizer could not be made reliable on the owner's PC. Over a day of traces it heard them in some runs and nothing in others,

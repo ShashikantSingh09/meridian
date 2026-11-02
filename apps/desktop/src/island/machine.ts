@@ -16,7 +16,8 @@ export type IslandView =
   | "screen"
   | "media"
   | "live"
-  | "error" | "level" | "voice";
+  | "error" | "level" | "voice"
+  | "note";
 
 export interface SessionSummary {
   id: string;
@@ -48,6 +49,8 @@ export interface Notice {
   sticky?: boolean;
   /** A session has ended, so the island shows what it did. */
   finished?: boolean;
+  /** Notes are ready, so the island offers to open them. */
+  note?: string;
 }
 
 export interface Suggestion {
@@ -65,6 +68,8 @@ export interface IslandError {
   retry?: () => void;
   /** An agent stopped, so the island says where and can open it. */
   sessionId?: string;
+  /** A note could not be written, so the island can open it. */
+  note?: string;
 }
 
 export interface Snapshot {
@@ -83,6 +88,10 @@ export interface Snapshot {
   level?: boolean;
   /** A spoken conversation is going on. */
   voice?: boolean;
+  /** A call is being recorded. */
+  recording?: boolean;
+  /** A recorded call is being written up. */
+  writingNote?: boolean;
 }
 
 const ACTIVE: ReadonlySet<SessionStatus> = new Set(["starting", "running", "waiting"]);
@@ -118,6 +127,8 @@ export function deriveView(s: Snapshot): IslandView {
   if (s.chatPending) return "thinking";
   if (s.live.length > 0) return "live";
   if (s.mediaPlaying) return "media";
+  // Anything above can take the island, and the red dot stays on show over all of it.
+  if (s.recording || s.writingNote) return "note";
   return "idle";
 }
 
@@ -137,6 +148,7 @@ const PANELS: Record<string, Geometry> = {
   agents: { w: 820, h: 600, r: 32 },
   media: { w: 820, h: 600, r: 32 },
   day: { w: 820, h: 600, r: 32 },
+  notes: { w: 820, h: 600, r: 32 },
   inbox: { w: 820, h: 600, r: 32 },
   settings: EXPANDED,
 };
@@ -159,6 +171,7 @@ const SIZES: Record<IslandView, Geometry> = {
   level: { w: 300, ...BAR },
   voice: { w: 440, h: 96, r: 26 },
   error: { w: 392, h: 58, r: 21 },
+  note: { w: 190, ...BAR },
 };
 
 const IDLE_HOVER: Geometry = { w: 380, h: 118, r: 26 };
@@ -191,6 +204,10 @@ const STOPPED: Geometry = { w: 344, h: 164, r: 22 };
 const IDLE_CLOCK: Geometry = { w: 148, h: 34, r: 15 };
 const SLIVER: Geometry = { w: 96, h: 6, r: 3 };
 const REMINDER: Geometry = { w: 420, h: 112, r: 24 };
+const NOTE_STOP: Geometry = { w: 262, ...BAR };
+const NOTE_WRITING: Geometry = { w: 250, ...BAR };
+const NOTE_READY: Geometry = { w: 372, ...BAR };
+const NOTE_FAILED: Geometry = { w: 330, ...BAR };
 
 export interface GeometryContext {
   hovered: boolean;
@@ -221,6 +238,12 @@ export interface GeometryContext {
   finished?: "message" | "brief";
   /** What is on show is an agent that stopped. */
   stopped?: boolean;
+  /** Nothing is recording, so the note view is only saying it is writing. */
+  noteWriting?: boolean;
+  /** The notice on show says some notes are ready. */
+  noteReady?: boolean;
+  /** The error on show is a note that could not be written. */
+  noteFailed?: boolean;
 }
 
 export function geometryFor(view: IslandView, ctx: GeometryContext): Geometry {
@@ -239,6 +262,9 @@ export function geometryFor(view: IslandView, ctx: GeometryContext): Geometry {
   if (view === "working" && ctx.approval) return { ...APPROVAL, h: APPROVAL.h + others };
   if (view === "working" && ctx.hovered && ctx.todos) return { w: 324, h: TODO_BASE + Math.min(ctx.todos, TODO_MAX_ROWS) * TODO_ROW, r: 22 };
   if (view === "working" && ctx.hovered) return STAGES;
+  if (view === "note") return ctx.noteWriting ? NOTE_WRITING : ctx.hovered ? NOTE_STOP : SIZES.note;
+  if (view === "notification" && ctx.noteReady) return NOTE_READY;
+  if (view === "error" && ctx.noteFailed) return NOTE_FAILED;
   if (view === "notification" && ctx.finished) return ctx.finished === "message" ? FINISHED : FINISHED_BRIEF;
   if (view === "error" && ctx.stopped) return STOPPED;
   if (view === "media" && ctx.mediaOpen) return MEDIA_OPEN;

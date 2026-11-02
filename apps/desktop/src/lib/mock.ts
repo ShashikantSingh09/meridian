@@ -24,6 +24,9 @@ import type {
   Settings,
   SettingsChange,
   Level,
+  Note,
+  NoteLevels,
+  NotesState,
   Track,
   WakeStatus,
 } from "./types";
@@ -38,9 +41,35 @@ const providers: ProviderInfo[] = [
 ];
 
 let settings: Settings = { ...defaultSettings, onboarded: true };
+let noteList: NotesState = { notes: [], recording: null, working: [] };
+let notesChanged = () => {};
+let noteWritten: (id: string) => void = () => {};
+let noteFailed: (failed: { id: string; title: string; why: string }) => void = () => {};
+let noteLevels: ((levels: NoteLevels) => void) | null = null;
+let exportedTo = "";
+
+const WRITTEN: Pick<Note, "speakers" | "lines"> = {
+  speakers: [
+    { id: "me", name: "You", color: 0, you: true },
+    { id: "p2", name: "Person 2", color: 1, you: false },
+    { id: "p3", name: "Person 3", color: 2, you: false },
+  ],
+  lines: [
+    { id: "a", speaker: "me", start: 4, end: 9, text: "Let's start with the launch date. Is Friday still okay?" },
+    { id: "b", speaker: "p2", start: 11, end: 16, text: "चेकआउट टेस्ट अभी बाकी है, Thursday तक हो जाएगा।" },
+    { id: "c", speaker: "p3", start: 19, end: 23, text: "Then Friday works, as long as the payment fix goes in first." },
+    { id: "d", speaker: "me", start: 27, end: 30, text: "ठीक है। I will tell the client today." },
+  ],
+};
+
+function changeNote(id: string, change: Partial<Note>) {
+  noteList = { ...noteList, notes: noteList.notes.map((note) => (note.id === id ? { ...note, ...change } : note)) };
+  notesChanged();
+}
 let emit: (e: AgentEnvelope) => void = () => {};
 let authed = true;
 let pushReminders: (r: Reminder[]) => void = () => {};
+let registered = true;
 let accounts: ConnectedAccount[] = [];
 const known = new Set<string>();
 const voicePacks = new Set<string>();
@@ -185,6 +214,79 @@ export const mock = {
     events = [...events, sampleEvent(crypto.randomUUID(), subject, "order")];
     return 1;
   },
+  /** A build with no registered app, so Google is reached through the Claude account. */
+  noRegisteredApps: () => void (registered = false),
+  builtInClients: async (): Promise<[boolean, boolean]> => [registered, registered],
+  claudeConnectors: async (): Promise<[boolean, boolean]> => [true, false],
+  notesState: async () => ({ ...noteList }),
+  onNotesChanged: (handler: () => void) => void (notesChanged = handler),
+  onNoteWritten: (handler: (id: string) => void) => void (noteWritten = handler),
+  onNoteFailed: (handler: (failed: { id: string; title: string; why: string }) => void) => void (noteFailed = handler),
+  onNoteLevels: (handler: (levels: NoteLevels) => void) => {
+    noteLevels = handler;
+    return () => void (noteLevels = null);
+  },
+  noteStart: async () => {
+    if (settings.voiceHearing === "local") throw "Notes need ElevenLabs or Deepgram. Change it in Settings, Voice.";
+    const id = crypto.randomUUID();
+    const note: Note = { id, title: "Call · 2 Nov, 4:23 pm", titleEdited: false, startedAt: Date.now(), endedAt: null, status: "recording", speakers: [], lines: [], summary: null, keyPoints: [], todos: [], error: null };
+    noteList = { ...noteList, notes: [note, ...noteList.notes], recording: id };
+    notesChanged();
+    return id;
+  },
+  noteStop: async () => {
+    const id = noteList.recording;
+    if (!id) return;
+    noteList = { ...noteList, recording: null, working: [...noteList.working, id] };
+    changeNote(id, { status: "writing", endedAt: Date.now() });
+  },
+  /** What the hearing service would do when a recording stops. */
+  finishNote: (lines = true) => {
+    const id = noteList.working[0]!;
+    noteList = { ...noteList, working: noteList.working.filter((other) => other !== id) };
+    changeNote(id, { status: "ready", ...(lines ? WRITTEN : { speakers: [WRITTEN.speakers[0]!], lines: [] }) });
+    noteWritten(id);
+  },
+  failNote: (why: string) => {
+    const id = noteList.working[0]!;
+    noteList = { ...noteList, working: noteList.working.filter((other) => other !== id) };
+    changeNote(id, { status: "failed", error: why });
+    noteFailed({ id, title: noteList.notes.find((note) => note.id === id)!.title, why });
+  },
+  setNoteLevels: (levels: NoteLevels) => noteLevels?.(levels),
+  noteRename: async (id: string, title: string) => changeNote(id, { title, titleEdited: true }),
+  noteRenameSpeaker: async (id: string, speaker: string, name: string) => {
+    const note = noteList.notes.find((n) => n.id === id)!;
+    changeNote(id, { speakers: note.speakers.map((s) => (s.id === speaker ? { ...s, name } : s)) });
+  },
+  noteToggleTodo: async (id: string, todo: string) => {
+    const note = noteList.notes.find((n) => n.id === id)!;
+    changeNote(id, { todos: note.todos.map((t) => (t.id === todo ? { ...t, done: !t.done } : t)) });
+  },
+  noteDelete: async (id: string) => {
+    noteList = { ...noteList, notes: noteList.notes.filter((note) => note.id !== id) };
+    notesChanged();
+  },
+  noteRetry: async (id: string) => {
+    noteList = { ...noteList, working: [...noteList.working, id] };
+    changeNote(id, { status: "writing", error: null });
+  },
+  noteSummarize: async (id: string) => {
+    const note = noteList.notes.find((n) => n.id === id)!;
+    changeNote(id, {
+      title: note.titleEdited ? note.title : "Launch date and checkout",
+      summary: "The launch moves to Friday 6 November, so the payment fix ships first. Priya finishes the checkout test by Thursday, and you tell the client today.",
+      keyPoints: ["The checkout test is the only thing holding the launch", "The payment fix goes in before anything else"],
+      todos: [
+        { id: "t1", text: "Tell the client the new date", owner: "You", due: "today", done: false },
+        { id: "t2", text: "Finish the checkout test", owner: "Priya", due: "Thursday", done: false },
+        { id: "t3", text: "Check the invoice template", owner: null, due: null, done: false },
+      ],
+    });
+  },
+  noteMarkdown: async (id: string) => `# ${noteList.notes.find((n) => n.id === id)!.title}\n`,
+  noteExport: async (path: string) => void (exportedTo = path),
+  exportedTo: () => exportedTo,
   accountsList: async () => accounts,
   accountConnect: async (provider: ConnectedAccount["provider"]) => {
     const account = { id: `${provider}:me`, provider, email: "me@example.com", scopes: [], connectedAt: "2026-10-30T09:00:00Z", lastSyncAt: null };

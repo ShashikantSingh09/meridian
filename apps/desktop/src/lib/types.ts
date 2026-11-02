@@ -199,6 +199,8 @@ export interface Settings {
   voiceProvider: string;
   voiceId: string | null;
   voiceHearing: string;
+  /** Writes the summary as soon as a call's transcript is done. */
+  notesSummary: boolean;
   voiceInterrupt: boolean;
   assistantName: string;
   assistantPersonality: string;
@@ -241,6 +243,59 @@ export interface Settings {
  *  Google or Microsoft connector; the rest are MCP servers. */
 export type IntegrationAccess = "open" | "registeredApp" | "tokenOrApp" | "account";
 
+export type NoteStatus = "recording" | "writing" | "ready" | "failed";
+
+export interface NoteSpeaker {
+  id: string;
+  name: string;
+  color: number;
+  you: boolean;
+}
+
+export interface NoteLine {
+  id: string;
+  speaker: string;
+  start: number;
+  end: number;
+  text: string;
+}
+
+export interface NoteTodo {
+  id: string;
+  text: string;
+  owner: string | null;
+  due: string | null;
+  done: boolean;
+}
+
+export interface Note {
+  id: string;
+  title: string;
+  titleEdited: boolean;
+  startedAt: number;
+  endedAt: number | null;
+  status: NoteStatus;
+  speakers: NoteSpeaker[];
+  lines: NoteLine[];
+  summary: string | null;
+  keyPoints: string[];
+  todos: NoteTodo[];
+  error: string | null;
+}
+
+export interface NotesState {
+  notes: Note[];
+  /** The note being recorded. */
+  recording: string | null;
+  /** Notes whose transcript or summary is being written. */
+  working: string[];
+}
+
+export interface NoteLevels {
+  you: number;
+  others: number;
+}
+
 export interface Integration {
   id: string;
   name: string;
@@ -251,6 +306,8 @@ export interface Integration {
   account: string | null;
   /** One click works. False until the publisher has registered this service once. */
   ready: boolean;
+  /** Reached through the user's Claude account, which holds the sign-in, and whether it is connected there. */
+  viaClaude?: "on" | "off";
 }
 
 export interface FetchedItem {
@@ -414,6 +471,7 @@ export const defaultSettings: Settings = {
   voiceProvider: "windows",
   voiceId: null,
   voiceHearing: "local",
+  notesSummary: true,
   voiceInterrupt: true,
   assistantName: "Meridian",
   assistantPersonality: "",

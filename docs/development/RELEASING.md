@@ -84,8 +84,9 @@ the IDs go in at build time. Until then those rows say they are not available ye
 | Asana | `MERIDIAN_CLIENT_ASANA`, `MERIDIAN_SECRET_ASANA` |
 | HubSpot | `MERIDIAN_CLIENT_HUBSPOT`, `MERIDIAN_SECRET_HUBSPOT` |
 | Box | `MERIDIAN_CLIENT_BOX`, `MERIDIAN_SECRET_BOX` |
+| Figma | `MERIDIAN_CLIENT_FIGMA`, `MERIDIAN_SECRET_FIGMA` |
 
-The other 16 services register themselves, and need nothing.
+The other 15 services register themselves, and need nothing.
 
 Google caps an unverified app at 100 new users. Google requires verification of a published
 app for `gmail.readonly`, including a security assessment, so plan for weeks.

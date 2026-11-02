@@ -14,6 +14,7 @@ use voice::wake::{self, Conditions, Spotter, Wanted};
 
 use crate::commands::Core;
 use crate::island;
+use crate::notetaker::NoteTaker;
 
 const TICK: Duration = Duration::from_secs(1);
 /// How long the Test button keeps listening.
@@ -194,6 +195,7 @@ pub fn spawn(app: AppHandle) {
                 locked: active && wake::screen_locked(),
                 pause_during_calls: settings.wake_pause_calls,
                 others_on_microphone: active && wake::others_on_microphone(&this_app),
+                recording_notes: app.state::<NoteTaker>().is_recording(),
             });
 
             let asked = Asked { words, easiness: settings.wake_sensitivity.clone(), lessons: state.lessons.load(Ordering::Relaxed) };

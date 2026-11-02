@@ -7,3 +7,6 @@ target/
 test-results/
 playwright-report/
 apps/desktop/src-tauri/gen/
+
+# Registered app IDs, which go to the build and never in the repository.
+.oauth.local

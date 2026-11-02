@@ -1170,6 +1170,25 @@ test.describe("panel", () => {
     await expect(page.getByRole("button", { name: "Disconnect" })).toHaveCount(0);
   });
 
+  test("with no registered app, Gmail and Calendar go through the Claude account", async ({ page }) => {
+    await page.evaluate(async () => {
+      const app = window as never as { __mock: { noRegisteredApps(): void }; __meridian: { refreshIntegrations(): Promise<void> } };
+      app.__mock.noRegisteredApps();
+      await app.__meridian.refreshIntegrations();
+    });
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await page.getByRole("button", { name: "Providers", exact: true }).click();
+    await page.locator(".link-tile", { hasText: "Gmail" }).click();
+    await expect(page.locator(".link-detail")).toContainText("Connected through your Claude account");
+    await expect(page.locator(".link-detail")).toContainText("goes through Claude");
+    await expect(page.getByRole("button", { name: "Disconnect" })).toHaveCount(0);
+    await page.getByRole("button", { name: "Google Calendar", exact: true }).click();
+    await expect(page.getByRole("button", { name: "Connect Google Calendar" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Check again" })).toBeVisible();
+    await page.getByRole("button", { name: "Outlook", exact: true }).click();
+    await expect(page.locator(".link-detail")).toContainText("Not available yet");
+  });
+
   test.describe("Claude Code as a chat engine", () => {
     test.beforeEach(async ({ page }) => {
       await page.getByRole("button", { name: "Chat", exact: true }).click();

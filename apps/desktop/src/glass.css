@@ -41,21 +41,21 @@
 
 /* The dock floats on the page rather than taking a strip of it. */
 .panel .page {
-  padding-bottom: 66px;
+  padding-bottom: 78px;
 }
 
 .dock {
   position: absolute;
   left: 50%;
-  bottom: 10px;
+  bottom: 13px;
   z-index: 2;
   width: max-content;
   height: auto;
-  padding: 4px;
+  padding: 5px;
   gap: 2px;
   transform: translateX(-50%);
   border: 0;
-  border-radius: 28px;
+  border-radius: 27px;
   background: var(--float);
   box-shadow: var(--float-edge);
   backdrop-filter: var(--frost);

@@ -166,8 +166,8 @@ function microphoneSettings(): MediaTrackConstraints {
   return { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true, ...(chosen ? { deviceId: { exact: chosen } } : {}) };
 }
 
-async function captureMicrophone(handle: (chunk: Int16Array) => void): Promise<Capture> {
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: microphoneSettings() });
+async function captureMicrophone(handle: (chunk: Int16Array) => void, settings = microphoneSettings()): Promise<Capture> {
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: settings });
   let context: AudioContext | undefined;
   try {
     context = new AudioContext({ sampleRate: 16000 });
@@ -205,6 +205,28 @@ async function openEar() {
   } finally {
     earOpening = false;
   }
+}
+
+let noteMicrophone: Capture | null = null;
+
+/** Sends the microphone to the note being recorded. The core drops anything before it starts.
+ *  A chosen microphone that is gone costs nobody a call, so the Windows default stands in. */
+export async function openNoteMicrophone(onStopped: () => void, onDefault: () => void) {
+  if (noteMicrophone) return;
+  const send = (chunk: Int16Array) => void bridge.noteAudio(new Uint8Array(chunk.buffer.slice(0)));
+  noteMicrophone = await captureMicrophone(send).catch((err: Error) => {
+    if (err.name !== "OverconstrainedError") throw err;
+    onDefault();
+    const { deviceId: _unplugged, ...anyMicrophone } = microphoneSettings();
+    return captureMicrophone(send, anyMicrophone);
+  });
+  // A headset unplugged in the middle of a call.
+  noteMicrophone.stream.getAudioTracks()[0]?.addEventListener("ended", onStopped);
+}
+
+export function closeNoteMicrophone() {
+  if (noteMicrophone) closeMicrophone(noteMicrophone.stream, noteMicrophone.context);
+  noteMicrophone = null;
 }
 
 function closeEar() {

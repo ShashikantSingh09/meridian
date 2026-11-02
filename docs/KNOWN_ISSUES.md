@@ -20,9 +20,9 @@ The 20 criteria from the enhancement brief, as they stand.
 | 9 | Screen awareness pausable | Done | Settings, tray, tests |
 | 10 | Media sessions detected | Done | Seen in the real app with JioSaavn really playing, with its title, artist and album art. Spotify, Apple Music and VLC not tried |
 | 11 | Media controls | Done | Live: controls reached the session |
-| 12 | Connect email accounts | **Not verified** | Tested against canned servers. Needs your app registration |
+| 12 | Connect email accounts | Gmail done, through the Claude account | Live on 2026-11-01: a real question to the real assistant. The direct route is tested against canned servers and needs an app registration |
 | 13 | Booking and delivery extraction | Done | Live from a pasted email, plus fixtures. Not from a real mailbox |
-| 14 | Connect calendars | **Not verified** | As 12 |
+| 14 | Connect calendars | **Not verified** | Built like Gmail, but no calendar has been connected. Direct route as 12 |
 | 15 | Meetings and dates on the island | Done, from local events | Live with a reminder. Not from a real calendar |
 | 16 | Activity timeline | Done | Live and UI tests |
 | 17 | Prioritized and deduplicated | Done | Unit tests on the engine and store, live reschedule |
@@ -37,7 +37,7 @@ The 20 criteria from the enhancement brief, as they stand.
 | Reverse engineer TwoCode and compare | Done | `docs/research/TWOCODE_TEARDOWN.md`. Static only, the app was never run |
 | macOS-style notch, not a pill | Done | Real app on this desktop, UI tests for shape and edge |
 | Providers column under Settings, MCP vendors, animated results | Done, against a local server | 144 tests, 56 of them over real sockets, plus UI tests. **No real vendor account was used** |
-| Gmail in that column | Built on the existing connector | Same state as criterion 12 |
+| Gmail in that column | Shows connected through the Claude account, with no feed, because it reads only when asked | Same state as criterion 12 |
 | Rendering problems | Fixed the ones found. See below | Screenshots of every state, no console errors |
 | Shippable to customers | Not yet. See Shipping | Installer built and tested: installs, runs, uninstalls cleanly, keeps settings |
 
@@ -56,7 +56,7 @@ pointer. Tool names were capitalised. A button stretched across My day.
 | Animated Claude icon while it works | Done, with our own spark | D34. The official logo needs Anthropic's permission |
 | Flight countdown and time to landing | Done, from the schedule | 18 unit tests on the stages. **No real flight email tried** |
 | Other live notifications | Parcels, meetings, tickets, focus timer | Unit tests |
-| Browser sign-in, no keys | Done for 16 services and for Claude, ChatGPT, OpenRouter | **No real account has signed in through it.** Gmail and six others wait on registration |
+| Browser sign-in, no keys | Reaches the real sign-in page for 15 services, plus Claude, ChatGPT, OpenRouter | **No real account has signed in through it.** Outlook and six others wait on registration. Gmail and Calendar connect through the Claude account |
 
 **Designed but not built.** Food and cab tracking, because those apps publish no live position to a desktop. The 5-hour usage
 ring, because it needs a status line script installed in Claude Code. Trains, because the extractor does not read them yet.
@@ -110,6 +110,30 @@ What stands between this build and a stranger installing it. Only the owner can 
 | Real media players | Tested with a silent session of its own. Spotify, browsers and VLC not tried, so artwork in particular is unproven. | Play something |
 | Focus return after Esc | Implemented. The check is unreliable while someone else is using the machine. | Try it |
 | Concurrent live agents | Multitask view is tested with sample data only. | Start two sessions |
+
+## Notes: real limits
+
+- **Not tried on a real call.** It was tested on a made-up call in English Windows voices. Speaker separation on real voices, and Hindi, are unmeasured.
+- **A call leaves the PC.** Audio goes to the hearing service and the transcript to the AI chosen for Chat. Local only refuses both, so Notes do not work in it.
+- **Hearing on this PC cannot do this.** It is English only and has no speakers, so Notes need ElevenLabs or Deepgram.
+- **Cost.** Both recordings are billed in full, about $0.44 per hour of call at ElevenLabs' list price. A side with no sound is not sent.
+- **Deepgram has never been run.** Its reply is parsed from documented examples.
+- **No words while recording.** They would cost a second pass.
+- **Summaries need Claude Code or an AI model.** With Codex chosen in Chat, the button says so.
+- **The other side must play through the default output.** A call on a device that is not the Windows default is not heard, though a change of default mid-call is followed. DRM-protected sound is
+  silent to loopback.
+- **Others' voices through speakers.** An echo is dropped by comparing words, which is unmeasured. Headphones avoid it.
+- **Your own assistant is recorded too** if it speaks during a call, because it plays through the same output.
+- **Consent is the user's job.** The app reminds them. It cannot know the law where they are, and nothing tells the other people.
+
+## Gmail and Calendar through Claude: real limits
+
+- **Claude Code has to be signed in** to the Claude account that holds the connector, or the row says to connect it.
+- **Only on request.** An answer takes 7 to 15 seconds and uses plan usage, about 0.11 USD equivalent for a broad mail search on 2026-11-01. So
+  nothing polls, mail raises no alerts, and My day is not fed.
+- **Built on one version.** The server addresses are fixed in `google.rs`, and the flags and settings it depends on were proved on Claude Code
+  2.1.316. If an address moves the row says not connected, which fails closed but says the wrong thing.
+- **A link can open unasked** if a crafted email fools two models. See `docs/security/THREAT_MODEL.md`.
 
 ## Personal activity: real limits
 

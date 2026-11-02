@@ -3,8 +3,8 @@
 
 use serde::Serialize;
 
-/// What connecting takes. Anonymous discovery probes on 2026-10-30 sorted the
-/// rows; none of this was tried with a real account.
+/// What connecting takes. The real flow, run as far as the browser on 2026-11-01,
+/// sorted the rows. None of this was tried with a real account.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Access {
@@ -70,7 +70,7 @@ static CATALOG: [Service; 22] = [
     open("granola", "Granola", "Work", "Your recent meeting notes.", "https://mcp.granola.ai/mcp", &[], &["list_meetings"]),
     open("sentry", "Sentry", "Development", "Open issues from your projects.", "https://mcp.sentry.dev/mcp", &["org:read"], &["find_issues", "search_issues"]),
     open("vercel", "Vercel", "Development", "Recent deployments and projects.", "https://mcp.vercel.com", &[], &["list_deployments", "list_projects"]),
-    open("figma", "Figma", "Design", "The account you signed in with.", "https://mcp.figma.com/mcp", &[], &["whoami"]),
+    app("figma", "Figma", "Design", "The account you signed in with.", "https://mcp.figma.com/mcp", &[], &["whoami"]),
     open("canva", "Canva", "Design", "Designs in your folders.", "https://mcp.canva.com/mcp", &["profile:read", "design:meta:read", "folder:read"], &["list-folder-items"]),
     open("dropbox", "Dropbox", "Files", "Files in your Dropbox.", "https://mcp.dropbox.com/mcp", &["account_info.read", "files.metadata.read"], &["list_folder"]),
     open("stripe", "Stripe", "Payments", "Customers and your balance.", "https://mcp.stripe.com", &[], &["list_customers", "retrieve_balance"]),
@@ -120,7 +120,7 @@ mod tests {
         assert_eq!(find("linear").unwrap().access, Access::Open);
         assert_eq!(find("slack").unwrap().access, Access::RegisteredApp);
         assert_eq!(find("github").unwrap().access, Access::TokenOrApp);
-        assert_eq!(catalog().iter().filter(|service| service.access == Access::Open).count(), 16);
+        assert_eq!(catalog().iter().filter(|service| service.access == Access::Open).count(), 15);
     }
 
     #[test]

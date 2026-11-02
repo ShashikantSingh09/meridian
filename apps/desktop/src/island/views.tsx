@@ -36,6 +36,7 @@ import { MeridianLine } from "./MeridianLine";
 import { Progress } from "./Progress";
 import { story, type LevelStory } from "../lib/levels";
 import { endConversation, voiceLevel, type VoiceState } from "../lib/voice";
+import { openFailedNote, seeNote, stopRecording, useRunningClock } from "../lib/notes";
 import { useMicLevel } from "./useMicLevel";
 
 /** With nothing to do and no pointer, the face gets drowsy, then falls asleep. */
@@ -147,6 +148,37 @@ export function IdleView({ reduced, hovered, sliver }: { reduced: boolean; hover
     <div className="rest ambient">
       <Mine mood={tired} reduced={reduced} />
       {clock && <Clock />}
+    </div>
+  );
+}
+
+/** The red dot and the time, wherever a recording shows. */
+export function RecordingClock({ since }: { since: number }) {
+  const time = useRunningClock(since);
+  return (
+    <span className="note-clock tabular" role="img" aria-label={`Recording, ${time}`}>
+      <i aria-hidden="true" />
+      {time}
+    </span>
+  );
+}
+
+export function NoteView({ hovered, reduced }: { hovered: boolean; reduced: boolean }) {
+  const note = useApp((s) => s.notes.notes.find((n) => n.id === s.notes.recording));
+  if (!note) {
+    return (
+      <div className="row pad-pill">
+        <Mine mood="rest" reduced={reduced} />
+        <span className="grow meta truncate">Writing the notes</span>
+      </div>
+    );
+  }
+  return (
+    <div className="row pad-pill note-bar">
+      <Mine mood="rest" reduced={reduced} />
+      <span className="grow" />
+      <RecordingClock since={note.startedAt} />
+      {hovered && <button className="note-stop" onClick={(e) => { e.stopPropagation(); void stopRecording(); }}>Stop</button>}
     </div>
   );
 }
@@ -434,6 +466,17 @@ export function NotificationView({ reduced }: { reduced: boolean }) {
   const mood: Mood = notice.tone === "success" ? "done" : notice.tone === "urgent" ? "needs" : "rest";
   const ended = notice.finished && sessions.find((s) => s.id === notice.sessionId);
   if (ended) return <FinishedCard noticeId={notice.id} title={notice.title} session={ended} reduced={reduced} />;
+
+  if (notice.note) {
+    const id = notice.note;
+    return (
+      <div className="row pad-pill">
+        <Mine mood={mood} reduced={reduced} />
+        <span className="grow note-ready truncate">{notice.title}: {notice.body}</span>
+        <button className="ghost" onClick={() => seeNote(notice.id, id)}>See</button>
+      </div>
+    );
+  }
 
   if (notice.eventId) {
     return (
@@ -780,6 +823,16 @@ export function ErrorView({ reduced }: { reduced: boolean }) {
   const stopped = useApp((s) => s.sessions.find((session) => session.id === s.errors[0]?.sessionId));
   if (!error) return null;
   if (stopped) return <StoppedCard errorId={error.id} body={error.body} session={stopped} />;
+  if (error.note) {
+    const id = error.note;
+    return (
+      <div className="row pad-pill note-bar">
+        <Mine mood="error" scale={0.56} reduced={reduced} />
+        <span className="grow note-ready truncate" title={error.body}>{error.title}</span>
+        <button className="text-button note-open" onClick={() => openFailedNote(error.id, id)}>Open</button>
+      </div>
+    );
+  }
   return (
     <div className="row pad-pill">
       <Mine mood="error" scale={0.56} reduced={reduced} />

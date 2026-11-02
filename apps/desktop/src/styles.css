@@ -2009,11 +2009,11 @@ textarea::placeholder {
 .dock-item {
   position: relative;
   width: 44px;
-  height: 40px;
+  height: 44px;
   display: grid;
   place-items: center;
-  border-radius: 13px;
-  color: var(--ink-3);
+  border-radius: 22px;
+  color: var(--dock-ink);
   transition: color 0.15s ease;
 }
 
@@ -3451,4 +3451,76 @@ kbd {
   display: block;
   flex: none;
   height: 6px;
+}
+
+/* A recording shows wherever the island is, over anything else on it. */
+.note-dot {
+  position: absolute;
+  left: 50%;
+  bottom: 3px;
+  width: 6px;
+  height: 6px;
+  margin-left: -3px;
+  border-radius: 50%;
+  background: var(--state-error);
+  pointer-events: none;
+}
+
+.wake-dot-head {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--state-listening);
+}
+
+.note-clock {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-1);
+}
+
+.note-clock i {
+  display: block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--state-error);
+  animation: note-blink 2s steps(1, end) infinite;
+}
+
+.note-ready {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.note-open {
+  flex: none;
+  display: block;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--tint-red);
+}
+
+.panel-head .note-clock {
+  gap: 6px;
+  font-size: 12px;
+  color: var(--tint-red);
+}
+
+.note-bar {
+  padding-right: 16px;
+}
+
+.note-stop {
+  flex: none;
+  height: 28px;
+  padding: 0 11px;
+  border-radius: 14px;
+  font-size: var(--text-sm);
+  font-weight: 600;
 }

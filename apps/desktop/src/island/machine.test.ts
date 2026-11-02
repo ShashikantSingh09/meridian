@@ -29,6 +29,31 @@ const notice = { id: "n", tone: "success" as const, title: "Done", body: "" };
 const suggestion = { id: "c", title: "Explain error", body: "" };
 const error = { id: "e", title: "Failed", body: "" };
 
+describe("a recording", () => {
+  const quiet: Snapshot = { panelOpen: false, listening: false, capturing: false, mediaPlaying: false, chatPending: false, sessions: [], notices: [], suggestions: [], errors: [], live: [] };
+
+  it("shows on the idle island, and writing up shows after it", () => {
+    expect(deriveView({ ...quiet, recording: true })).toBe("note");
+    expect(deriveView({ ...quiet, writingNote: true })).toBe("note");
+  });
+
+  it("gives way to anything else, and to the open panel", () => {
+    expect(deriveView({ ...quiet, recording: true, mediaPlaying: true })).toBe("media");
+    expect(deriveView({ ...quiet, recording: true, panelOpen: true })).toBe("expanded");
+    expect(deriveView({ ...quiet, recording: true, notices: [{ id: "a", tone: "info", title: "t", body: "b" }] })).toBe("notification");
+  });
+
+  it("is the sizes on the board", () => {
+    const base = { hovered: false, rows: 0, approval: false };
+    expect(geometryFor("note", base)).toMatchObject({ w: 190, h: 46 });
+    expect(geometryFor("note", { ...base, hovered: true })).toMatchObject({ w: 262, h: 46 });
+    expect(geometryFor("note", { ...base, noteWriting: true })).toMatchObject({ w: 250, h: 46 });
+    expect(geometryFor("notification", { ...base, noteReady: true })).toMatchObject({ w: 372, h: 46 });
+    expect(geometryFor("error", { ...base, noteFailed: true })).toMatchObject({ w: 330, h: 46 });
+    expect(geometryFor("expanded", { ...base, tab: "notes" })).toMatchObject({ w: 820, h: 600 });
+  });
+});
+
 describe("volume, brightness and the battery", () => {
   it("shows at once, but never over something that needs an answer", () => {
     expect(deriveView({ ...base, level: true })).toBe("level");

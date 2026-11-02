@@ -11,6 +11,8 @@ use crate::{VoiceError, VoiceInfo};
 
 pub const RATE: u32 = 24_000;
 const TIMEOUT: Duration = Duration::from_secs(60);
+/// A long call takes minutes to send, and more to write down.
+const LONG_TIMEOUT: Duration = Duration::from_secs(45 * 60);
 
 fn client() -> Result<Client, VoiceError> {
     Ok(Client::builder().connect_timeout(Duration::from_secs(10)).build()?)
@@ -150,10 +152,106 @@ pub async fn transcribe(provider: &str, key: &str, wav: Vec<u8>) -> Result<Strin
     Ok(words.as_str().unwrap_or_default().trim().to_string())
 }
 
+/// A word and when it was said, with who said it if the service was asked to tell people apart.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TimedWord {
+    pub text: String,
+    pub start: f64,
+    pub end: f64,
+    pub speaker: Option<String>,
+}
+
+fn words_of(provider: &str, body: &Value) -> Vec<TimedWord> {
+    let number = |word: &Value, key: &str| word[key].as_f64().unwrap_or_default();
+    if provider == "deepgram" {
+        let words = body["results"]["channels"][0]["alternatives"][0]["words"].as_array().cloned().unwrap_or_default();
+        return words
+            .iter()
+            .filter_map(|word| {
+                let text = word["punctuated_word"].as_str().or(word["word"].as_str())?;
+                Some(TimedWord { text: text.to_string(), start: number(word, "start"), end: number(word, "end"), speaker: word["speaker"].as_u64().map(|speaker| speaker.to_string()) })
+            })
+            .collect();
+    }
+    // Spaces and sounds such as laughter come as entries of their own.
+    let words = body["words"].as_array().cloned().unwrap_or_default();
+    words
+        .iter()
+        .filter(|word| word["type"] == "word")
+        .filter_map(|word| Some(TimedWord { text: word["text"].as_str()?.trim().to_string(), start: number(word, "start"), end: number(word, "end"), speaker: word["speaker_id"].as_str().map(String::from) }))
+        .filter(|word| !word.text.is_empty())
+        .collect()
+}
+
+/// Writes down a whole recording, word by word. With `speakers` the service tells the voices apart.
+pub async fn transcribe_words(provider: &str, key: &str, wav: Vec<u8>, speakers: bool) -> Result<Vec<TimedWord>, VoiceError> {
+    let http = client()?;
+    let request = match provider {
+        "elevenlabs" => {
+            let file = multipart::Part::bytes(wav).file_name("call.wav").mime_str("audio/wav")?;
+            let form = multipart::Form::new().text("model_id", "scribe_v2").text("timestamps_granularity", "word").text("tag_audio_events", "false").text("diarize", speakers.to_string()).part("file", file);
+            http.post("https://api.elevenlabs.io/v1/speech-to-text").header("xi-api-key", key).multipart(form)
+        }
+        "deepgram" => http
+            .post(format!("https://api.deepgram.com/v1/listen?model=nova-3&language=multi&smart_format=true&diarize={speakers}"))
+            .header("Authorization", format!("Token {key}"))
+            .header("Content-Type", "audio/wav")
+            .body(wav),
+        other => return Err(VoiceError::Service(format!("{other} cannot write down a call."))),
+    };
+    let response = request.timeout(LONG_TIMEOUT).send().await?;
+    let status = response.status();
+    let text = response.text().await?;
+    if !status.is_success() {
+        return Err(refusal(status, &text));
+    }
+    let body: Value = serde_json::from_str(&text).map_err(|_| VoiceError::Service("The service sent something unexpected.".into()))?;
+    Ok(words_of(provider, &body))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use reqwest::StatusCode;
+
+    #[test]
+    fn elevenlabs_words_keep_their_times_and_speakers_and_nothing_else() {
+        let body = json!({ "words": [
+            { "text": "Hello", "type": "word", "start": 0.1, "end": 0.5, "speaker_id": "speaker_0" },
+            { "text": " ", "type": "spacing", "start": 0.5, "end": 0.6, "speaker_id": "speaker_0" },
+            { "text": "(laughter)", "type": "audio_event", "start": 0.6, "end": 1.0, "speaker_id": "speaker_0" },
+            { "text": "नमस्ते", "type": "word", "start": 1.0, "end": 1.4, "speaker_id": "speaker_1" },
+        ] });
+        let words = words_of("elevenlabs", &body);
+        assert_eq!(words.len(), 2);
+        assert_eq!(words[0], TimedWord { text: "Hello".into(), start: 0.1, end: 0.5, speaker: Some("speaker_0".into()) });
+        assert_eq!(words[1].text, "नमस्ते");
+        assert_eq!(words[1].speaker.as_deref(), Some("speaker_1"));
+    }
+
+    #[test]
+    fn a_word_with_no_speaker_is_still_a_word() {
+        let words = words_of("elevenlabs", &json!({ "words": [{ "text": "Hi", "type": "word", "start": 0.0, "end": 0.2 }] }));
+        assert_eq!(words[0].speaker, None);
+    }
+
+    #[test]
+    fn deepgram_words_are_read_from_where_it_keeps_them() {
+        let body = json!({ "results": { "channels": [{ "alternatives": [{ "words": [
+            { "word": "hello", "punctuated_word": "Hello,", "start": 0.1, "end": 0.5, "speaker": 1 },
+            { "word": "there", "start": 0.6, "end": 0.9 },
+        ] }] }] } });
+        let words = words_of("deepgram", &body);
+        assert_eq!(words[0], TimedWord { text: "Hello,".into(), start: 0.1, end: 0.5, speaker: Some("1".into()) });
+        assert_eq!(words[1].text, "there");
+        assert_eq!(words[1].speaker, None);
+    }
+
+    #[test]
+    fn an_empty_answer_is_no_words() {
+        assert!(words_of("elevenlabs", &json!({})).is_empty());
+        assert!(words_of("deepgram", &json!({})).is_empty());
+    }
 
     #[test]
     fn a_refusal_is_put_plainly() {

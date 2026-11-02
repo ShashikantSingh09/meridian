@@ -234,6 +234,9 @@ function Privacy() {
         <Fact text="The microphone opens only while the listening view is on screen, for wake words if you turn them on, or while Microphone and headphones is open under Voice. Nothing is recorded." />
         <Fact text="The island shows a dot for as long as it is listening for wake words." />
         <Fact text="Chat goes only to the engine you pick. Providers are read with read-only tools, and what they return stays on this PC." />
+        <Fact text="Gmail and Google Calendar connected through your Claude account are read only when you ask, and what is read goes through Claude." />
+        <Fact text="Notes record your microphone and this PC's sound only after you press Record, with a red dot on the island the whole time. The audio goes to your hearing service to be written down, then it is deleted." />
+        <Fact text="A call's transcript goes to the AI you chose for Chat, to write the summary. The notes themselves stay on this PC." />
         <Fact text="No telemetry." />
       </div>
       <div className="stack">

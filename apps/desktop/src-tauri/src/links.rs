@@ -31,6 +31,7 @@ fn built_in_client(id: &str) -> Option<Client> {
         "asana" => (option_env!("MERIDIAN_CLIENT_ASANA"), option_env!("MERIDIAN_SECRET_ASANA")),
         "hubspot" => (option_env!("MERIDIAN_CLIENT_HUBSPOT"), option_env!("MERIDIAN_SECRET_HUBSPOT")),
         "box" => (option_env!("MERIDIAN_CLIENT_BOX"), option_env!("MERIDIAN_SECRET_BOX")),
+        "figma" => (option_env!("MERIDIAN_CLIENT_FIGMA"), option_env!("MERIDIAN_SECRET_FIGMA")),
         "drive" => (option_env!("MERIDIAN_GOOGLE_CLIENT_ID"), option_env!("MERIDIAN_GOOGLE_CLIENT_SECRET")),
         _ => return None,
     };

@@ -58,7 +58,8 @@ flowchart TB
 | `packages/design-system` | Colour, surface and motion tokens | Nothing |
 | `src-tauri/island.rs` | Placement, style bits, click-through poll | Win32 |
 | `crates/ai-core` | Providers | reqwest |
-| `crates/agent-adapters` | Agent sessions | tokio |
+| `crates/agent-adapters` | Agent sessions, and Gmail and Calendar through the Claude account | tokio |
+| `crates/notes` | Notes of a call: lines, people, Markdown, the summary, the files | none |
 | `crates/screen` | Capture, OCR, signals, exclusions. No network code | Win32, WinRT |
 | `crates/media` | Media sessions and controls, which players can be heard, and volume, brightness and battery | WinRT, Core Audio, WMI |
 | `crates/voice` | Speaking and hearing: cloud services, the Windows voice, and the downloaded local engine | reqwest, WinRT, libloading |
@@ -68,6 +69,7 @@ flowchart TB
 | `src-tauri/life.rs` | Activity timers, keychain, sign-in, commands | `activity` |
 | `src-tauri/links.rs` | Providers over MCP, and OpenRouter sign-in | `mcp` |
 | `src-tauri/following.rs` | Following Claude Code from any terminal | `agent-adapters` |
+| `src-tauri/notetaker.rs` | Recording a call and writing it up | `notes`, `media`, `voice` |
 | `src-tauri/voice.rs` | Voice commands, keys and pack downloads | `voice` |
 | `src-tauri/update.rs` | Checking for and installing a release through `gh` | `gh` CLI |
 | `src-tauri/log.rs` | A redacted log of crashes | Nothing |

@@ -1,5 +1,53 @@
 # Development ledger
 
+## 2026-11-02: Notes, and the dock as the boards drew it
+
+The owner asked for note taking like Coucou's, understood without guessing. See `docs/research/NOTETAKER_REVIEW.md` and `docs/DECISIONS.md`, D61.
+
+- **Reading first paid off.** Coucou's speech model has no Hindi, so copying it would have failed on the owner's own calls.
+- **Windows does the mixing.** Asking loopback for 16 kHz mono worked first time on the real output, so no resampler was written.
+- **Comparing with the boards found what tests could not.** Grey titles, a plain checkbox where the board has a switch, a banner pushing the page down, a cut-off notice, and a plain line for the blue bar.
+- **Real runs found the rest.** The dev build cannot see the chosen microphone, which showed that an unplugged one would have refused a recording with a blank error. It now falls back to the
+  Windows default and says so.
+- **A smooth pulse was left out on purpose.** This window is layered, so a pulsing dot would repaint it for the whole of a call. It blinks in steps with the clock.
+- **The dock is the board's.** Round items, the board's glass, its height and its place. The blue wake dot sat under it and read as part of the bar, so with the panel open it is in the head.
+
+### Proved
+
+Real app, real ElevenLabs, real Claude Code, on a call made in three Windows voices: five lines with the right words, three people told apart, two of them on the same recording, times
+within 0.2 seconds, a title, summary, key points and to-dos, and the audio deleted. It cost about $0.004. The real assistant answered from it through `my_notes`. A real recording of 5.8 seconds
+from the real microphone and loopback, with both files within 0.1 seconds of each other, wake words paused, the meters moving, and Delete removing the folder. Every tab was compared in the real
+window, and nothing sits under the dock. Loopback through a Bluetooth output delivered 63,809 samples of 64,103 expected in 4 seconds.
+
+### Not proved
+
+- A real call with real people, and Hindi on a call. The voices were English Windows voices.
+- Loopback in real silence, because something was playing every time it was measured. Filling gaps is unit tested.
+- Deepgram, which has never been run. Sound moving to another output mid-call, and the four-hour limit.
+
+## 2026-11-01: Gmail and Calendar through the Claude account
+
+The owner has no Google Cloud console access, so nothing could be registered. See `docs/DECISIONS.md`, D60.
+
+- **Fifteen of 16 one-click services reach their real sign-in page**, measured with a new ignored test. Figma refused registration and moved to the registered group.
+- **The assistant can read Gmail when asked.** Two tools, `my_mail` and `my_calendar`, start a separate Claude Code run with one server and reading tools only.
+- **Providers stopped saying Not available** for these two. It reads the real state from Claude Code as it starts, in about 2.5 seconds, and links to Claude's connector page.
+- **The first version looked fine and read nothing.** A real read came back in 3.8 seconds with no mail in it. Claude Code does not wait for its servers by default, so the model
+  started with no tools and said so politely. Runs now wait, and a server still connecting counts as unreachable.
+- **Hooks had to go off.** With them on, 25 hook events fired in one run, and a memory plugin would have seen mail.
+
+### Proved
+
+Real assistant, real mailbox, through the app: a mail question answered through `my_mail` in 14.6 seconds, a calendar question that said it was not connected and where to fix
+it, and a request to send mail refused. Claude Code itself reports one server and six tools for a run with these flags: get_draft, get_message, get_thread, list_drafts, list_labels
+and search_threads. A check run left no session file.
+
+### Not proved
+
+- Calendar, which the owner has not connected yet, so its tool names are unseen.
+- Whether calendar reads are cheap enough for meeting alerts on the island.
+- A real attempt to steer it from inside an email.
+
 ## 2026-11-01: Wake words learn your voice
 
 The owner reported wake words working once and then stopping, and each fix to the Windows recognizer failed on their real voice. See `docs/DECISIONS.md`, D59.

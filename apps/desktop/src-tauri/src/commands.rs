@@ -125,7 +125,7 @@ fn resolve(core: &Core, id: &str) -> Result<(&'static ProviderDef, Endpoint), St
     Ok((def, Endpoint { base_url: url, api_key: secrets::get(id) }))
 }
 
-fn provider(core: &Core, id: &str) -> Result<Box<dyn ai_core::Provider>, String> {
+pub(crate) fn provider(core: &Core, id: &str) -> Result<Box<dyn ai_core::Provider>, String> {
     let (def, endpoint) = resolve(core, id)?;
     ai_core::client(def.protocol, endpoint).map_err(stringify)
 }

@@ -30,6 +30,14 @@ const paths: Record<string, ReactNode> = {
     </>
   ),
   stop: <rect x="5.5" y="5.5" width="9" height="9" rx="1.8" />,
+  note: (
+    <>
+      <path d="M5.2 3.2h7l3.6 3.6v9a1 1 0 0 1-1 1H5.2a1 1 0 0 1-1-1V4.2a1 1 0 0 1 1-1Z" />
+      <path d="M12 3.4V7h3.6M7 11h6M7 14h4" />
+    </>
+  ),
+  save: <path d="M10 3.5v9M6.5 9.2 10 12.7l3.5-3.5M4 16.5h12" />,
+  trash: <path d="M4 6h12M8 6V4.4h4V6M6 6l.7 10.5h6.6L14 6" />,
   close: <path d="m5.5 5.5 9 9M14.5 5.5l-9 9" />,
   check: <path d="m4.5 10.5 3.6 3.6 7.4-8" />,
   send: <path d="M10 16V4.6M5 9.4l5-5 5 5" />,

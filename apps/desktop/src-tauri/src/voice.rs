@@ -88,7 +88,7 @@ fn stringify(err: impl std::fmt::Display) -> String {
     err.to_string()
 }
 
-fn cloud_key(core: &Core, provider: &str) -> Result<String, String> {
+pub(crate) fn cloud_key(core: &Core, provider: &str) -> Result<String, String> {
     if core.settings.lock().unwrap().local_only {
         return Err(LOCAL_ONLY.into());
     }

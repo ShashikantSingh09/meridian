@@ -181,6 +181,13 @@ pub fn built_in_clients() -> (bool, bool) {
     (BUILT_IN_GOOGLE.is_some(), BUILT_IN_MICROSOFT.is_some())
 }
 
+/// Whether Gmail and Google Calendar are connected in the user's Claude account.
+#[tauri::command]
+pub async fn claude_connectors(core: State<'_, Core>) -> Result<(bool, bool), String> {
+    refuse_if_local(&core)?;
+    Ok(agent_adapters::google::connected().await)
+}
+
 async fn sync_account(core: &Core, life: &Life, account: &ConnectedAccount) -> Result<SyncSummary, String> {
     refuse_if_local(core)?;
     let config = oauth_config(core, account.provider, None)?;

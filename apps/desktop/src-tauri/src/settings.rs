@@ -55,6 +55,8 @@ pub struct Settings {
     pub voice_id: Option<String>,
     /// "local", or the cloud service that hears.
     pub voice_hearing: String,
+    /// Writes the summary as soon as a call's transcript is done.
+    pub notes_summary: bool,
     pub voice_interrupt: bool,
     /// What the assistant is called, and how it should come across.
     pub assistant_name: String,
@@ -118,6 +120,7 @@ impl Default for Settings {
             voice_provider: "windows".into(),
             voice_id: None,
             voice_hearing: "local".into(),
+            notes_summary: true,
             voice_interrupt: true,
             assistant_name: "Meridian".into(),
             assistant_personality: String::new(),

@@ -440,8 +440,8 @@ html[data-motion="reduced"] .live-dot {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 8px 16px 0;
+  gap: 11px;
+  padding: 11px 16px 0;
   overflow: hidden;
 }
 
@@ -718,7 +718,7 @@ html[data-motion="reduced"] .live-dot {
 /* Room for the dock is kept here, under the message box. */
 .chat-page .chat {
   min-width: 0;
-  padding-bottom: 66px;
+  padding-bottom: 78px;
 }
 
 .chat .chat-bar {
@@ -1535,5 +1535,635 @@ html[data-motion="reduced"] .live-dot {
 .board.welcome-page .solid {
   height: 36px;
   padding: 0 22px;
+  border-radius: 18px;
+}
+
+/* Notes */
+
+.notes-page {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 14px;
+  padding: 4px 16px 0;
+}
+
+.notes-list {
+  flex: none;
+  width: 232px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.record-button {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 16px;
+  border-radius: 18px;
+  background: var(--accent-shine);
+  color: var(--accent-ink);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.42), 0 3px 10px rgba(10, 99, 200, 0.34);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.record-button i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.record-button.stop,
+.danger,
+.note-stop {
+  background: linear-gradient(180deg, #ff5f55 0, #d92d20 100%);
+  color: #fff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4), 0 3px 10px rgba(217, 45, 32, 0.34);
+}
+
+.record-button.stop i {
+  border-radius: 2px;
+}
+
+.danger {
+  height: 32px;
+  padding: 0 14px;
+  border-radius: 16px;
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.notes-rows {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.notes-day {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.note-label {
+  margin: 0;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--dock-ink);
+}
+
+.notes-day > .note-label {
+  margin: 8px 0 2px 10px;
+}
+
+.note-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 7px 10px;
+  border-radius: 12px;
+  text-align: left;
+}
+
+.note-row:hover {
+  background: var(--well);
+}
+
+.note-row[aria-current="true"] {
+  background: var(--well-active);
+}
+
+.note-row .label {
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.note-row .meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--dock-ink);
+}
+
+.note-row .meta[data-recording="true"] {
+  color: var(--tint-red);
+}
+
+.rec-dot {
+  flex: none;
+  display: block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--state-error);
+  animation: note-blink 2s steps(1, end) infinite;
+}
+
+.note-row .rec-dot {
+  width: 6px;
+  height: 6px;
+}
+
+/* In steps, with the clock. A smooth pulse would repaint this window for the whole of a call. */
+@keyframes note-blink {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+.notes-foot {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 16px;
+  background: var(--well);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07);
+}
+
+.notes-foot .toggle input {
+  width: 42px;
+  height: 26px;
+}
+
+.notes-foot .toggle input::after {
+  top: 2px;
+  left: 2px;
+  width: 22px;
+  height: 22px;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+}
+
+.notes-foot .toggle input:checked::after {
+  translate: 16px 0;
+}
+
+.notes-foot .meta {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: 1.45;
+  color: var(--dock-ink);
+}
+
+.notes-pane {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.note-head {
+  flex: none;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.note-title {
+  min-width: 0;
+}
+
+.note-title h2 {
+  margin: 0;
+  color: var(--ink-1);
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: -0.016em;
+}
+
+.note-title h2 button {
+  display: block;
+  max-width: 100%;
+  font: inherit;
+  letter-spacing: inherit;
+}
+
+.note-title .meta {
+  margin: 3px 0 0;
+  font-size: var(--text-sm);
+  color: var(--dock-ink);
+}
+
+.note-rename {
+  width: 100%;
+  height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 8px;
+  outline: 1.5px solid var(--focus-ring);
+  background: var(--well);
+  color: var(--ink-1);
+  font: inherit;
+  font-weight: 600;
+}
+
+.note-people .note-rename {
+  width: 130px;
+}
+
+.note-tools {
+  flex: none;
+  display: flex;
+  gap: 6px;
+}
+
+.note-tools .ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 16px;
+  font-weight: 500;
+}
+
+.note-tools .round {
+  width: 32px;
+  height: 32px;
+}
+
+.note-people {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.note-person {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 28px;
+  padding: 0 11px 0 4px;
+  border-radius: 14px;
+  background: var(--well);
+  font-size: var(--text-sm);
+  font-weight: 500;
+}
+
+.note-person:hover {
+  background: var(--well-hover);
+}
+
+.note-person i,
+.note-line > i {
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--person-ink);
+  font-style: normal;
+  font-weight: 700;
+}
+
+.note-person i {
+  width: 20px;
+  height: 20px;
+  font-size: 10.5px;
+}
+
+.note-person span {
+  color: var(--dock-ink);
+}
+
+.notes-pane .chips {
+  flex: none;
+  gap: 6px;
+}
+
+.notes-pane .chip {
+  flex: none;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 15px;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--dock-ink);
+  text-transform: none;
+}
+
+.notes-pane .chip[aria-pressed="true"] {
+  color: var(--ink-1);
+}
+
+/* Like the lists on the other pages, it fades at the foot instead of showing a scroll bar. */
+.note-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-bottom: 14px;
+  overflow-y: auto;
+  scrollbar-width: none;
+  mask-image: linear-gradient(#000 calc(100% - 14px), transparent);
+}
+
+.note-body p {
+  margin: 0;
+}
+
+.note-summary {
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.note-points {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.note-todos {
+  display: flex;
+  flex-direction: column;
+}
+
+.note-todo {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  width: 100%;
+  padding: 4px 0;
+  text-align: left;
+}
+
+.note-todo > i {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 17px;
+  height: 17px;
+  margin-top: 1px;
+  border-radius: 6px;
+  color: #fff;
+  box-shadow: inset 0 0 0 1.5px var(--dock-ink);
+}
+
+.note-todo[aria-checked="true"] > i {
+  background: var(--accent);
+  box-shadow: none;
+}
+
+.note-todo > span {
+  display: block;
+  min-width: 0;
+}
+
+.note-todo-text {
+  display: block;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.note-todo .meta {
+  display: block;
+  margin-top: 1px;
+  font-size: 11.5px;
+  color: var(--dock-ink);
+}
+
+.note-todo[aria-checked="true"] .note-todo-text {
+  color: var(--dock-ink);
+  text-decoration: line-through;
+}
+
+.note-lines {
+  gap: 12px;
+}
+
+.note-line {
+  display: flex;
+  gap: 10px;
+}
+
+.note-line > i {
+  width: 24px;
+  height: 24px;
+  font-size: 11px;
+}
+
+.note-line > div {
+  min-width: 0;
+}
+
+.note-who {
+  gap: 8px;
+}
+
+.note-name {
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.note-who .meta {
+  font-size: 11.5px;
+  color: var(--dock-ink);
+}
+
+.note-line p {
+  margin: 2px 0 0;
+  font-size: 13px;
+  line-height: 1.45;
+  user-select: text;
+}
+
+.note-centred {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 14px;
+  padding: 0 38px;
+}
+
+.notes-pane.note-centred {
+  gap: 18px;
+}
+
+.note-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--tint-red);
+}
+
+.note-time {
+  margin-top: 4px;
+  font-size: 54px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  line-height: 1.2;
+}
+
+.note-levels {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.note-level {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.note-level span {
+  flex: none;
+  width: 52px;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--dock-ink);
+}
+
+.note-level i {
+  flex: 1;
+  display: block;
+  height: 6px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: var(--well-active);
+}
+
+.note-level b {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.2s ease;
+}
+
+.note-centred .meta {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--dock-ink);
+}
+
+.note-progress {
+  height: 3px;
+  border-radius: 2px;
+  overflow: hidden;
+  background: var(--well-active);
+}
+
+.note-progress i {
+  display: block;
+  width: 28%;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--accent);
+  animation: note-progress 1.6s ease-in-out infinite;
+}
+
+@keyframes note-progress {
+  from {
+    transform: translateX(-100%);
+  }
+
+  to {
+    transform: translateX(380%);
+  }
+}
+
+.note-writing {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.note-card {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px;
+  border-radius: 16px;
+  background: var(--well);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07);
+}
+
+.note-card .meta {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--dock-ink);
+}
+
+.note-card .solid {
+  height: 36px;
+  margin-top: 8px;
+  padding: 0 16px;
+  border-radius: 18px;
+}
+
+.note-card.note-confirm {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+}
+
+.note-confirm .ghost {
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 16px;
+}
+
+.notes-blank {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 4px 16px 0;
+  text-align: center;
+  color: var(--dock-ink);
+}
+
+.notes-blank h2 {
+  margin: 4px 0 0;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.016em;
+  color: var(--ink-1);
+}
+
+.notes-blank .meta {
+  max-width: 430px;
+  margin: 0 0 10px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--dock-ink);
+}
+
+.notes-blank .solid {
+  height: 36px;
+  padding: 0 16px;
   border-radius: 18px;
 }

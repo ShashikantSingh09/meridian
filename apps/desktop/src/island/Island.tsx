@@ -8,7 +8,7 @@ import { AnimatePresence, animate, motion, useMotionValue, useTransform } from "
 import { useEffect, useMemo, useRef } from "react";
 import { bridge } from "../lib/bridge";
 import { lastMessage } from "../lib/sessions";
-import { reportView, togglePanel, useApp } from "../lib/store";
+import { openPanel, reportView, togglePanel, useApp } from "../lib/store";
 import { Panel } from "../panel/Panel";
 import { useReduced } from "./faces";
 import { activeSessions, deriveView, geometryFor, stateToken, waitingApproval, type IslandView, type Snapshot } from "./machine";
@@ -23,6 +23,7 @@ import {
   LiveView,
   MediaView,
   MultitaskView,
+  NoteView,
   NotificationView,
   ScreenView,
   ThinkingView,
@@ -51,9 +52,11 @@ function useSnapshot(): Snapshot {
   const live = useApp((s) => s.live);
   const level = useApp((s) => s.level !== null);
   const voice = useApp((s) => s.voice !== null);
+  const recording = useApp((s) => s.notes.recording !== null);
+  const writingNote = useApp((s) => s.notes.working.length > 0);
   return useMemo(
-    () => ({ panelOpen, listening, capturing, mediaPlaying, chatPending, sessions, notices, suggestions, errors, live, level, voice }),
-    [panelOpen, listening, capturing, mediaPlaying, chatPending, sessions, notices, suggestions, errors, live, level, voice],
+    () => ({ panelOpen, listening, capturing, mediaPlaying, chatPending, sessions, notices, suggestions, errors, live, level, voice, recording, writingNote }),
+    [panelOpen, listening, capturing, mediaPlaying, chatPending, sessions, notices, suggestions, errors, live, level, voice, recording, writingNote],
   );
 }
 
@@ -83,6 +86,8 @@ function CompactContent({ view, reduced, hovered, sliver, mediaOpen }: { view: I
       return <VoiceView reduced={reduced} />;
     case "error":
       return <ErrorView reduced={reduced} />;
+    case "note":
+      return <NoteView hovered={hovered} reduced={reduced} />;
     default:
       return <IdleView reduced={reduced} hovered={hovered} sliver={sliver} />;
   }
@@ -134,6 +139,9 @@ export function Island() {
     voiceLong,
     greeting,
     liveRich: Boolean(snapshot.live[0]?.route || snapshot.live[0]?.steps),
+    noteWriting: !snapshot.recording,
+    noteReady: snapshot.notices[0]?.note !== undefined,
+    noteFailed: snapshot.errors[0]?.note !== undefined,
   });
 
   const width = useMotionValue(reduced ? target.w : BIRTH.w);
@@ -177,7 +185,7 @@ export function Island() {
   const lit = LIT.has(view) && !reduced;
   const glow = view === "media" ? artTint ?? "#ff7a9c" : `var(${stateToken(view, snapshot)})`;
   // A waiting request looks the same either way, and swapping it would lose the answers so far.
-  const opensOnHover = view === "idle" || view === "live" || (view === "working" && waiting === null);
+  const opensOnHover = view === "idle" || view === "live" || view === "note" || (view === "working" && waiting === null);
   const contentKey = expanded ? "panel" : view + (opened && opensOnHover ? "-hover" : "") + (view === "media" && playerOpen ? "-open" : "");
 
   return (
@@ -188,7 +196,7 @@ export function Island() {
       data-align={align}
       data-small={target.h < 12}
       style={{ width, height, "--glow": glow } as never}
-      onClick={view === "idle" ? togglePanel : undefined}
+      onClick={view === "idle" ? togglePanel : view === "note" ? () => openPanel("notes") : undefined}
     >
       <svg className="island-body" aria-hidden="true">
         <motion.path d={outline} />
@@ -208,7 +216,8 @@ export function Island() {
             {expanded ? <Panel /> : <CompactContent view={view} reduced={reduced} hovered={opened} sliver={sliver} mediaOpen={playerOpen} />}
           </motion.div>
         </AnimatePresence>
-        {wakeOn && <span className="wake-dot" role="img" aria-label="Listening for a wake word" title="Listening for a wake word" />}
+        {wakeOn && !expanded && <span className="wake-dot" role="img" aria-label="Listening for a wake word" title="Listening for a wake word" />}
+        {snapshot.recording && !expanded && view !== "note" && <span className="note-dot" role="img" aria-label="Recording" title="Recording" />}
       </motion.div>
     </motion.div>
   );

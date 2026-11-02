@@ -31,6 +31,7 @@ import type {
   Level,
   WakeStatus,
   LimitWindow,
+  NotesState,
 } from "./types";
 import type { Mood } from "../island/faces";
 import type { VoiceState } from "./voice";
@@ -38,7 +39,7 @@ import { lastMessage, mergeTodo, resetLabel } from "./sessions";
 import { applyTheme } from "./theme";
 import { defaultSettings } from "./types";
 
-export type Tab = "home" | "chat" | "agents" | "media" | "day" | "inbox" | "settings";
+export type Tab = "home" | "chat" | "agents" | "media" | "day" | "notes" | "inbox" | "settings";
 export type SettingsSection = "general" | "themes" | "island" | "assistant" | "voice" | "wake" | "screen" | "updates" | "models" | "providers" | "agents" | "privacy" | "about";
 
 export interface LogEntry {
@@ -161,6 +162,9 @@ export interface AppState {
   monitors: string[];
   preview: string | null;
   integrations: Integration[];
+  notes: NotesState;
+  /** The note open in Notes, until another is picked. */
+  selectedNote: string | null;
   /** Google and Microsoft sign-in work with no registration of the user's own. */
   builtInClients: [boolean, boolean];
   digests: Record<string, Digest>;
@@ -250,6 +254,8 @@ let state: AppState = {
   monitors: [],
   preview: null,
   integrations: [],
+  notes: { notes: [], recording: null, working: [] },
+  selectedNote: null,
   builtInClients: [false, false],
   digests: {},
   fetching: [],
@@ -403,6 +409,8 @@ export const setDraft = (draft: string) => set({ draft });
 export const addDraftFile = (file: string) => set({ draftFiles: [...state.draftFiles, file] });
 export const clearDraft = () => set({ draft: "", draftFiles: [] });
 export const setTab = (tab: Tab) => set({ tab });
+export const setNotes = (notes: NotesState) => set({ notes });
+export const showNote = (selectedNote: string | null) => set({ selectedNote });
 export const setSettingsSection = (settingsSection: SettingsSection) => set({ settingsSection });
 export const openSettings = (settingsSection: SettingsSection) => set({ tab: "settings", settingsSection });
 
@@ -649,6 +657,16 @@ export function selectEngine(id: string) {
 /** What to move to, if anything. A provider that has gone, such as a closed local server, is no choice at all. */
 export function nextEngine(chosen: string | null, usable: string | undefined, agent: string | undefined) {
   return usable ? (usable === chosen ? null : usable) : (agent ?? null);
+}
+
+/** What Chat would answer with, for work done away from Chat. */
+export async function chatEngine(): Promise<{ agent: string } | { provider: string; model: string } | null> {
+  pickEngine();
+  if (state.agentChat.agent) return { agent: state.agentChat.agent };
+  const provider = usableProvider();
+  if (!provider) return null;
+  if (state.chat.providerId !== provider.id || !state.chat.model) await selectProvider(provider.id, state.chat.model);
+  return state.chat.model ? { provider: provider.id, model: state.chat.model } : null;
 }
 
 /** Chat opens on an AI, so nobody meets an empty choice. Asking from anywhere else gets the same one. */
@@ -1109,16 +1127,36 @@ const DIRECT: Integration[] = [
 const directAccount = (id: string, accounts: ConnectedAccount[]) =>
   accounts.find((a) => a.provider === (id === "outlook" ? "microsoft" : "google")) ?? null;
 
+/** With no registered app, these two are read through the user's Claude account, only when asked. */
+const VIA_CLAUDE: Record<string, string> = {
+  gmail: "Answers questions about your mail.",
+  calendar: "Answers questions about your schedule.",
+};
+let onClaude: Record<string, boolean> = {};
+
 export async function refreshIntegrations() {
   const accounts = await bridge.accountsList().catch(() => []);
   const [google, microsoft] = await bridge.builtInClients();
-  const direct = DIRECT.map((d) => {
+  const direct = DIRECT.map((d): Integration => {
     const account = directAccount(d.id, accounts);
     const own = d.id === "outlook" ? state.settings.microsoftClientId : state.settings.googleClientId;
-    return { ...d, connected: account !== null, account: account?.email ?? null, ready: (d.id === "outlook" ? microsoft : google) || own !== "" };
+    const ready = (d.id === "outlook" ? microsoft : google) || own !== "";
+    const row = { ...d, connected: account !== null, account: account?.email ?? null, ready };
+    return ready || !VIA_CLAUDE[d.id] ? row : { ...row, ready: true, blurb: VIA_CLAUDE[d.id], viaClaude: onClaude[d.id] ? "on" : "off" };
   });
   const servers = await bridge.integrationsList().catch(() => []);
   set({ integrations: [...direct, ...servers] });
+}
+
+/** Claude Code reports this as it starts, which takes seconds, so it is asked only when Providers opens. */
+export async function checkClaudeConnectors() {
+  const ids = Object.keys(VIA_CLAUDE);
+  if (!state.integrations.some((i) => i.viaClaude) || state.fetching.includes(ids[0])) return;
+  set({ fetching: [...state.fetching, ...ids] });
+  const [gmail, calendar] = await bridge.claudeConnectors().catch(() => [false, false]);
+  onClaude = { gmail, calendar };
+  set({ fetching: state.fetching.filter((x) => !ids.includes(x)) });
+  await refreshIntegrations();
 }
 
 /** What the mail and calendar connectors have found, in the shape of a fetch. */

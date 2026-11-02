@@ -29,6 +29,8 @@ import type {
   Settings,
   SettingsChange,
   Level,
+  NoteLevels,
+  NotesState,
   VoiceInfo,
   WakeStatus,
 } from "./types";
@@ -135,7 +137,9 @@ export const bridge = {
     native ? invoke<void>("account_disconnect", { id }) : mock.accountDisconnect(id),
   accountSync: (id: string) => (native ? invoke<string>("account_sync", { id }) : Promise.resolve("Up to date.")),
   openUrl: (url: string) => (native ? invoke<void>("open_url", { url }) : Promise.resolve()),
-  builtInClients: () => (native ? invoke<[boolean, boolean]>("built_in_clients") : Promise.resolve<[boolean, boolean]>([true, true])),
+  builtInClients: () => (native ? invoke<[boolean, boolean]>("built_in_clients") : mock.builtInClients()),
+  /** Whether Gmail and Google Calendar are connected in the user's Claude account. */
+  claudeConnectors: () => (native ? invoke<[boolean, boolean]>("claude_connectors") : mock.claudeConnectors()),
   /** Sends the user to the service's own page, and stores what comes back. */
   aiSignIn: (id: string) => (native ? invoke<void>("ai_sign_in", { id }) : mock.setProviderKey(id)),
 
@@ -183,6 +187,16 @@ export const bridge = {
     try {
       const picked = await open({ multiple: false });
       return typeof picked === "string" ? picked : null;
+    } finally {
+      dialogOpen = false;
+    }
+  },
+  pickSavePath: async (name: string) => {
+    if (!native) return `C:\\Users\\sample\\Documents\\${name}`;
+    const { save } = await import("@tauri-apps/plugin-dialog");
+    dialogOpen = true;
+    try {
+      return await save({ defaultPath: name, filters: [{ name: "Markdown", extensions: ["md"] }] });
     } finally {
       dialogOpen = false;
     }
@@ -273,6 +287,36 @@ export const bridge = {
   wakeStatus: () => (native ? invoke<WakeStatus>("wake_status") : Promise.resolve<WakeStatus>({ state: "off", why: "" })),
   wakeTest: () => (native ? invoke<void>("wake_test") : Promise.resolve()),
   wakeAudio: (pcm: Uint8Array) => (native ? invoke<void>("wake_audio", pcm) : Promise.resolve()),
+  notesState: () => (native ? invoke<NotesState>("notes_state") : mock.notesState()),
+  notesResume: () => (native ? invoke<void>("notes_resume") : Promise.resolve()),
+  noteStart: () => (native ? invoke<string>("notes_start") : mock.noteStart()),
+  noteStop: () => (native ? invoke<void>("notes_stop") : mock.noteStop()),
+  noteAudio: (pcm: Uint8Array) => (native ? invoke<void>("note_audio", pcm) : Promise.resolve()),
+  noteRename: (id: string, title: string) => (native ? invoke<void>("notes_rename", { id, title }) : mock.noteRename(id, title)),
+  noteRenameSpeaker: (id: string, speaker: string, name: string) => (native ? invoke<void>("notes_rename_speaker", { id, speaker, name }) : mock.noteRenameSpeaker(id, speaker, name)),
+  noteToggleTodo: (id: string, todo: string) => (native ? invoke<void>("notes_toggle_todo", { id, todo }) : mock.noteToggleTodo(id, todo)),
+  noteDelete: (id: string) => (native ? invoke<void>("notes_delete", { id }) : mock.noteDelete(id)),
+  noteRetry: (id: string) => (native ? invoke<void>("notes_retry", { id }) : mock.noteRetry(id)),
+  noteSummarize: (id: string, engine: { agent?: string; provider?: string; model?: string }) =>
+    native ? invoke<void>("notes_summarize", { id, agent: engine.agent ?? null, provider: engine.provider ?? null, model: engine.model ?? null }) : mock.noteSummarize(id),
+  noteMarkdown: (id: string) => (native ? invoke<string>("notes_markdown", { id }) : mock.noteMarkdown(id)),
+  noteExport: (id: string, path: string) => (native ? invoke<void>("notes_export", { id, path }) : mock.noteExport(path)),
+  onNotesChanged(handler: () => void) {
+    if (!native) return Promise.resolve(mock.onNotesChanged(handler));
+    return listen("notes-changed", handler).then(() => {});
+  },
+  onNoteWritten(handler: (id: string) => void) {
+    if (!native) return Promise.resolve(mock.onNoteWritten(handler));
+    return listen<string>("note-written", (e) => handler(e.payload)).then(() => {});
+  },
+  onNoteFailed(handler: (failed: { id: string; title: string; why: string }) => void) {
+    if (!native) return Promise.resolve(mock.onNoteFailed(handler));
+    return listen<{ id: string; title: string; why: string }>("note-failed", (e) => handler(e.payload)).then(() => {});
+  },
+  onNoteLevels(handler: (levels: NoteLevels) => void): Promise<() => void> {
+    if (!native) return Promise.resolve(mock.onNoteLevels(handler));
+    return listen<NoteLevels>("note-levels", (e) => handler(e.payload));
+  },
   wakeTaught: (words: string[]) => (native ? invoke<string[]>("wake_taught", { words }) : mock.wakeTaught(words)),
   wakeTeachSample: (pcm: Uint8Array) => (native ? invoke<[number, boolean]>("wake_teach_sample", pcm) : Promise.resolve<[number, boolean]>([0, false])),
   wakeTeachEnd: (word: string | null) => (native ? invoke<void>("wake_teach_end", { word }) : mock.wakeTeachEnd(word)),

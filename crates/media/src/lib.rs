@@ -9,6 +9,7 @@
 
 mod audio;
 pub mod levels;
+pub mod loopback;
 pub use audio::audible_now;
 
 use std::collections::HashMap;
