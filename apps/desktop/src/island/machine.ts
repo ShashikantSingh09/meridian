@@ -27,6 +27,8 @@ export interface SessionSummary {
   activity: string;
   startedAt: number;
   approval: Approval | null;
+  /** A request folded away to answer later. The island leaves it until another one comes. */
+  foldedId?: string | null;
   /** The agent's own to-do list, when it keeps one. In memory only. */
   todos?: Todo[];
 }
@@ -49,6 +51,8 @@ export interface Notice {
   sticky?: boolean;
   /** A session has ended, so the island shows what it did. */
   finished?: boolean;
+  /** A recording nobody has spoken in, and the seconds before it stops by itself. */
+  quiet?: number;
   /** Notes are ready, so the island offers to open them. */
   note?: string;
   /** A new version can be installed, so clicking opens Updates. */
@@ -102,7 +106,10 @@ export const activeSessions = <T extends SessionSummary>(sessions: T[]) =>
   sessions.filter((s) => ACTIVE.has(s.status));
 
 export const waitingApproval = <T extends SessionSummary>(sessions: T[]) =>
-  sessions.find((s) => s.approval !== null) ?? null;
+  sessions.find((s) => s.approval !== null && s.foldedId !== s.approval.id) ?? null;
+
+/** How many requests are waiting across every session, folded or not. */
+export const waitingCount = (sessions: SessionSummary[]) => sessions.reduce((n, s) => n + (s.approval ? 1 : 0) + ((s as { queued?: unknown[] }).queued?.length ?? 0), 0);
 
 /**
  * Priority, highest first. The user's own actions win, then anything that
@@ -207,6 +214,8 @@ const IDLE_CLOCK: Geometry = { w: 148, h: 34, r: 15 };
 /** With a laptop's charge beside the clock, or on its own. */
 const IDLE_CLOCK_CHARGE: Geometry = { w: 214, h: 34, r: 15 };
 const IDLE_CHARGE: Geometry = { w: 124, h: 34, r: 15 };
+/** Room for the plan-use ring beside the time. */
+const USAGE_W = 30;
 const SLIVER: Geometry = { w: 96, h: 6, r: 3 };
 const REMINDER: Geometry = { w: 420, h: 112, r: 24 };
 const NOTE_STOP: Geometry = { w: 262, ...BAR };
@@ -223,6 +232,8 @@ export interface GeometryContext {
   clock?: boolean;
   /** A laptop's charge is shown at rest. */
   charge?: boolean;
+  /** The plan-use ring is shown at rest. */
+  usage?: boolean;
   /** Idle with auto-hide on: only a sliver remains until the pointer arrives. */
   sliver?: boolean;
   /** A notice with actions needs room for its buttons. */
@@ -258,8 +269,10 @@ export function geometryFor(view: IslandView, ctx: GeometryContext): Geometry {
   if (view === "idle" && ctx.greeting) return GREETING;
   if (view === "idle" && ctx.hovered) return IDLE_HOVER;
   if (view === "idle" && ctx.sliver) return SLIVER;
-  if (view === "idle" && ctx.clock) return ctx.charge ? IDLE_CLOCK_CHARGE : IDLE_CLOCK;
-  if (view === "idle" && ctx.charge) return IDLE_CHARGE;
+  if (view === "idle" && (ctx.clock || ctx.charge)) {
+    const base = ctx.clock ? (ctx.charge ? IDLE_CLOCK_CHARGE : IDLE_CLOCK) : IDLE_CHARGE;
+    return ctx.usage ? { ...base, w: base.w + USAGE_W } : base;
+  }
   // Whoever else is at work stays on show under a question, with what needs the user first.
   const others = Math.max(0, Math.min(ctx.rows, MULTITASK_MAX_ROWS) - 1) * OTHER_ROW;
   if (view === "working" && ctx.asking?.plan) return { ...PLAN, h: PLAN.h + others };

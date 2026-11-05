@@ -401,6 +401,63 @@ test("playing media takes over an idle island and answers its controls", async (
   await expect(island(page)).toHaveAttribute("data-view", "idle");
 });
 
+test("nothing on the island moves for ever, at rest, at work, waiting for an answer or playing music", async ({ page }) => {
+  // Anything that moves redraws the whole window, so a state that lasts hours may only move now and then.
+  await page.clock.install();
+  await page.goto("/");
+  const mock = (call: string) => page.evaluate(`window.__mock.${call}`);
+  const endless = () =>
+    page.evaluate(() => {
+      const island = document.querySelector(".island")!;
+      return document
+        .getAnimations()
+        .filter((a) => {
+          const target = (a.effect as KeyframeEffect | null)?.target;
+          return a.playState === "running" && a.effect?.getComputedTiming().iterations === Infinity && target && island.contains(target);
+        })
+        .map((a) => (a as CSSAnimation).animationName ?? "a script animation");
+    });
+  const tenSecondsIn = async (view: string) => {
+    await expect(island(page)).toHaveAttribute("data-view", view);
+    await page.clock.runFor(10_000);
+    await expect(island(page)).toHaveAttribute("data-view", view);
+    expect(await endless()).toEqual([]);
+  };
+
+  await tenSecondsIn("idle");
+  await mock("publishMedia(true)");
+  await tenSecondsIn("media");
+  await expect(page.locator(".island .bars")).toHaveAttribute("data-playing", "true");
+  await mock('publishWatched("watch:s1")');
+  await tenSecondsIn("working");
+  await mock('publishWatchedApproval("watch:s1")');
+  await expect(island(page)).toContainText("Allow once");
+  await tenSecondsIn("working");
+  // Content that left is still there: the fake clock does not run Motion's exits.
+  await expect(page.locator(".island .face").last()).toHaveAttribute("data-mood", "needs");
+});
+
+test("every face draws every mood", async ({ page }) => {
+  await island(page).click();
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await page.getByRole("button", { name: "Island", exact: true }).click();
+  const faces = page.locator(".face-grid .face");
+  const each = (name: string) => faces.evaluateAll((els, n) => els.map((el) => el.getAttribute(n)), name);
+  await expect(faces).toHaveCount(8);
+  expect(await each("data-face")).toEqual(["soft", "googly", "visor", "smile", "pixel", "cat", "horizon", "moons"]);
+  const drawn = ["rest", "listen", "think", "speak", "heard", "notice", "working", "needs", "done", "error", "drag", "sleepy", "asleep"];
+  // Only soft eyes draws these. The others show the nearest mood they have.
+  const borrowed: Record<string, string> = { music: "rest", curious: "rest", wink: "done", love: "done", dizzy: "error" };
+  for (const mood of [...drawn, ...Object.keys(borrowed)]) {
+    await page.evaluate((m) => (window as never as { __meridian: { feel(m: string, ms: number): void } }).__meridian.feel(m, 60_000), mood);
+    const shown = borrowed[mood] ?? mood;
+    await expect.poll(() => each("data-mood")).toEqual([mood, ...Array<string>(7).fill(shown)]);
+    // Something is drawn, at a size that can be seen.
+    const seen = await faces.evaluateAll((els) => els.map((el) => { const b = el.getBoundingClientRect(); return el.children.length > 0 && b.width >= 8 && b.height >= 2; }));
+    expect(seen, mood).toEqual(Array(8).fill(true));
+  }
+});
+
 test("the face shows how it feels by its shape, and it passes", async ({ page }) => {
   const face = page.locator(".island .face");
   await expect(face).toHaveAttribute("data-mood", "rest");

@@ -11,7 +11,8 @@ type Session = { id: string; agent: string; status: string; log: { kind: string;
 const h = vi.hoisted(() => ({
   app: {
     voice: null as { phase: string; mode: string } | null,
-    settings: { voiceInterrupt: true, wakeAfter: "turn", wakeWords: [{ text: "Hey Meridian", on: true }], voiceMicrophone: null as string | null, voiceOutput: null },
+    settings: { voiceInterrupt: true, wakeAfter: "turn", wakeWords: [{ text: "Hey Meridian", on: true }], voiceMicrophone: null as string | null, voiceOutput: null, hushWhileTalking: true, hushLeaveCalls: true },
+    notes: { recording: null as string | null },
     wake: { state: "off" },
     chat: { messages: [] as { role: string; content: string }[] },
     chatPending: false,
@@ -40,6 +41,8 @@ vi.mock("./bridge", () => ({
     voiceHearEnd: vi.fn(async () => ""),
     voiceSpeak: vi.fn(async () => {}),
     voiceStop: vi.fn(async () => {}),
+    hushOn: vi.fn(async () => {}),
+    hushOff: vi.fn(async () => {}),
   },
 }));
 
@@ -355,27 +358,52 @@ describe("following a reply", () => {
     expect(vi.mocked(bridge.voiceSpeak).mock.calls.map((call) => call[0])).toEqual(["A new answer.", "And then another one."]);
   });
 
+  it("quiets other apps for the conversation, and never while a call records", async () => {
+    vi.mocked(sendChat).mockImplementationOnce(async () => {
+      h.app.chat = { messages: [{ role: "user", content: "hi" }, { role: "assistant", content: "Hello." }] };
+    });
+    await holdAndSay("hi");
+    await vi.waitFor(() => expect(h.app.voice).toBeNull());
+    expect(bridge.hushOn).toHaveBeenCalledWith(true);
+    expect(bridge.hushOff).toHaveBeenCalledOnce();
+
+    vi.mocked(bridge.hushOn).mockClear();
+    h.app.notes.recording = "n1";
+    vi.mocked(sendChat).mockImplementationOnce(async () => {
+      h.app.chat = { messages: [{ role: "user", content: "hi" }, { role: "assistant", content: "Hello again." }] };
+    });
+    await holdAndSay("hi");
+    await vi.waitFor(() => expect(h.app.voice).toBeNull());
+    expect(bridge.hushOn).not.toHaveBeenCalled();
+    h.app.notes.recording = null;
+  });
+
   it("asks about a request once, and goes on from where it was", async () => {
     const chat: Session = { id: "s", agent: "Claude", status: "running", log: [{ kind: "user", text: "fix it" }, { kind: "text", text: "On it. Looking now." }], approval: null };
     h.app.sessions = [chat];
     h.app.agentChat = { agent: "claude-code", sessionId: "s" };
     vi.mocked(sendAgentChat).mockImplementationOnce(async () => void (chat.log = [...chat.log]));
 
+    vi.spyOn(Math, "random").mockReturnValue(0);
     await holdAndSay("fix it");
-    Object.assign(chat, { status: "waiting", approval: { id: "a1", summary: "edit a file" } });
+    Object.assign(chat, { status: "waiting", approval: { id: "a1", tool: "Edit", summary: "edit a file" } });
     await vi.waitFor(() => expect(bridge.voiceSpeak).toHaveBeenCalledOnce());
     await vi.waitFor(() => expect(h.app.voice?.phase).toBe("listening"));
+    // A plain yes is not enough: a video or someone else could say it.
     await holdAndSay("yes");
+    expect(answerApproval).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(h.app.voice?.phase).toBe("listening"));
+    await holdAndSay("allow harbour");
     expect(answerApproval).toHaveBeenCalledWith("s", "a1", true);
     await new Promise((resolve) => setTimeout(resolve, 200));
 
     // The agent has not reported the answer yet, so the request is still listed.
     const said = () => vi.mocked(bridge.voiceSpeak).mock.calls.map((call) => call[0]);
-    expect(said()).toEqual(["Claude wants to edit a file. Should it?"]);
+    expect(said()).toEqual(["Claude wants to edit a file. To allow it, say allow harbour. Or say no.", "To allow it, say allow harbour. Or say no, or use the buttons."]);
 
     Object.assign(chat, { approval: null, status: "completed", log: [...chat.log, { kind: "text", text: "All done." }] });
     await vi.waitFor(() => expect(h.app.voice).toBeNull());
-    expect(said().slice(1)).toEqual(["On it.", "Looking now.", "All done."]);
+    expect(said().slice(2)).toEqual(["On it.", "Looking now.", "All done."]);
   });
 
   it("reads only the answer after the last step, never its working", async () => {

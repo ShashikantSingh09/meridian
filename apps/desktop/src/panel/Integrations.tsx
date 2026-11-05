@@ -186,7 +186,7 @@ export function Integrations() {
         <div className="links-grid" role="navigation" aria-label="Providers">
           {sorted.map((i) => (
             <button key={i.id} className="link-tile" aria-current={i.id === current.id ? "true" : undefined} data-ready={i.ready} onClick={() => setSelected(i.id)}>
-              {i.id === current.id && <motion.span layoutId="link-pill" className="dock-pill" transition={spring.hover} />}
+              {i.id === current.id && <motion.span layoutId="link-pill" className="dock-pill" transition={spring.snap} />}
               <span className="link-mono">
                 <Brand id={i.id} name={i.name} />
                 {(i.connected || i.viaClaude === "on") && <i className="link-dot" title="Connected" />}
@@ -195,7 +195,7 @@ export function Integrations() {
             </button>
           ))}
         </div>
-        <motion.div key={current.id} className="link-pane" initial={{ opacity: 0, x: 6 }} animate={{ opacity: 1, x: 0 }} transition={spring.hover}>
+        <motion.div key={current.id} className="link-pane" initial={{ opacity: 0, x: 6 }} animate={{ opacity: 1, x: 0 }} transition={spring.snap}>
           <Detail integration={current} />
         </motion.div>
       </div>

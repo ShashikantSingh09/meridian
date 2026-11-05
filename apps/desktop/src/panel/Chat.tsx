@@ -124,8 +124,10 @@ function EnginePicker() {
   const agents = useApp((s) => s.agents);
   const providerId = useApp((s) => s.chat.providerId);
   const agent = useApp((s) => s.agentChat.agent);
+  const localOnly = useApp((s) => s.settings.localOnly);
   const current = agent ?? providerId ?? "";
-  const engines = [...agents.filter((a) => a.installed), ...providers.filter((p) => isReady(p, localOnline))];
+  // Agents reach their makers' servers, so local-only mode does not offer them.
+  const engines = [...agents.filter((a) => a.installed && !localOnly), ...providers.filter((p) => isReady(p, localOnline))];
 
   if (engines.length === 0) {
     return <button className="engine-connect" onClick={() => openSettings("models")}>Connect an AI</button>;

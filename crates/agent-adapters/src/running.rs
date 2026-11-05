@@ -21,6 +21,8 @@ const TAIL_BYTES: u64 = 256 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Running {
+    /// The Claude Code process, which the record is named for.
+    pub pid: u32,
     pub session: String,
     pub cwd: String,
     pub title: Option<String>,
@@ -60,18 +62,27 @@ fn last_tool(transcript: &str) -> Option<String> {
     None
 }
 
-fn read(record: &Path, claude_dir: &Path, alive: &impl Fn(u32) -> bool) -> Option<Running> {
-    let pid = record.file_stem()?.to_str()?.parse().ok()?;
-    if record.extension()? != "json" || !alive(pid) {
-        return None;
-    }
-    let session: Value = serde_json::from_slice(&fs::read(record).ok()?).ok()?;
+/// Each live process's record, with its process id. Only a `<pid>.json` is opened, never a key.
+fn records(claude_dir: &Path, alive: impl Fn(u32) -> bool) -> impl Iterator<Item = (u32, Value)> {
+    let entries = fs::read_dir(claude_dir.join("sessions")).into_iter().flatten().flatten();
+    entries.filter_map(move |entry| {
+        let record = entry.path();
+        let pid = record.file_stem()?.to_str()?.parse().ok()?;
+        if record.extension()? != "json" || !alive(pid) {
+            return None;
+        }
+        Some((pid, serde_json::from_slice(&fs::read(&record).ok()?).ok()?))
+    })
+}
+
+fn read(pid: u32, session: &Value, claude_dir: &Path) -> Option<Running> {
     if session["entrypoint"].as_str()?.starts_with("sdk") || session["status"].as_str()? == "idle" {
         return None;
     }
     let (id, cwd) = (session["sessionId"].as_str()?, session["cwd"].as_str()?);
     let transcript = claude_dir.join("projects").join(project_folder(cwd)).join(format!("{id}.jsonl"));
     Some(Running {
+        pid,
         session: watch::session_id(id),
         cwd: cwd.to_string(),
         title: session["name"].as_str().map(str::to_string),
@@ -82,8 +93,14 @@ fn read(record: &Path, claude_dir: &Path, alive: &impl Fn(u32) -> bool) -> Optio
 /// Every session busy right now. `alive` is asked about each process, because a record can
 /// outlive a crash, and a dead session must not sit on the island.
 pub fn busy(claude_dir: &Path, alive: impl Fn(u32) -> bool) -> Vec<Running> {
-    let Ok(records) = fs::read_dir(claude_dir.join("sessions")) else { return Vec::new() };
-    records.flatten().filter_map(|entry| read(&entry.path(), claude_dir, &alive)).collect()
+    records(claude_dir, alive).filter_map(|(pid, session)| read(pid, &session, claude_dir)).collect()
+}
+
+/// The process behind a session the interface shows, as `watch::session_id` names it. Idle
+/// counts: a session waiting for its next prompt is still open in its terminal.
+pub fn pid_of(claude_dir: &Path, session: &str, alive: impl Fn(u32) -> bool) -> Option<u32> {
+    let mut found = records(claude_dir, alive);
+    found.find(|(_, record)| record["sessionId"].as_str().is_some_and(|id| watch::session_id(id) == session)).map(|(pid, _)| pid)
 }
 
 #[cfg(test)]
@@ -135,7 +152,9 @@ mod tests {
         ]);
         let found = busy(&claude.0, |_| true);
         assert_eq!(found.len(), 1);
+        assert_eq!(found[0].pid, 10);
         assert_eq!(found[0].session, "watch:a");
+        assert_eq!(found[0].cwd, "G:\\Work\\shop");
         assert_eq!(found[0].title.as_deref(), Some("Fix the cart"));
         assert_eq!(found[0].activity.as_deref(), Some("Editing src/cart.ts"));
     }
@@ -172,6 +191,22 @@ mod tests {
         fs::write(sessions.join("9.abcdef.key"), "secret").unwrap();
         assert!(busy(&claude.0, |_| true).is_empty());
         assert!(busy(Path::new("Z:\\nowhere"), |_| true).is_empty());
+    }
+
+    #[test]
+    fn a_session_is_traced_to_its_live_process_even_when_idle() {
+        let claude = Claude::new("pid");
+        claude.session(21, record("old", "busy", "cli"));
+        // A crash leaves a record behind, and the same session can be resumed in a new process.
+        claude.session(22, record("calm", "idle", "cli"));
+        claude.session(23, record("calm", "idle", "cli"));
+        fs::write(claude.0.join("sessions").join("24.abcdef.key"), "secret").unwrap();
+        let alive = |pid| pid != 22;
+        assert_eq!(pid_of(&claude.0, "watch:calm", alive), Some(23));
+        assert_eq!(pid_of(&claude.0, "watch:old", alive), Some(21));
+        assert_eq!(pid_of(&claude.0, "calm", alive), None, "only the interface's name is looked up");
+        assert_eq!(pid_of(&claude.0, "watch:gone", alive), None);
+        assert_eq!(pid_of(Path::new("Z:\\nowhere"), "watch:calm", alive), None);
     }
 
     #[test]

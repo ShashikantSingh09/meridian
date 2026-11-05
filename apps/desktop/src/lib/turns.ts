@@ -109,6 +109,21 @@ export function yesOrNo(words: string): boolean | null {
   return null;
 }
 
+/** Words for allowing a request by voice. One is picked for each request, so a plain "yes" from a
+ *  video, a recording or someone else in the room cannot allow it. */
+export const ALLOW_WORDS = ["harbour", "maple", "comet", "river", "lantern", "pebble", "orchid", "falcon", "meadow", "cobalt", "tulip", "glacier", "ember", "willow", "summit", "canyon", "violet", "anchor", "saffron", "quartz", "juniper", "marble", "coral", "thunder"];
+
+export const pickAllowWord = (random: () => number = Math.random) => ALLOW_WORDS[Math.floor(random() * ALLOW_WORDS.length) % ALLOW_WORDS.length]!;
+
+/** A spoken answer to a request: no is enough to deny, and allowing needs the request's own word. */
+export function spokenAnswer(words: string, allowWord: string): boolean | null {
+  const said = words.trim().replace(/[.!।,"']+/g, "").replace(/\s+/g, " ").toLowerCase();
+  if (yesOrNo(said) === false) return false;
+  const named = said.split(" ").includes(allowWord.toLowerCase());
+  const refused = /(^| )(no|not|don't|dont|never|nahin|nahi|नहीं)( |$)/u.test(said);
+  return named && !refused ? true : null;
+}
+
 const FILLERS = ["Let me look.", "One moment.", "Let me check.", "Give me a second."];
 
 /** Something short to say when a real answer is going to take a while. */

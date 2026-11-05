@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 use tokio::sync::mpsc;
 use tokio::time::Instant;
 
-use crate::approvals::{settings_json, Hook};
+use crate::approvals::Hook;
 use crate::process::spawn;
 use crate::{AgentEvent, Command, Emit, Launch, LimitWindow, SessionStatus, Todo};
 
@@ -38,7 +38,9 @@ pub fn args(launch: &Launch, hook_url: &str) -> Vec<String> {
     ]
     .map(String::from)
     .to_vec();
-    args.extend(["--settings".to_string(), settings_json(hook_url)]);
+    // The assistant's own tool server also answers the check before a web fetch or search.
+    let before_web = launch.assistant.as_ref().filter(|_| launch.restricted).map(|assistant| format!("{}/pre", assistant.tools_url));
+    args.extend(["--settings".to_string(), crate::approvals::settings_with(hook_url, before_web.as_deref())]);
     if let Some(model) = &launch.model {
         args.extend(["--model".to_string(), model.clone()]);
     }

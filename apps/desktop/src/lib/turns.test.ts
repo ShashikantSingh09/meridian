@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { filler, isGoodbye, looksFinished, sentences, silenceFor, speakable, yesOrNo, withoutWakeWord } from "./turns";
+import { filler, isGoodbye, looksFinished, pickAllowWord, sentences, silenceFor, speakable, spokenAnswer, yesOrNo, withoutWakeWord } from "./turns";
 
 describe("knowing when someone has finished", () => {
   it("hears a whole thought", () => {
@@ -113,5 +113,23 @@ describe("answers in Hindi", () => {
   });
   it("can end a conversation", () => {
     for (const bye of ["bas", "बस", "शुक्रिया", "धन्यवाद"]) expect(isGoodbye(bye), bye).toBe(true);
+  });
+});
+
+describe("spoken answers to a request", () => {
+  it("denies on no, and allows only with the request's own word", () => {
+    expect(spokenAnswer("no", "harbour")).toBe(false);
+    expect(spokenAnswer("नहीं", "harbour")).toBe(false);
+    expect(spokenAnswer("yes", "harbour")).toBeNull();
+    expect(spokenAnswer("go ahead", "harbour")).toBeNull();
+    expect(spokenAnswer("allow harbour", "harbour")).toBe(true);
+    expect(spokenAnswer("Allow, Harbour.", "harbour")).toBe(true);
+    expect(spokenAnswer("allow maple", "harbour")).toBeNull();
+    expect(spokenAnswer("do not allow harbour", "harbour")).toBeNull();
+  });
+
+  it("picks a word from the list", () => {
+    expect(pickAllowWord(() => 0)).toBe("harbour");
+    expect(pickAllowWord(() => 0.999)).toBe("thunder");
   });
 });

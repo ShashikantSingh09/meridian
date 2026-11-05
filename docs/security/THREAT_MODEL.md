@@ -11,7 +11,7 @@ Scope is M3. Anything that reads more of the desktop must extend this before it 
 | Prompts to agents | Sent over stdin, so they never appear in a process list. |
 | Microphone | Opens on a click or while the voice key is used. It stays open only if the user turns on wake words, which are off by default, and then the island shows a dot for as long as it is open. That listening happens on this PC, by comparing the chosen microphone with a pattern of the user's own voice, and by Windows' own speech engine running inside the app on the same sound. The sound is compared and dropped, apart from the last three seconds held in memory to hand a command said with the name to the conversation, a lesson's recordings stay in memory until the pattern is made, and nothing is sent until the word is found. After that, what is said goes to the hearing service, including anything said by mistake after a false wake. In a conversation the island shows Listening, with a stop button. Audio stays in memory and is never saved. With local hearing it stays on this PC. With a cloud service, the recorded turn is sent to that service at the end of the turn. |
 | Calls | Only on a click, never by itself, never by voice and never by the assistant. The island shows a red dot and a clock for as long as it records, over every other view. Microphone and PC sound go to files on this PC, then to the hearing service the user chose, then the audio is deleted. Local only refuses it. Pausing all monitoring stops it. It stops by itself after four hours. |
-| Assistant actions | Tools run on a loopback server with a random token in the path, reachable only by this app's own runs. Opening things, media, volume and reminders run without asking. Reading the screen, starting an agent, commands and edits always ask first. A file that runs a program cannot be opened by the open tool. |
+| Assistant actions | Tools run on a loopback server with a random token in the path, reachable only by this app's own runs, which refuses any request with an Origin. Opening things, media, volume and reminders run without asking, until the assistant reads other people's words: for half an hour after mail, the calendar, call notes or the day's events, opening a website, searching and opening a file ask on the island first, and the CLI's own WebFetch and WebSearch are refused. Reading the screen, starting an agent, commands and edits always ask first. The open tool opens only documents, pictures, music and video, never a program or a path on another computer. |
 | Voice keys | Windows Credential Manager, like API keys. No command returns one to the webview. |
 | Spoken replies | With a cloud voice, the reply text goes to that service. Local only blocks every cloud voice and cloud hearing. |
 | Screen | Read only on request or in opt-in contextual mode, on this PC. Shared only from a preview the user approves. Frames are held in memory and dropped on send, discard or at once in contextual mode. |
@@ -31,7 +31,8 @@ Scope is M3. Anything that reads more of the desktop must extend this before it 
 
 ## Trust boundaries
 
-**The webview is treated as untrusted.** It loads only bundled content, under a strict content security policy. A
+**The webview is treated as untrusted.** It loads only bundled content, under a strict content security policy. A navigation guard refuses
+any other address, and the page cancels dropped files and links, so nothing else can load where the app's commands are reachable. A
 compromised page could start an agent in a folder or spend tokens, but cannot read a key, because no command exposes one.
 The capability file grants only what the page needs. Other webview permissions, such as camera and location, are denied by
 default in `island::restrict_permissions`.
@@ -41,10 +42,13 @@ and an unknown token gets a 404 and raises nothing on screen. The token appears 
 process of the same user can read. Same-user processes are outside this model, as they could equally drive the CLI directly.
 
 **Agents run as the user, with the user's own settings.** Meridian does not sandbox them. The app never approves anything
-on its own: a request waits for a click, and if nobody answers within 30 minutes the agent's own rule applies. Project
+on its own: a request waits for a click, and if nobody answers within 30 minutes the agent's own rule applies. A request whose one line
+leaves anything out carries the whole of it, and Allow stays off until it has been opened. By voice, allowing needs a word picked for that
+request, so a yes from a video or another person cannot allow anything. The assistant's Start an agent names the folder and that the agent
+gets full access, and is not offered for a folder the user never worked in. Project
 hooks load without a trust prompt in print mode, so the new-session form warns about this.
 
-**Local-only mode** also stops mail and calendar sync, and it is enforced in Rust on the resolved address, including custom endpoints. A hostname merely containing
+**Local-only mode** also stops Claude Code and Codex sessions, which send what they are given to their makers, and mail and calendar sync, and it is enforced in Rust on the resolved address, including custom endpoints. A hostname merely containing
 "localhost" does not pass.
 
 **The OAuth loopback listener** binds 127.0.0.1 on a random port for one sign-in, and checks `state` and PKCE.
@@ -55,7 +59,9 @@ malicious web page on screen could carry instructions. Approvals stand between t
 **The watcher** listens on 127.0.0.1 only, and accepts only `POST /meridian-hook` with the right token, compared in constant
 time. A request with an `Origin` header is refused, so a web page cannot reach it. The token sits in the user's Claude Code
 settings file in clear, which any process of the same user can read. Same-user processes are outside this model. A closed app
-never blocks Claude Code, because a failed http hook is not an error to it.
+never blocks Claude Code, because a failed http hook is not an error to it. The hooks are taken out when the app quits and put back when it
+starts, and a new port comes with a new token, so another account on the PC cannot answer on that address while the app is closed. A
+crash leaves them in place until the next start.
 
 **MCP servers are untrusted.** A server chooses its metadata, tool names, annotations and results. Every URL taken from one
 must be https and must not be a private or loopback address, so a server cannot point the app at a local service.
@@ -71,20 +77,21 @@ anything.
 **Mail read through Claude does reach a model**, so there it can try to instruct one. That run loads one server, can run only tools named
 get, list, search or find, refuses write verbs by name even if the user has allowed them everywhere, and has nothing else to reach for. Its
 one output is a reply. The assistant gets that reply, is told to report it and never act on it, and its commands still ask on the island.
-What remains: `open_website` and `search_web` run without asking, so text that fools both models could open a link, and an address can
-carry what the reply held. Reading verbs are trusted by name, as with Providers over MCP. Claude's own page calls its Calendar connector
+Once mail has been read, the assistant's ways of sending something out ask first, and the CLI's web tools are refused, for half an hour.
+What remains: an approved link can still carry what the reply held, which the island shows before the click. Reading verbs are trusted by name, as with Providers over MCP. Claude's own page calls its Calendar connector
 read-only, and the Gmail connector offers send and delete, so the rule here does not rest on that wording.
 
 **A call is other people's words.** Someone on a call could say something meant for the AI. The summary run has no tools, so the most it can do is write a bad summary, and what it sends back can only
-fill in a note's fields, as text. The assistant is told to report notes and never act on them, with the same limit as mail: `open_website` and `search_web` run without asking.
+fill in a note's fields, as text. The assistant is told to report notes and never act on them, and after reading one its ways of sending something out ask first, as with mail.
 
 **Downloaded speech packs are code the app loads.** The local engine is a DLL from sherpa-onnx's releases, loaded into the app's own
 process. It downloads only when asked for, over TLS, and must match a SHA-256 pinned in the source, so a changed release fails instead of
 running. This trusts that the pinned build was clean, and the app does not sign or sandbox it. A same-user process could replace the
 unpacked DLL, which is outside this model. Packs are unpacked with Windows' own `tar`.
 
-**Updates run an installer.** An update is a program run with the user's rights. It comes over HTTPS from the repository's public
-GitHub releases, or through `gh` if the repository is private, and must match the release's `SHA256SUMS.txt`. Both come from the same
+**Updates run an installer.** An update is a program run with the user's rights, and only the version the user was shown. It comes over
+HTTPS from the repository's public GitHub releases, or through `gh` if the repository is private, into a new folder of the app's own, and
+must match the release's `SHA256SUMS.txt`, checked in memory before the file is written. Windows' own tools run by full path. Both come from the same
 place, so the checksum proves the download is whole and not who made it. Anyone able to publish to the repository can therefore reach
 every PC that updates, and with the repository public that is every installed copy, each of which is told about the release. Each still
 needs its user's click. Customers need a signed update, see `docs/DECISIONS.md`, D52 and D62.

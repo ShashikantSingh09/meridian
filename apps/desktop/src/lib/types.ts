@@ -125,6 +125,14 @@ export interface Approval {
   questions?: Question[];
   /** The plan to approve. */
   plan?: string;
+  /** The whole request, when `summary` leaves part of it out. Allow waits until it has been opened. */
+  full?: string;
+  /** The request's length in characters, when even `full` had to stop short. */
+  length?: number;
+  /** The folder an agent would start in, for the assistant's Start an agent. */
+  folder?: string;
+  /** Why this one asks, when it would not usually. */
+  why?: string;
 }
 
 /** What a change to a settings file would do, shown before it is made. */
@@ -142,7 +150,7 @@ export interface LimitWindow {
 }
 
 export type AgentEvent =
-  | { type: "watched"; agent: string; cwd: string; title: string | null }
+  | { type: "watched"; agent: string; cwd: string; title: string | null; pid?: number | null }
   | { type: "started"; nativeId: string | null; model: string | null }
   | { type: "status"; status: SessionStatus; message?: string | null }
   | { type: "text"; text: string }
@@ -198,6 +206,18 @@ export interface Settings {
   showClock: boolean;
   /** A laptop's charge beside the clock. */
   showBattery: boolean;
+  /** A ring by the clock for how much of the Claude plan is used. */
+  showUsage: boolean;
+  /** Whether to look for new versions by itself. Null until asked. */
+  updateChecks: boolean | null;
+  /** The version the user last saw What's new for. */
+  lastSeenVersion: string | null;
+  /** Other apps go quiet while the user talks to the assistant. */
+  hushWhileTalking: boolean;
+  /** Calls keep their sound while the room goes quiet. */
+  hushLeaveCalls: boolean;
+  /** A recording nobody speaks in for 15 minutes offers to stop. */
+  stopQuietCalls: boolean;
   animationSpeed: number;
   agentDefaultDir: string | null;
   voiceProvider: string;
@@ -481,6 +501,12 @@ export const defaultSettings: Settings = {
   islandAutoHide: false,
   showClock: true,
   showBattery: true,
+  showUsage: false,
+  updateChecks: null,
+  lastSeenVersion: null,
+  hushWhileTalking: true,
+  hushLeaveCalls: true,
+  stopQuietCalls: true,
   animationSpeed: 1,
   agentDefaultDir: null,
   voiceProvider: "windows",

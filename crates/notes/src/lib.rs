@@ -75,6 +75,11 @@ pub struct Note {
     pub error: Option<String>,
 }
 
+/// What every note id looks like: 32 lowercase hex characters.
+pub fn is_note_id(id: &str) -> bool {
+    id.len() == 32 && id.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+}
+
 pub(crate) fn new_id() -> String {
     uuid::Uuid::new_v4().simple().to_string()
 }
@@ -187,13 +192,19 @@ impl Store {
         self.folder.join(id)
     }
 
+    /// Only an id this store makes names a folder, so a damaged note.json cannot point outside Notes.
+    fn checked(&self, id: &str) -> io::Result<PathBuf> {
+        if is_note_id(id) { Ok(self.folder_of(id)) } else { Err(io::Error::other("That is not a note.")) }
+    }
+
     /// Every note that can be read, newest first. One damaged file costs only that note.
     pub fn load(&self) -> Vec<Note> {
         let mut notes: Vec<Note> = fs::read_dir(&self.folder)
             .into_iter()
             .flatten()
             .flatten()
-            .filter_map(|entry| serde_json::from_slice(&fs::read(entry.path().join("note.json")).ok()?).ok())
+            .filter_map(|entry| serde_json::from_slice::<Note>(&fs::read(entry.path().join("note.json")).ok()?).ok())
+            .filter(|note| is_note_id(&note.id))
             .collect();
         notes.sort_by_key(|note| std::cmp::Reverse(note.started_at));
         notes
@@ -201,7 +212,7 @@ impl Store {
 
     /// Written beside the old copy and swapped in, so a crash cannot leave half a note.
     pub fn save(&self, note: &Note) -> io::Result<()> {
-        let folder = self.folder_of(&note.id);
+        let folder = self.checked(&note.id)?;
         fs::create_dir_all(&folder)?;
         let temporary = folder.join("note.json.tmp");
         fs::write(&temporary, serde_json::to_vec_pretty(note)?)?;
@@ -209,7 +220,7 @@ impl Store {
     }
 
     pub fn remove(&self, id: &str) -> io::Result<()> {
-        fs::remove_dir_all(self.folder_of(id))
+        fs::remove_dir_all(self.checked(id)?)
     }
 
     /// Deletes the recordings of a note, once its transcript is safe.
@@ -232,6 +243,19 @@ const AUDIO: [&str; 2] = [MIC_FILE, SYSTEM_FILE];
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_real_note_id_names_a_folder() {
+        assert!(is_note_id(&new_id()));
+        for bad in ["", "..", r"C:\Windows", "../../x", "ABCDEF0123456789ABCDEF0123456789", "0123456789abcdef0123456789abcdeg"] {
+            assert!(!is_note_id(bad), "{bad}");
+        }
+        let store = Store::new(std::env::temp_dir().join(format!("notes-id-{}", new_id())));
+        let mut note = sample();
+        note.id = "..".into();
+        assert!(store.save(&note).is_err());
+        assert!(store.remove("..").is_err());
+    }
 
     pub(crate) fn sample() -> Note {
         let mut note = Note::new("Launch".into(), 1_000);

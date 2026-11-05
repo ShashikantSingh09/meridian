@@ -358,26 +358,26 @@ textarea {
 }
 
 @keyframes breathe {
-  from { opacity: 0.55; }
-  to { opacity: 1; }
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
 }
 
-/* Breathes for about 25 seconds after the island comes to rest, then stops for
-   good. Any repaint of this window is expensive: an endless fade measured 13% of
-   a core, and even a once-a-second update about 4%, against 0.1% when nothing
-   moves. Seven passes end on `to`, so the line rests fully lit. */
-html[data-ambient="true"] .ambient {
-  animation: breathe 3.6s ease-in-out 7 alternate both;
+/* Two breaths on the face after the island comes to rest, then still for good. The clock
+   stays lit: dimming it reads as loading. Any repaint of this window is expensive: an endless
+   fade measured 13% of a core, and even a once-a-second update about 4%, against 0.1% when
+   nothing moves. On the face's parts, because the face itself plays its moods. */
+html[data-ambient="true"] .ambient .face > * {
+  animation: breathe 3.6s ease-in-out 2;
 }
 
-html[data-motion="reduced"] .ambient {
-  animation: none;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  html[data-motion="system"] .ambient {
-    animation: none;
-  }
+/* One switch for reduced motion, set from the app's own setting and Windows' (Island.tsx). The
+   faces, the comet and the music bars read the same switch. */
+html[data-reduced] .voice-dots i,
+html[data-reduced] .orb,
+html[data-reduced] .island-shape,
+html[data-reduced] .island-body,
+html[data-reduced] .bubble {
+  animation: none !important;
 }
 
 /* ── Layout helpers ──────────────────────────────────────────────────── */
@@ -1328,12 +1328,10 @@ textarea::placeholder {
   text-transform: none;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .beam[data-on="true"]::after {
-    animation: none;
-    translate: 0 0;
-    width: 100%;
-  }
+html[data-reduced] .beam[data-on="true"]::after {
+  animation: none;
+  translate: 0 0;
+  width: 100%;
 }
 
 .setting {
@@ -1468,13 +1466,13 @@ textarea::placeholder {
 @keyframes edge-spin { to { rotate: 360deg; } }
 @keyframes mark-spin { to { rotate: 360deg; } }
 @keyframes mark-pulse { 0%, 100% { scale: 1; } 50% { scale: 1.16; } }
-@keyframes bars-move { 0%, 100% { scale: 1 0.25; } 50% { scale: 1 1; } }
 @keyframes spark-fly { to { translate: var(--dx) var(--dy); scale: 0.2; opacity: 0; } }
 @keyframes step-pulse { 0%, 100% { scale: 1; opacity: 1; } 50% { scale: 1.6; opacity: 0.5; } }
 @keyframes plane-drift { 0%, 100% { translate: -3px 0; } 50% { translate: 3px 0; } }
 @keyframes shimmer-run { to { translate: 300% 0; } }
 @keyframes bubble-pop { from { scale: 0; opacity: 0; } 70% { scale: 1.12; } to { scale: 1; opacity: 1; } }
-@keyframes shape-wobble { 0%, 100% { translate: 0 0; } 20% { translate: -3px 0; } 40% { translate: 3px 0; } 60% { translate: -2px 0; } 80% { translate: 2px 0; } }
+/* One shake that dies away. */
+@keyframes shape-wobble { 0%, 100% { translate: 0 0; } 20% { translate: 3px 0; } 40% { translate: -2.4px 0; } 60% { translate: 1.6px 0; } 80% { translate: -0.8px 0; } }
 
 .island-body,
 .island-light {
@@ -1517,18 +1515,10 @@ textarea::placeholder {
   pointer-events: none;
 }
 
+/* Out of sight between laps, which Island.tsx runs: two as something starts, then one now and then. */
 .island-comet {
   stroke-dasharray: 0.22 1.22;
-  animation: comet-run 2.4s linear infinite forwards;
-}
-
-.island[data-view="thinking"] .island-comet { animation-duration: 1.8s; }
-.island[data-view="notification"] .island-comet,
-.island[data-view="error"] .island-comet { animation-iteration-count: 2; animation-duration: 1.6s; }
-
-@keyframes comet-run {
-  from { stroke-dashoffset: 0.22; }
-  to { stroke-dashoffset: -1; }
+  stroke-dashoffset: -1;
 }
 
 /* Clips what is inside. The black itself is the path behind it. */
@@ -1540,7 +1530,7 @@ textarea::placeholder {
 
 .island[data-view="error"] .island-shape,
 .island[data-view="error"] .island-body {
-  animation: shape-wobble 0.45s ease 1;
+  animation: shape-wobble 0.32s ease-out 1;
 }
 
 /* Colour rising from the bottom edge: the album, or whatever is happening. */
@@ -1724,6 +1714,13 @@ textarea::placeholder {
   padding: 12px 14px;
 }
 
+/* A face drawn at its real size stands a little taller than the words beside it. It may reach into
+   the gap, but it does not push the card's buttons out of the bottom. */
+.pad-card .row > .face,
+.pad-card .notice-face > .face {
+  margin-block: -3px;
+}
+
 .doing {
   font: 400 var(--text-xs) / 1.4 var(--font-mono);
   color: #79bcff;
@@ -1767,8 +1764,9 @@ textarea::placeholder {
   scale: 1 0.25;
 }
 
+/* Playing, they stand at their own heights. marks.tsx moves them for a few seconds now and then. */
 .bars[data-playing="true"] i {
-  animation: bars-move 0.6s ease-in-out infinite;
+  scale: 1 var(--h);
 }
 
 .notice-face {
@@ -3605,4 +3603,120 @@ kbd {
   border-radius: 14px;
   font-size: var(--text-sm);
   font-weight: 600;
+}
+
+/* Approvals that say what they leave out. The whole request opens in a box that scrolls, and the
+   assistant's Start an agent names its folder and that the agent gets full access. */
+.command.whole {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 160px;
+  overflow-y: auto;
+  text-overflow: clip;
+}
+/* The approval header's count and fold, as on the board: small enough to keep the header one line. */
+.round.queue-fold {
+  width: 22px;
+  height: 22px;
+  margin: -2px 0;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+.queue-count {
+  font-variant-numeric: tabular-nums;
+}
+
+.plan-note {
+  text-align: right;
+  font-size: 11px;
+}
+
+.plan-text + .row.end button {
+  white-space: nowrap;
+}
+
+.cut-note {
+  font-size: var(--text-xs);
+  color: var(--state-waiting);
+  min-width: 0;
+}
+.show-all {
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--state-listening);
+  padding: 0 4px;
+}
+.approval-task {
+  font-weight: 600;
+}
+.approval-chips {
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.approval-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  height: 22px;
+  padding: 0 9px;
+  border-radius: 11px;
+  background: var(--well);
+  font-size: var(--text-xs);
+  color: var(--ink-1);
+}
+.approval-warn {
+  margin: 0;
+  padding: 7px 9px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--state-waiting) 14%, transparent);
+  color: var(--state-waiting);
+  font-size: var(--text-xs);
+  line-height: 1.4;
+}
+
+/* The offer to stop a recording nobody speaks in. */
+.rec-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--state-error);
+}
+.quiet-left {
+  flex: none;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--state-waiting);
+}
+
+/* A session in a terminal can bring that terminal to the front. */
+.cap-button {
+  cursor: pointer;
+  border: 0;
+}
+.cap-button:hover {
+  filter: brightness(1.2);
+}
+
+/* How much of the Claude plan is used, as a small ring beside the time. */
+.usage-ring {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  --tone: var(--state-success);
+  background: conic-gradient(var(--tone) 0 var(--used), rgba(255, 255, 255, 0.16) var(--used) 100%);
+}
+.usage-ring[data-tone="mid"] { --tone: var(--state-waiting); }
+.usage-ring[data-tone="high"] { --tone: var(--state-error); }
+.usage-hole {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #000;
 }

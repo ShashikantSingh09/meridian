@@ -76,7 +76,7 @@ export function Panel() {
   return (
     <div className="panel">
       <header className="panel-head">
-        <Face id={face} mood={feeling ?? "rest"} scale={0.62} />
+        <Face id={face} mood={feeling ?? "rest"} />
         <h1 className="grow truncate">{title}</h1>
         {recording && <RecordingClock since={recording.startedAt} />}
         {wakeOn && <span className="wake-dot-head" role="img" aria-label="Listening for a wake word" title="Listening for a wake word" />}
@@ -94,7 +94,7 @@ export function Panel() {
         <nav className="dock" aria-label="Sections">
           {NAV.map((n) => (
             <button key={n.tab} className="dock-item" aria-label={n.label} title={n.label} aria-current={tab === n.tab ? "page" : undefined} onClick={() => setTab(n.tab)}>
-              {tab === n.tab && <motion.span layoutId="dock-pill" className="dock-pill" transition={spring.hover} />}
+              {tab === n.tab && <motion.span layoutId="dock-pill" className="dock-pill" transition={spring.snap} />}
               <Icon name={n.icon} size={19} />
               {n.tab === "agents" && running > 0 && <span className="badge tabular">{running}</span>}
             </button>

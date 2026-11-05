@@ -3,12 +3,12 @@
 // interrupted transition keeps its velocity instead of restarting, and nothing
 // inside re-renders per frame.
 
-import { contentEnter, contentEnterReduced, instant, scaled, spring } from "@meridian/design-system/motion";
+import { contentEnter, contentEnterReduced, instant, scaled, spring, type SpringName } from "@meridian/design-system/motion";
 import { AnimatePresence, animate, motion, useMotionValue, useTransform } from "motion/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { bridge } from "../lib/bridge";
 import { lastMessage } from "../lib/sessions";
-import { openPanel, reportView, togglePanel, useApp } from "../lib/store";
+import { feel, openPanel, planUse, reportView, togglePanel, useApp } from "../lib/store";
 import { Panel } from "../panel/Panel";
 import { useReduced } from "./faces";
 import { activeSessions, deriveView, geometryFor, stateToken, waitingApproval, type IslandView, type Snapshot } from "./machine";
@@ -40,6 +40,13 @@ const BIRTH = { w: 18, h: 4 };
 const VOICE_LINE = 52;
 /** Views with a light running round the edge, because something is under way. */
 const LIT: ReadonlySet<IslandView> = new Set(["listening", "thinking", "working", "multitask", "error", "notification"]);
+/** The light runs two laps as something starts, then one this often while it lasts. The rim stays lit. */
+const LAP_EVERY: Partial<Record<IslandView, number>> = { listening: 6000, thinking: 6000, working: 12_000, multitask: 12_000 };
+/** A request waiting for an answer taps more often. */
+const LAP_WAITING = 8000;
+const LAP_MS: Partial<Record<IslandView, number>> = { thinking: 1800, notification: 1600, error: 1600 };
+/** The face plays its pick-up, lean and landing once, which is about as long as a drag lasts. */
+const DRAG_FEEL_MS = 1600;
 
 function useSnapshot(): Snapshot {
   const panelOpen = useApp((s) => s.panelOpen);
@@ -115,6 +122,7 @@ export function Island() {
   const wakeOn = useApp((s) => s.wake.state === "listening");
   const battery = useApp((s) => s.level?.kind === "battery");
   const charged = useApp((s) => s.settings.showBattery && s.charge !== null);
+  const usage = useApp((s) => s.settings.showUsage && planUse(s) !== null);
   const voiceLong = useApp((s) => ((s.voice?.words.length ?? 0) + (s.voice?.ahead.length ?? 0)) > VOICE_LINE);
   const stagesOpen = useApp((s) => s.stagesOpen);
   const finished = useApp((s) => {
@@ -129,6 +137,8 @@ export function Island() {
   const playerOpen = mediaOpen || hovered;
 
   useEffect(() => reportView(view), [view]);
+  // One switch for reduced motion, from the app's setting and Windows', for every style to follow.
+  useEffect(() => void document.documentElement.toggleAttribute("data-reduced", reduced), [reduced]);
 
   const target = geometryFor(view, {
     hovered: opened,
@@ -140,6 +150,7 @@ export function Island() {
     asking: waiting?.approval,
     clock,
     charge: charged,
+    usage,
     sliver,
     actions: (snapshot.notices[0]?.actions?.length ?? 0) > 0 || snapshot.notices[0]?.eventId !== undefined,
     tab,
@@ -162,6 +173,7 @@ export function Island() {
   // Its contents are clipped to the same corners, all four of them when it floats.
   const corner = useTransform([width, height, radius, afloat], ([w, h, r, f]: number[]) => (f ? pillRadius(w!, h!, r!) : r!));
   const topCorner = useTransform([corner, afloat], ([c, f]: number[]) => (f ? c! : 0));
+  const comet = useRef<SVGPathElement | null>(null);
   const press = useRef<{ x: number; y: number; moved: boolean } | null>(null);
   const justDragged = useRef(false);
   const el = useRef<HTMLDivElement>(null);
@@ -185,9 +197,11 @@ export function Island() {
     };
   }, [width, height]);
 
+  // Which spring moves the shape, so the content can wait for it.
+  const shapeSpring: SpringName = target.w * target.h > width.get() * height.get() ? "grow" : hovered ? "snap" : "shrink";
   useEffect(() => {
     const grows = target.w * target.h > width.get() * height.get();
-    const transition = reduced ? instant : scaled(grows ? spring.grow : hovered ? spring.hover : spring.shrink, speed);
+    const transition = reduced ? instant : scaled(grows ? spring.grow : hovered ? spring.snap : spring.shrink, speed);
     const controls = [
       animate(width, target.w, transition),
       animate(height, target.h, transition),
@@ -196,7 +210,7 @@ export function Island() {
     return () => controls.forEach((c) => c.stop());
   }, [target.w, target.h, target.r, reduced, hovered, speed, width, height, radius]);
 
-  const enter = reduced ? contentEnterReduced : contentEnter;
+  const enter = reduced ? contentEnterReduced : contentEnter(shapeSpring, speed, place === "up");
   const expanded = view === "expanded";
 
   // Press and move to drag it anywhere. Less than a few pixels is still a click.
@@ -211,6 +225,7 @@ export function Island() {
     // Only now: capturing on every press would take the click from a button inside the island.
     el.current?.setPointerCapture(e.pointerId);
     setDragging(true);
+    feel("drag", DRAG_FEEL_MS);
     void bridge.islandDrag(true);
   };
   const up = () => {
@@ -223,7 +238,23 @@ export function Island() {
     setDragging(false);
     void bridge.islandDrag(false);
   };
-  const lit = LIT.has(view) && !reduced;
+  const lit = LIT.has(view);
+  const lapMs = (LAP_MS[view] ?? 2400) / speed;
+  const lapEvery = view === "working" && waiting !== null ? LAP_WAITING : LAP_EVERY[view];
+
+  // Laps of light, not a loop: one that ran for as long as an approval waited would redraw the
+  // whole window for all of that time.
+  useEffect(() => {
+    const path = comet.current;
+    if (!path || !lit || reduced) return;
+    const lap = (laps: number) => path.animate([{ strokeDashoffset: 0.22 }, { strokeDashoffset: -1 }], { duration: lapMs, iterations: laps });
+    lap(2);
+    const timer = lapEvery ? setInterval(() => lap(1), lapEvery) : undefined;
+    return () => {
+      clearInterval(timer);
+      path.getAnimations().forEach((a) => a.cancel());
+    };
+  }, [lit, reduced, view, lapMs, lapEvery]);
   const glow = view === "media" ? artTint ?? "#ff7a9c" : `var(${stateToken(view, snapshot)})`;
   // A waiting request looks the same either way, and swapping it would lose the answers so far.
   const opensOnHover = view === "idle" || view === "live" || view === "note" || (view === "working" && waiting === null);
@@ -259,14 +290,23 @@ export function Island() {
         <svg className="island-light" aria-hidden="true">
           <motion.path className="island-rim" d={outline} />
           {/* Measured as 1 long, so the dash in the styles is a share of the outline at any size. */}
-          <motion.path className="island-comet" d={outline} ref={(path: SVGPathElement | null) => path?.setAttribute("pathLength", "1")} />
+          {!reduced && (
+            <motion.path
+              className="island-comet"
+              d={outline}
+              ref={(path: SVGPathElement | null) => {
+                comet.current = path;
+                path?.setAttribute("pathLength", "1");
+              }}
+            />
+          )}
         </svg>
       )}
       <Bubble />
       <motion.div className="island-shape" style={{ borderBottomLeftRadius: corner, borderBottomRightRadius: corner, borderTopLeftRadius: topCorner, borderTopRightRadius: topCorner }}>
         <span className="island-tint" aria-hidden="true" />
         <AnimatePresence initial={false}>
-          <motion.div key={contentKey} className="island-content" style={{ width: target.w, height: target.h }} initial={enter.initial} animate={enter.animate} exit={enter.exit}>
+          <motion.div key={contentKey} className="island-content" style={{ width: target.w, height: target.h, transformOrigin: place === "up" ? "50% 100%" : "50% 0" }} initial={enter.initial} animate={enter.animate} exit={enter.exit}>
             {expanded ? <Panel /> : <CompactContent view={view} reduced={reduced} hovered={opened} sliver={sliver} mediaOpen={playerOpen} />}
           </motion.div>
         </AnimatePresence>

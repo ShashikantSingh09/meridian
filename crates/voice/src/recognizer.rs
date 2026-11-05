@@ -283,8 +283,11 @@ unsafe fn open(words: &[String], shared: &Shared) -> windows::core::Result<Sessi
     context.SetInterest(wanted, wanted)?;
     let rules = context.CreateGrammar(1)?;
     // The grammar is read from a file, so it is written for a moment to this app's temporary folder.
-    let file = std::env::temp_dir().join(format!("meridian-wake-{}.xml", std::process::id()));
-    std::fs::write(&file, grammar(words, tag)).map_err(|err| windows::core::Error::new(E_NOTIMPL, err.to_string()))?;
+    // A name nobody can guess, and a file that must be new, so nothing can be put there first.
+    let unique = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |t| t.as_nanos());
+    let file = std::env::temp_dir().join(format!("meridian-wake-{}-{unique}.xml", std::process::id()));
+    let written = std::fs::OpenOptions::new().write(true).create_new(true).open(&file).and_then(|mut out| std::io::Write::write_all(&mut out, grammar(words, tag).as_bytes()));
+    written.map_err(|err| windows::core::Error::new(E_NOTIMPL, err.to_string()))?;
     let loaded = rules.LoadCmdFromFile(&HSTRING::from(file.as_os_str()), SPLO_STATIC);
     let _ = std::fs::remove_file(&file);
     loaded?;

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { bridge } from "./bridge";
-import { chatEngine, dismissError, dismissNotice, getState, openPanel, pushError, pushNotice, setNotes, showNote, updateSettings } from "./store";
+import { chatEngine, dismissError, dismissNotice, getState, openPanel, pushError, pushNotice, setNotes, setQuietCall, showNote, updateSettings } from "./store";
 import type { Note, NoteLevels } from "./types";
 import { closeNoteMicrophone, openNoteMicrophone } from "./voice";
 
@@ -100,8 +100,7 @@ export async function copyNote(id: string) {
 
 export async function exportNote(note: Note) {
   const safe = note.title.replace(/[^\p{L}\p{N} -]+/gu, " ").replace(/\s+/g, " ").trim() || "Notes";
-  const path = await bridge.pickSavePath(`${safe}.md`);
-  if (path) await bridge.noteExport(note.id, path).catch((err) => pushError({ title: "Could not export this note", body: String(err) }));
+  await bridge.noteExport(note.id, safe).catch((err) => pushError({ title: "Could not export this note", body: String(err) }));
 }
 
 export function setSummaryByItself(notesSummary: boolean) {
@@ -111,6 +110,11 @@ export function setSummaryByItself(notesSummary: boolean) {
 export function wireNotes() {
   void bridge.onNotesChanged(() => void refreshNotes());
   void bridge.onNoteWritten((id) => void written(id));
+  void bridge.onNoteQuiet(setQuietCall);
+  void bridge.onNoteStoppedQuiet((id) => {
+    setQuietCall(0);
+    pushNotice({ tone: "info", title: "Stopped", body: "Nobody spoke for 15 minutes", note: id });
+  });
   void bridge.onNoteFailed(({ id, title, why }) => {
     // Someone looking at Notes already sees it, on the note itself.
     const { panelOpen, tab } = getState();

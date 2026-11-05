@@ -51,6 +51,16 @@ pub struct Approval {
     /// The plan to approve, for ExitPlanMode.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub plan: Option<String>,
+    /// The whole of what is asked, when the summary leaves part of it out. The island will not
+    /// take an Allow until this has been opened.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub full: Option<String>,
+    /// How many characters the request has in all, when even `full` had to stop short.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub length: Option<usize>,
+    /// The folder an agent would start in, for the assistant's start_agent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub folder: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -85,8 +95,9 @@ pub enum AgentEvent {
     Limits { windows: Vec<LimitWindow> },
     /// How full the conversation is. The two numbers arrive at different times.
     Context { used: Option<u64>, size: Option<u64> },
-    /// A session this app did not start, heard from for the first time.
-    Watched { agent: String, cwd: String, title: Option<String> },
+    /// A session this app did not start, heard from for the first time. `pid` is its Claude Code
+    /// process, for finding its terminal, when the app could tell which one it is.
+    Watched { agent: String, cwd: String, title: Option<String>, pid: Option<u32> },
     /// Lines an edit takes out and puts in, shown while it happens and never saved. Those are cut
     /// short, so the two counts say how many lines really changed.
     Diff { path: String, removed: Vec<String>, added: Vec<String>, lines_removed: usize, lines_added: usize },

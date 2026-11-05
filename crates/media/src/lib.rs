@@ -8,9 +8,11 @@
 //! listen for the few that publish nothing at all. See `audio`.
 
 mod audio;
+mod hush;
 pub mod levels;
 pub mod loopback;
 pub use audio::audible_now;
+pub use hush::Hush;
 
 use std::collections::HashMap;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};

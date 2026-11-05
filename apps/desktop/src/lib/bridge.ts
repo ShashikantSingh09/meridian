@@ -76,6 +76,8 @@ export const bridge = {
     native ? invoke<void>("island_set_rect", { rect: { ...rect, dpr: window.devicePixelRatio || 1 } }) : Promise.resolve(),
   setInteractive: (on: boolean) => (native ? invoke<void>("island_set_interactive", { on }) : Promise.resolve()),
   islandDrag: (start: boolean) => (native ? invoke<void>("island_drag", { start }) : mock.islandDrag(start)),
+  /** Off while the face sleeps, so the core stops reporting the pointer. */
+  islandGaze: (on: boolean) => (native ? invoke<void>("island_gaze", { on }) : Promise.resolve()),
   islandReset: () => (native ? invoke<void>("island_reset") : mock.islandReset()),
   islandPlacement: () => (native ? invoke<IslandPlace>("island_placement") : mock.islandPlacement()),
   batteryNow: () => (native ? invoke<Charge | null>("battery_now") : mock.batteryNow()),
@@ -166,7 +168,19 @@ export const bridge = {
     native
       ? invoke<UpdateStatus>("update_check")
       : mock.checkUpdate(),
-  installUpdate: () => (native ? invoke<void>("update_install") : mock.installUpdate()),
+  /** Installs the version the user was shown, and refuses if a newer one appeared since. */
+  installUpdate: (tag: string) => (native ? invoke<void>("update_install", { tag }) : mock.installUpdate()),
+  /** How this copy was installed. A portable copy cannot update itself. */
+  updateKind: () => (native ? invoke<"setup" | "msi" | "portable">("update_kind") : mock.updateKind()),
+  /** Other apps go quiet while the user talks, and come back after. */
+  hushOn: (leaveCalls: boolean) => (native ? invoke<void>("hush_on", { leaveCalls }) : mock.hushOn(leaveCalls)),
+  hushOff: () => (native ? invoke<void>("hush_off") : mock.hushOff()),
+  /** What the agents are doing and the plan use, for the assistant's agents_status tool. */
+  assistantContext: (agents: string) => (native ? invoke<void>("assistant_context", { agents }) : Promise.resolve()),
+  /** Brings the window a terminal session runs in to the front. False when none was found. */
+  terminalFocus: (pid: number, project: string | null) => (native ? invoke<boolean>("terminal_focus", { pid, project }) : mock.terminalFocus(pid)),
+  /** Whether that window is already in front, so a finish needs no chime. */
+  terminalInFront: (pid: number) => (native ? invoke<boolean>("terminal_in_front", { pid }) : mock.terminalInFront(pid)),
   openLogs: () => (native ? invoke<void>("open_logs") : Promise.resolve()),
 
   screenCapture: (target: "window" | "screen") =>
@@ -287,6 +301,14 @@ export const bridge = {
     if (!native) return Promise.resolve();
     return listen("assistant-stop-listening", handler).then(() => {});
   },
+  /** A question from the assistant's own tools, asked after it read other people's words. */
+  onAssistantConfirm(asked: (confirm: { id: string; tool: string; summary: string }) => void, gone: (id: string) => void) {
+    if (!native) return Promise.resolve();
+    return Promise.all([
+      listen<{ id: string; tool: string; summary: string }>("assistant-confirm", (e) => asked(e.payload)),
+      listen<string>("assistant-confirm-resolved", (e) => gone(e.payload)),
+    ]).then(() => {});
+  },
   onAssistantAgent(handler: (start: { task: string; folder: string }) => void) {
     if (!native) return Promise.resolve();
     return listen<{ task: string; folder: string }>("assistant-start-agent", (e) => handler(e.payload)).then(() => {});
@@ -307,11 +329,30 @@ export const bridge = {
   noteSummarize: (id: string, engine: { agent?: string; provider?: string; model?: string }) =>
     native ? invoke<void>("notes_summarize", { id, agent: engine.agent ?? null, provider: engine.provider ?? null, model: engine.model ?? null }) : mock.noteSummarize(id),
   noteMarkdown: (id: string) => (native ? invoke<string>("notes_markdown", { id }) : mock.noteMarkdown(id)),
-  noteExport: (id: string, path: string) => (native ? invoke<void>("notes_export", { id, path }) : mock.noteExport(path)),
+  /** Saves a note where the user picks, in a dialog the core opens. False if they closed it. */
+  noteExport: async (id: string, name: string) => {
+    if (!native) return mock.noteExport(`C:\\Users\\sample\\Documents\\${name}.md`);
+    dialogOpen = true;
+    try {
+      return await invoke<boolean>("notes_export", { id, name });
+    } finally {
+      dialogOpen = false;
+    }
+  },
   onNotesChanged(handler: () => void) {
     if (!native) return Promise.resolve(mock.onNotesChanged(handler));
     return listen("notes-changed", handler).then(() => {});
   },
+  /** A quiet recording: seconds before it stops by itself, or 0 when someone spoke again. */
+  onNoteQuiet(handler: (left: number) => void) {
+    if (!native) return Promise.resolve(mock.onNoteQuiet(handler));
+    return listen<number>("note-quiet", (e) => handler(e.payload)).then(() => {});
+  },
+  onNoteStoppedQuiet(handler: (id: string) => void) {
+    if (!native) return Promise.resolve(mock.onNoteStoppedQuiet(handler));
+    return listen<string>("note-stopped-quiet", (e) => handler(e.payload)).then(() => {});
+  },
+  keepRecording: () => (native ? invoke<void>("notes_keep_going") : mock.keepRecording()),
   onNoteWritten(handler: (id: string) => void) {
     if (!native) return Promise.resolve(mock.onNoteWritten(handler));
     return listen<string>("note-written", (e) => handler(e.payload)).then(() => {});

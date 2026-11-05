@@ -36,6 +36,10 @@ import { watchTheme } from "./lib/theme";
 import { refreshNotes, wireNotes } from "./lib/notes";
 import { endConversation, say, startVoice, wireVoice } from "./lib/voice";
 
+// A file or link dropped on the island would otherwise load in its place, and every page here can
+// reach the app's commands. The island's own drag uses the pointer, not this, so nothing is lost.
+for (const kind of ["dragover", "drop"] as const) addEventListener(kind, (e) => e.preventDefault());
+
 createRoot(document.getElementById("root")!).render(<Island />);
 
 wireVoice();

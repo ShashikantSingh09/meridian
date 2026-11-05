@@ -1,7 +1,8 @@
 // Small moving pieces shared by the island and the panel.
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { mediaAction } from "../lib/store";
+import { useReduced } from "./faces";
 import type { MediaAction, Track } from "../lib/types";
 
 /** Our own spark, drawn here. It is not the official Claude logo: that is Anthropic's mark,
@@ -43,12 +44,37 @@ export function AgentMark({ agent, size = 18, live = true }: { agent: string; si
   );
 }
 
-/** Music bars. They rest flat when paused, and cost nothing then. */
+/** Where each bar stands while music plays and the bars are still. */
+const BAR_REST = [0.35, 0.8, 0.55, 1, 0.45];
+const BARS_MOVE_MS = 6000;
+const BARS_RIPPLE_MS = 1200;
+const BARS_RIPPLE_EVERY = 12_000;
+
+/** Music bars. Playing, they move for 6 s, then stand at their own heights with a small ripple every
+ *  12 s: music can play for hours, and anything moving redraws the whole window. Paused, they rest flat. */
 export function Bars({ playing, count = 5, height = 16 }: { playing: boolean; count?: number; height?: number }) {
+  const box = useRef<HTMLSpanElement>(null);
+  const reduced = useReduced();
+  useEffect(() => {
+    const bars = [...(box.current?.children ?? [])] as HTMLElement[];
+    if (!playing || reduced) return;
+    const move = (ms: number) =>
+      bars.forEach((bar, i) => {
+        const rest = BAR_REST[i % BAR_REST.length]!;
+        const beat = 500 + ((i * 7) % 5) * 90;
+        bar.animate({ scale: [`1 ${rest}`, `1 ${1.25 - rest}`, `1 ${rest}`] }, { duration: beat, iterations: Math.max(1, Math.round(ms / beat)), easing: "ease-in-out" });
+      });
+    move(BARS_MOVE_MS);
+    const timer = setInterval(() => move(BARS_RIPPLE_MS), BARS_RIPPLE_EVERY);
+    return () => {
+      clearInterval(timer);
+      bars.forEach((bar) => bar.getAnimations().forEach((a) => a.cancel()));
+    };
+  }, [playing, reduced]);
   return (
-    <span className="bars" data-playing={playing} style={{ height }} aria-hidden="true">
+    <span ref={box} className="bars" data-playing={playing} style={{ height }} aria-hidden="true">
       {Array.from({ length: count }, (_, i) => (
-        <i key={i} style={{ animationDuration: `${0.5 + ((i * 7) % 5) * 0.09}s`, animationDelay: `${-i * 0.17}s` }} />
+        <i key={i} style={{ "--h": BAR_REST[i % BAR_REST.length] } as React.CSSProperties} />
       ))}
     </span>
   );

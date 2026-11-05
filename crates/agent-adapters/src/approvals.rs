@@ -83,29 +83,71 @@ impl ApprovalServer {
 
 /// The `--settings` JSON that injects the hook for one run.
 pub fn settings_json(url: &str) -> String {
-    json!({
-        "hooks": { "PermissionRequest": [{
-            "hooks": [{ "type": "http", "url": url, "timeout": HOOK_TIMEOUT_SECS }]
-        }]}
-    })
-    .to_string()
+    settings_with(url, None)
 }
 
-/// One line for the island saying what is being asked for.
-pub fn summarize(tool: &str, input: &Value) -> String {
-    match tool {
-        "mcp__meridian__read_screen" => return "Read what is on your screen".to_string(),
-        "mcp__meridian__start_agent" => return format!("Start an agent: {}", input["task"].as_str().unwrap_or_default()).chars().take(240).collect(),
-        _ => {}
+/// The same, and for the assistant a check before the CLI's own web tools run, so the app can
+/// refuse them after the assistant has read other people's words.
+pub fn settings_with(url: &str, before_web: Option<&str>) -> String {
+    let mut hooks = json!({ "PermissionRequest": [{ "hooks": [{ "type": "http", "url": url, "timeout": HOOK_TIMEOUT_SECS }] }] });
+    if let Some(before) = before_web {
+        hooks["PreToolUse"] = json!([{ "matcher": "WebFetch|WebSearch", "hooks": [{ "type": "http", "url": before, "timeout": 10 }] }]);
     }
+    json!({ "hooks": hooks }).to_string()
+}
+
+/// How much of a request fits on the island's line.
+pub const SHOWN: usize = 240;
+/// The most of a request that is ever sent to the interface. Longer ones can only be denied there.
+pub const MOST_FULL: usize = 20_000;
+
+/// What a request is about, whole: the command, the path, the address, or the input itself.
+fn subject(tool: &str, input: &Value) -> String {
     let text = match tool {
+        "mcp__meridian__read_screen" => return "Read what is on your screen".to_string(),
+        "mcp__meridian__start_agent" => return format!("Start an agent: {}", input["task"].as_str().unwrap_or_default()),
         "Bash" | "PowerShell" => input["command"].as_str(),
         "Edit" | "Write" | "MultiEdit" | "Read" | "NotebookEdit" => input["file_path"].as_str(),
         "WebFetch" => input["url"].as_str(),
         _ => None,
     };
-    let text = text.map(str::to_string).unwrap_or_else(|| input.to_string());
-    text.chars().take(240).collect()
+    text.map(str::to_string).unwrap_or_else(|| input.to_string())
+}
+
+/// What the island shows: one line, the whole text when the line leaves anything out, and the
+/// full length when even that had to stop. Nobody should approve what they cannot see.
+pub fn shown(text: &str) -> (String, Option<String>, Option<usize>) {
+    let flat = text.trim();
+    let line: String = flat.chars().take(SHOWN).collect();
+    let count = text.chars().count();
+    if flat.chars().count() <= SHOWN && !flat.contains('\n') {
+        return (line, None, None);
+    }
+    let full: String = text.chars().take(MOST_FULL).collect();
+    (line, Some(full), (count > MOST_FULL).then_some(count))
+}
+
+/// One line for the island saying what is being asked for.
+pub fn summarize(tool: &str, input: &Value) -> String {
+    shown(&subject(tool, input)).0
+}
+
+/// Fills in what the island shows for a request: its line, the whole text when that is longer,
+/// and the folder an agent would start in.
+pub fn approval(id: String, tool: &str, input: &Value) -> Approval {
+    let (summary, full, length) = shown(&subject(tool, input));
+    let folder = (tool == "mcp__meridian__start_agent").then(|| input["folder"].as_str().map(str::to_string)).flatten();
+    Approval { id, tool: label(tool), summary, full, length, folder, ..Default::default() }
+}
+
+/// The app's own tools are named for the agent, so they are put in plain words here.
+fn label(tool: &str) -> String {
+    match tool {
+        "mcp__meridian__start_agent" => "Start an agent".to_string(),
+        "mcp__meridian__read_screen" => "Read the screen".to_string(),
+        t if t.starts_with("mcp__meridian__") => "Action".to_string(),
+        t => crate::claude::connector_tool(t).unwrap_or_else(|| t.to_string()),
+    }
 }
 
 pub fn decision_body(allow: bool) -> String {
@@ -171,13 +213,11 @@ async fn handle(mut socket: TcpStream, state: Arc<Mutex<State>>) {
     };
 
     let id = uuid::Uuid::new_v4().to_string();
-    let tool = payload["tool_name"].as_str().unwrap_or("Tool").to_string();
-    let summary = summarize(&tool, &payload["tool_input"]);
-    // The app's own tools are named for the agent, so they are put in plain words here.
-    let tool = if tool.starts_with("mcp__meridian__") { "Action".to_string() } else { crate::claude::connector_tool(&tool).unwrap_or(tool) };
+    let tool = payload["tool_name"].as_str().unwrap_or("Tool");
+    let asked = approval(id.clone(), tool, &payload["tool_input"]);
     let (tx, rx) = oneshot::channel();
     state.lock().unwrap().waiting.insert(id.clone(), tx);
-    emit(AgentEvent::Approval { approval: Approval { id: id.clone(), tool, summary, ..Default::default() } });
+    emit(AgentEvent::Approval { approval: asked });
 
     let decision = tokio::time::timeout(DECISION_TIMEOUT, rx).await;
     state.lock().unwrap().waiting.remove(&id);
@@ -282,5 +322,37 @@ mod tests {
         assert_eq!(summarize("Edit", &json!({"file_path": "a.rs"})), "a.rs");
         assert!(summarize("Mystery", &json!({"x": 1})).contains("\"x\""));
         assert!(summarize("Bash", &json!({"command": "y".repeat(999)})).len() <= 240);
+    }
+
+    #[test]
+    fn nothing_is_left_out_without_saying_so() {
+        let short = approval("a".into(), "Bash", &json!({"command": "npm test"}));
+        assert_eq!((short.summary.as_str(), short.full, short.length), ("npm test", None, None));
+
+        // A harmless start with the rest past the line: the whole command travels with it.
+        let long = format!("echo {} ; echo FINAL_MARKER", "a".repeat(240));
+        let cut = approval("b".into(), "Bash", &json!({"command": long}));
+        assert!(!cut.summary.contains("FINAL_MARKER"));
+        assert_eq!(cut.full.as_deref(), Some(long.as_str()));
+
+        // Leading blank lines no longer push the command off the line, and a second line counts as hidden.
+        let padded = format!("{}rm -rf build", "\n".repeat(240));
+        let line = approval("c".into(), "Bash", &json!({"command": padded}));
+        assert_eq!(line.summary, "rm -rf build");
+        let two = approval("d".into(), "Bash", &json!({"command": "echo hi\nrm -rf build"}));
+        assert!(two.full.is_some());
+
+        // Past the most that is sent, the total length says so.
+        let huge = approval("e".into(), "Bash", &json!({"command": "x".repeat(MOST_FULL + 5)}));
+        assert_eq!(huge.length, Some(MOST_FULL + 5));
+    }
+
+    #[test]
+    fn starting_an_agent_names_its_folder() {
+        let asked = approval("a".into(), "mcp__meridian__start_agent", &json!({"task": "fix tests", "folder": "C:\\dummy\\other"}));
+        assert_eq!(asked.tool, "Start an agent");
+        assert_eq!(asked.summary, "Start an agent: fix tests");
+        assert_eq!(asked.folder.as_deref(), Some("C:\\dummy\\other"));
+        assert_eq!(approval("b".into(), "Bash", &json!({"command": "x", "folder": "y"})).folder, None);
     }
 }

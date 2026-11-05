@@ -4,8 +4,8 @@
 // chose, and nothing is ever recorded to disk.
 
 import { bridge } from "./bridge";
-import { answerApproval, feel, getState, openPanel, openSettings, pickEngine, pushError, sendAgentChat, sendChat, setVoice, setWake, startSession, wakeTestHeard, type Tab } from "./store";
-import { filler, isGoodbye, sentences, silenceFor, speakable, withoutWakeWord, yesOrNo } from "./turns";
+import { answerApproval, feel, getState, knownFolder, openPanel, openSettings, pickEngine, pushError, sendAgentChat, sendChat, setVoice, setWake, startSession, wakeTestHeard, type Tab } from "./store";
+import { filler, isGoodbye, pickAllowWord, sentences, silenceFor, speakable, spokenAnswer, withoutWakeWord } from "./turns";
 
 export type VoiceMode = "hold" | "turn" | "conversation";
 export type VoicePhase = "listening" | "pause" | "thinking" | "speaking";
@@ -31,6 +31,8 @@ const LONGEST_TURN_MS = 45_000;
 const MOST_SENTENCES = 3;
 const INTERRUPT_MS = 200;
 const FILLER_AFTER_MS = 1600;
+/** How long the face shows it heard its name: a squash, a pop and a blink. */
+const HEARD_MS = 700;
 /** A key held less than this was tapped. */
 const TAP_MS = 280;
 const DOUBLE_TAP_MS = 380;
@@ -76,8 +78,8 @@ let session: {
   loudMs: number;
   listenedMs: number;
   turn: number;
-  /** A request waiting for a spoken yes or no, and how many sentences came before it. */
-  deciding: { sessionId: string; approvalId: string; spoken: number } | null;
+  /** A request waiting for a spoken answer, the word that allows it, and how many sentences came before it. */
+  deciding: { sessionId: string; approvalId: string; spoken: number; word: string } | null;
   /** What the chat held when the user last spoke, so an earlier reply is not taken for this one. */
   before: unknown;
   /** The assistant heard them say they were finished, so this reply is the last. */
@@ -315,8 +317,27 @@ export async function teachWakeWord(word: string, onStep: (recording: number, of
   }
 }
 
+/** Whether other apps were made quiet for this conversation, so they get their sound back once. */
+let hushed = false;
+
+/** Other apps go quiet while the user talks, unless they turned it off or a call is being recorded,
+ *  which would empty the PC side of the recording. */
+function hushRoom() {
+  const { settings, notes } = getState();
+  if (hushed || !settings.hushWhileTalking || notes?.recording) return;
+  hushed = true;
+  void bridge.hushOn(settings.hushLeaveCalls).catch(() => undefined);
+}
+
+function unhushRoom() {
+  if (!hushed) return;
+  hushed = false;
+  void bridge.hushOff().catch(() => undefined);
+}
+
 export function endConversation() {
   silence();
+  unhushRoom();
   if (session) closeMicrophone(session.stream, session.context);
   session = null;
   micLevel = 0;
@@ -440,11 +461,11 @@ async function finishTurn() {
   const goodbye = isGoodbye(said, [...wakeWords, getState().settings.assistantName ?? ""]);
 
   if (now.deciding) {
-    const answer = yesOrNo(said);
+    const answer = spokenAnswer(said, now.deciding.word);
     if (answer === null) {
       // A request stays on the island for its buttons. Leaving never answers it.
       if (goodbye) return endConversation();
-      await speak("Please say yes or no, or use the buttons.");
+      await speak(`To allow it, say allow ${now.deciding.word}. Or say no, or use the buttons.`);
       return void listen(now.mode);
     }
     const { sessionId, approvalId, spoken } = now.deciding;
@@ -464,7 +485,7 @@ function chatNow() {
 }
 
 /** Everything the AI has written since the last thing the user said. */
-function replySoFar(): { text: string; done: boolean; waiting: { sessionId: string; approvalId: string; summary: string; agent: string } | null } {
+function replySoFar(): { text: string; done: boolean; waiting: { sessionId: string; approvalId: string; summary: string; agent: string; tool: string; whole: boolean } | null } {
   const app = getState();
   const unchanged = chatNow() === session?.before;
   if (!app.agentChat.agent) {
@@ -483,7 +504,7 @@ function replySoFar(): { text: string; done: boolean; waiting: { sessionId: stri
   return {
     text: done ? answer || (turn.length > 0 && chat.status === "completed" ? "Done." : "") : "",
     done,
-    waiting: asking ? { sessionId: chat.id, approvalId: asking.id, summary: asking.summary, agent: chat.agent } : null,
+    waiting: asking ? { sessionId: chat.id, approvalId: asking.id, summary: asking.summary, agent: chat.agent, tool: asking.tool, whole: !asking.full } : null,
   };
 }
 
@@ -520,9 +541,14 @@ async function followReply(turn: number, spoken = 0, answered: string | null = n
   while (current()) {
     const reply = replySoFar();
     if (reply.waiting && reply.waiting.approvalId !== answered) {
-      session!.deciding = { ...reply.waiting, spoken };
-      update({ phase: "speaking", words: `${reply.waiting.agent} wants to: ${reply.waiting.summary}. Should it?`, ahead: "" });
-      await speak(`${reply.waiting.agent} wants to ${speakable(reply.waiting.summary)}. Should it?`);
+      // Allowing needs a word picked for this request, so a "yes" from a video or another person
+      // cannot do it. A command is not read out, because reading it aloud drops what matters.
+      const word = pickAllowWord();
+      const { agent, summary, tool, whole } = reply.waiting;
+      const shell = ["Bash", "PowerShell", "Shell"].includes(tool) || !whole;
+      session!.deciding = { sessionId: reply.waiting.sessionId, approvalId: reply.waiting.approvalId, spoken, word };
+      update({ phase: "speaking", words: `${agent} wants to: ${summary}. To allow it, say "allow ${word}", or click.`, ahead: "" });
+      await speak(`${agent} wants to ${shell ? "run something. It is on the island" : speakable(summary)}. To allow it, say allow ${word}. Or say no.`);
       if (current()) await listen(session!.mode);
       return;
     }
@@ -565,6 +591,7 @@ export async function startVoice(mode: VoiceMode, woken = false, afterMs = 0) {
   const said = woken && afterMs > 0 ? recent.slice(-(Math.ceil(afterMs / CHUNK_MS) + 1)) : [];
   recent = [];
   try {
+    hushRoom();
     await openMicrophone(mode, woken);
     await listen(mode, woken);
     // Read again, because a conversation can end while it starts.
@@ -627,11 +654,18 @@ export function wireVoice() {
   void bridge.onAssistantAgent(({ task, folder }) => {
     const cwd = folder || getState().settings.agentDefaultDir;
     if (!cwd) return pushError({ title: "Choose a project folder", body: "Tell it which folder to work in." });
+    // The approval names the folder, and a folder the user never worked in is not started at all.
+    if (!knownFolder(cwd)) return pushError({ title: "Agent not started", body: `${cwd} is not a folder you have used. Start it yourself from Agents if you meant it.` });
     void startSession({ agent: "claude-code", cwd, prompt: task, model: null, restricted: false, images: [] }, "agents", "project");
   });
   void bridge.wakeStatus().then((status) => {
     setWake(status);
     if (status.state === "listening") void openEar();
   });
-  void bridge.onWakeHeard(({ word, test, afterMs }) => (test ? wakeTestHeard(word) : void startVoice(getState().settings.wakeAfter, true, afterMs)));
+  void bridge.onWakeHeard(({ word, test, afterMs }) => {
+    if (test) return wakeTestHeard(word);
+    // A perk, so it is plain it caught its name. Then it listens.
+    feel("heard", HEARD_MS);
+    void startVoice(getState().settings.wakeAfter, true, afterMs);
+  });
 }

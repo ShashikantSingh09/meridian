@@ -47,6 +47,18 @@ pub struct Settings {
     pub show_clock: bool,
     /// A laptop's charge beside the clock.
     pub show_battery: bool,
+    /// A ring by the clock for how much of the Claude plan is used. Off unless turned on.
+    pub show_usage: bool,
+    /// Whether to look for new versions by itself. None until the user has been asked.
+    pub update_checks: Option<bool>,
+    /// The version the user last saw What's new for.
+    pub last_seen_version: Option<String>,
+    /// Other apps go quiet while the user talks to the assistant.
+    pub hush_while_talking: bool,
+    /// Calls keep their sound while the room goes quiet.
+    pub hush_leave_calls: bool,
+    /// A recording nobody speaks in for 15 minutes offers to stop.
+    pub stop_quiet_calls: bool,
     /// Multiplies every spring. 1 is the designed speed.
     pub animation_speed: f64,
     pub agent_default_dir: Option<String>,
@@ -121,6 +133,12 @@ impl Default for Settings {
             island_auto_hide: false,
             show_clock: true,
             show_battery: true,
+            show_usage: false,
+            update_checks: None,
+            last_seen_version: None,
+            hush_while_talking: true,
+            hush_leave_calls: true,
+            stop_quiet_calls: true,
             animation_speed: 1.0,
             agent_default_dir: None,
             screen_mode: "ondemand".into(),

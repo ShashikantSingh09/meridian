@@ -42,7 +42,8 @@ const providers: ProviderInfo[] = [
   { id: "ollama", name: "Ollama", kind: "local", baseUrl: "http://localhost:11434/v1", needsKey: false, hasKey: false, capabilities: { ...caps, usage: false } },
 ];
 
-let settings: Settings = { ...defaultSettings, onboarded: true };
+// Tests start as someone who has already said yes to update checks. The question itself has its own test.
+let settings: Settings = { ...defaultSettings, onboarded: true, updateChecks: true };
 let noteList: NotesState = { notes: [], recording: null, working: [] };
 let notesChanged = () => {};
 let noteWritten: (id: string) => void = () => {};
@@ -86,6 +87,14 @@ let wakeHeard: ((heard: { word: string; test: boolean; afterMs: number }) => voi
 let updateStatus = { current: "0.3.0", latest: "v0.3.0", available: false, notes: "", published: null as string | null, message: "You are on the latest version." };
 let updateInstalled = false;
 let failInstalling: (why: Error) => void = () => {};
+let installKind: "setup" | "msi" | "portable" = "setup";
+const hushes: string[] = [];
+const focused: number[] = [];
+let inFront: number[] = [];
+let terminalFound = true;
+let noteQuiet: (left: number) => void = () => {};
+let noteStoppedQuiet: (id: string) => void = () => {};
+let keptRecording = 0;
 let signInGate: Promise<void> | null = null;
 let failSigningIn: (why: Error) => void = () => {};
 let pushLevel: (level: Level) => void = () => {};
@@ -96,6 +105,7 @@ const islandDrags: boolean[] = [];
 let islandResets = 0;
 let watching = false;
 let lastAnswers: Record<string, string | string[]> | null = null;
+let updateLooks = 0;
 let integrations: Integration[] = [
   { id: "linear", name: "Linear", group: "Work", blurb: "Issues assigned to you.", access: "open", connected: false, account: null, ready: true },
   { id: "slack", name: "Slack", group: "Work", blurb: "Channels you belong to.", access: "registeredApp", connected: false, account: null, ready: false },
@@ -320,7 +330,7 @@ export const mock = {
     });
   },
   noteMarkdown: async (id: string) => `# ${noteList.notes.find((n) => n.id === id)!.title}\n`,
-  noteExport: async (path: string) => void (exportedTo = path),
+  noteExport: async (path: string) => ((exportedTo = path), true),
   exportedTo: () => exportedTo,
   accountsList: async () => accounts,
   accountConnect: async (provider: ConnectedAccount["provider"]) => {
@@ -387,13 +397,32 @@ export const mock = {
   },
   setHeard: (words: string) => void (heardWords = words),
   spoken: () => spokenWords,
-  checkUpdate: async () => updateStatus,
+  checkUpdate: async () => {
+    updateLooks++;
+    return updateStatus;
+  },
   installUpdate: () => {
     updateInstalled = true;
     // Succeeding ends the real app, so this only ever answers with a failure.
     return new Promise<void>((_, reject) => (failInstalling = reject));
   },
   failInstall: (why: string) => failInstalling(new Error(why)),
+  updateKind: async () => installKind,
+  onNoteQuiet: (handler: (left: number) => void) => void (noteQuiet = handler),
+  onNoteStoppedQuiet: (handler: (id: string) => void) => void (noteStoppedQuiet = handler),
+  quietCall: (left: number) => noteQuiet(left),
+  stoppedQuiet: (id: string) => noteStoppedQuiet(id),
+  keepRecording: async () => void (keptRecording += 1),
+  keptRecording: () => keptRecording,
+  setInstallKind: (kind: "setup" | "msi" | "portable") => void (installKind = kind),
+  hushOn: async (leaveCalls: boolean) => void hushes.push(leaveCalls ? "on, calls left alone" : "on"),
+  hushOff: async () => void hushes.push("off"),
+  hushes: () => hushes,
+  terminalFocus: async (pid: number) => (focused.push(pid), terminalFound),
+  terminalInFront: async (pid: number) => inFront.includes(pid),
+  focused: () => focused,
+  setInFront: (pids: number[]) => void (inFront = pids),
+  setTerminalFound: (found: boolean) => void (terminalFound = found),
   setUpdate:(status: Partial<typeof updateStatus>) => void (updateStatus = { ...updateStatus, ...status }),
   updateInstalled: () => updateInstalled,
   watching: () => watching,
@@ -429,7 +458,7 @@ export const mock = {
 
   /** A session started in another terminal, as its hooks would report it. */
   publishWatched: (sessionId: string) => {
-    emit({ sessionId, event: { type: "watched", agent: "Claude Code", cwd: "C:\\Projects\\shop", title: "Fix the checkout" } });
+    emit({ sessionId, event: { type: "watched", agent: "Claude Code", cwd: "C:\\Projects\\shop", title: "Fix the checkout", pid: 4242 } });
     emit({ sessionId, event: { type: "activity", label: "Editing cart.ts" } });
   },
   publishEvent: (sessionId: string, event: AgentEvent) => emit({ sessionId, event }),
@@ -446,6 +475,8 @@ export const mock = {
     emit({ sessionId, event: { type: "approval", approval: { id: "p1", tool: "ExitPlanMode", summary: "Add a page", plan: "## Add a page\n\n1. Write it\n2. Test it" } } }),
   /** The last answer given to a question, so a test can see what would go back. */
   lastAnswers: () => lastAnswers,
+  /** How many times the app asked GitHub for the latest release. */
+  updateLooks: () => updateLooks,
 
   async startSession(request: { agent: string; cwd: string; prompt: string }) {
     const sessionId = crypto.randomUUID();

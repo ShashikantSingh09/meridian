@@ -490,6 +490,85 @@ side by side in the real window before it counts as done.
 Apple-style glass, themes, limits and models, the assistant's name and personality, and wake words are on the canvas and held for review.
 Wake words would reverse the part of D51 that left them out, and only because the owner asked for them.
 
+## D70. Faces glance and settle, and nothing loops for ever
+
+The owner approved the faces and motion boards on 2026-11-05. Each face is now layered: the face moves as a whole, the eyes follow the
+pointer, the lids blink, and each mood has its own shapes. Six moods were added (listening, thinking, speaking, heard, notice, picked
+up), and three faces: Horizon, Moons, and Cat with ears.
+
+A face that never stops moving is tiring to sit next to and costs power. So every mood plays once and settles, blinks and heartbeats come
+from timers with random gaps, and the eyes glance at the pointer at most four times a second, only when that moves them by a whole
+device pixel, never while the face sleeps or the island is hidden. An end-to-end test fails if anything on the island at rest, playing,
+working or waiting for an approval still has an endless animation after ten seconds. Three loops stay, only while their state lasts:
+the thinking orb, the voice thinking dots and the agent mark spinning in the panel.
+
+Motion uses six named springs (snap, grow, shrink, face, pop, drift). Content waits for the island's shape before it fades in. Reduced
+motion is one switch on the page, which turns off movement but keeps colour and shape changes.
+
+Faces are drawn at the boards' real size, about 1.5 times what the island showed before. The widest faces with the clock and charge
+fill the notch almost exactly.
+
+## D69. A security review's fixes, built from its boards
+
+A source-only security audit on 2026-11-05 found ten leads, none confirmed because nothing could be run in a sandbox. The report is in
+`~/security-audit-skill/meridian/run-1/`. The owner approved the boards on 2026-11-05, and these are the fixes.
+
+- **Nothing is approved that could not be seen.** An approval carries the whole request when its one line leaves anything out, says how
+  much is hidden, and keeps Allow off until Show all has been opened. Leading blank lines no longer push a command off the line, and a
+  second line counts as hidden. A request longer than 20,000 characters can only be denied on the island.
+- **Starting an agent names its folder.** The assistant's Start an agent shows the folder and that the agent gets full access. A folder
+  the user never worked in is not offered at all, and the page refuses it again before starting.
+- **Other people's words cannot send something out on their own.** For half an hour after the assistant reads mail, the calendar, call
+  notes or the day's events, its tools that open a website, search or open a file ask on the island first, in the tool server itself.
+  The CLI's own WebFetch and WebSearch are refused for that time, through a PreToolUse hook on the same server.
+- **open_path opens documents only.** A short list of document, picture, music and video types, never a program, a shortcut or a file a
+  script host runs, and never a path on another computer, which Windows would connect to with the user's sign-in just to look it up.
+- **The island stays on its own pages.** A navigation guard refuses anything but the app's own address, and the page cancels drops.
+- **Local-only covers Claude Code and Codex.** They send what they are given to their makers, so local-only refuses their sessions in the
+  core and the engine picker no longer offers them. Notes and mail through Claude were already refused.
+- **The terminal hooks are taken out when the app quits** and put back when it starts, and a new port always comes with a new token, so
+  nothing else on the PC can answer Claude Code on that address while the app is closed.
+- **Updates.** The version installed is the one the user was shown. It downloads into a new folder of the app's own, is checked in
+  memory before it is written, runs Windows' own tools by full path, and the installer opens the new version itself (`/S /UPDATE /R`,
+  or `AUTOLAUNCHAPP` for the MSI). A copy that was not installed is sent to the release page. Integrity still rests on the checksum, D62:
+  a signed update needs the certificate.
+- **Smaller ones.** Random, new temp folders for one-shot runs and the wake grammar; note ids checked before they name a folder; the
+  note export dialog opened by the core; provider clients follow no redirects; only `localhost` itself counts as local; the tool server
+  refuses requests with an Origin; CI builds with read-only permission and a separate job publishes.
+
+**Gave up.** WebFetch and WebSearch stop working for half an hour after the assistant reads mail or notes. Approving a long command takes
+one more click.
+
+## D68. A spoken yes is not enough to allow a command
+
+Spoken approvals answered anything that sounded like yes, and the wake word is also heard by Windows' engine, which hears anyone. A video
+playing on the PC or another person could open a conversation and say yes. Now each request gets a word from a list, said aloud and shown
+on the island, and allowing by voice means saying "allow" with that word. No is still enough to deny. A command is no longer read aloud,
+because turning it into speech drops what matters. The island shows it.
+
+**Gave up.** Saying yes to allow.
+
+## D67. Looking for updates is asked about once
+
+The app looked on GitHub at every start without asking. That broke no rule, but asking is the more trustworthy pattern, and Coucou does it.
+About 30 seconds after the first start the island asks once, and the answer is kept. Check for updates works either way. After an update,
+a few lines written for people say what is new, once.
+
+## D66. Features from Coucou, built from the boards
+
+Read from Coucou's code on 2026-11-05, for behaviour only, and approved by the owner the same day:
+
+- **A quiet room.** Other apps go quiet while the user talks to the assistant and come back after. It never unmutes what the user muted,
+  leaves call apps alone if asked, never runs while a call is recorded, and a crash list puts sound back at the next start.
+- **Go to its terminal.** A session in the user's own terminal carries Claude Code's process id. One click raises the window it runs in,
+  and when that window is already in front a finish makes no sound and no pop-up.
+- **A forgotten call stops itself.** After 15 minutes with nobody speaking on either side, the island counts down 30 seconds with Keep
+  recording, then stops.
+- **Plan use at rest.** An optional ring by the clock, from the limits the app's own runs already report.
+- **The assistant knows the agents.** A read-only `agents_status` tool. There is still no tool that answers or stops anything.
+- **Approvals.** "1 of 3" when several wait, a fold to answer later, and after a plan "Approve, and accept edits", which sets Claude
+  Code's mode for that session only and is never the default.
+
 ## D65. The island can be dragged anywhere, and shows a laptop's charge
 
 The owner asked on 2026-11-02, choosing option A of three: the island sat over browser tabs, and they wanted to move it.

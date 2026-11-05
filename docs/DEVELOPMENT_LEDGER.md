@@ -1,5 +1,45 @@
 # Development ledger
 
+## 2026-11-05: The security review's fixes, and features from Coucou
+
+The owner asked for a security audit, a look at Coucou for new features, and better motion and faces, designs first. They approved the
+boards on the canvas page "New: for your review" and asked for the fixes and changes. See `docs/DECISIONS.md`, D66 to D69. The audit
+report is in `~/security-audit-skill/meridian/run-1/`.
+
+- **No sandbox, so no lead was confirmed.** The audit read the code only. Ten leads, each re-checked by a second agent, all needing a
+  runtime or owner fact. They were fixed anyway, because each fix is small and the risk was real on its face.
+- **The updater, the room quieting and the terminal jump were built in parallel**, each in its own copy of the repository, then merged.
+  The terminal one touched files edited here, so it went in as a patch.
+- **Owner decisions taken by default** while they were away: local-only covers Claude Code and Codex, a spoken word allows by voice, web
+  tools are refused for half an hour after reading mail, and the terminal hooks are taken out on quit.
+- **Comparing the real app with the boards found three faults**, now fixed and tested. The fold button had its own row, which squeezed the
+  command to a 10 px sliver; it now sits in the header with the count, as on the board. A terminal's plan card laid its three buttons
+  out without the board's split and note. And opening Settings, Updates asked GitHub before the user had answered the question about
+  checks.
+- **The test copy ran beside the installed app**, under its own app ID and with an empty Claude folder, so the owner's Meridian and
+  terminal hooks were never touched.
+- **The faces and motion were rebuilt by one agent** in the main copy, after the rest (D70). Left for later: one face kept across views
+  and the notch-to-pill morph, staggered card rows, hover glances, the cat's ear flick, the googly rattle, blinks at pauses in speech,
+  and frame caps for the voice line and mic level.
+
+### Proved
+
+Unit tests for each new control: what an approval leaves out, the folder of Start an agent, the document list and network paths for
+open_path, the web check after reading mail, the island's address guard, the plan reply with accept edits, the quiet-call countdown,
+note ids, loopback addresses, the updater's install kind, tag check, in-memory checksum and fresh folder, the room quieting's choices and
+the terminal's process walk. In the browser build: a cut command, the folder card, the quiet-call offer, quiet when watching with the
+Terminal button, and the question about update checks. The faces: every face draws every mood, and nothing on the island loops for
+ever at rest, playing, working or waiting. The core sends gaze only for a whole device pixel of travel. In the real app (a dev build):
+all eight faces and the new moods drawn as on the boards, the approval, plan and finished cards, Settings, Island, Voice and Updates, no
+console errors, and no endless animation on the island after ten seconds at rest.
+
+### Not proved
+
+- The release build, and the real effect on Windows: muting other apps, raising a terminal window, the installer restarting the new
+  version, a dropped file being refused.
+- That Claude Code honours the PreToolUse refusal and `setMode` in its permission reply as documented.
+- How much CPU the island uses now, which needs the real app on the owner's display.
+
 ## 2026-11-02: An island that can be moved, and a laptop's charge
 
 The owner wanted to move the island off their browser tabs, and picked dragging it anywhere. See `docs/DECISIONS.md`, D65.

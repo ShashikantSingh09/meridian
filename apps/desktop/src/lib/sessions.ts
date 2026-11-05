@@ -36,6 +36,8 @@ export function groupSessions(sessions: SessionDetail[], now: number): SessionGr
 export function asking(approval: Approval): string {
   if (approval.questions?.length) return "Has a question";
   if (approval.plan) return "Has a plan to approve";
+  if (approval.tool === "Start an agent") return "Wants to start an agent";
+  if (approval.tool === "Read the screen") return "Wants to read your screen";
   return approval.tool === "Bash" || approval.tool === "PowerShell" ? "Wants to run a command" : `Wants to use ${approval.tool}`;
 }
 

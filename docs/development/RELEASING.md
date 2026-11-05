@@ -36,12 +36,19 @@ Nothing, for a working unsigned build. These optional secrets, set under Setting
 
 ## How installed copies update
 
-Meridian looks for a newer release when it starts and every six hours, and says so on the island when it finds one. Settings, Updates
-installs it on a click.
+A new copy asks once, half a minute after it first starts, whether it may look for updates by itself. Until the user says yes it looks
+only when they press Check now. With checks on, it looks when it starts and every six hours, and says so on the island when it finds
+one. Settings, Updates installs it on a click.
 
-The app reads the latest release from GitHub's public API, downloads the setup file and `SHA256SUMS.txt` from the release's own links,
-and refuses a file that does not match. It then quits, runs the installer silently, and starts again. A restart ends running agents, so
-nothing installs without the click. Nothing needs signing in while the repository is public. If it goes private again, the app falls back
+The app reads the latest release from GitHub's public API and installs only the version it showed: if the latest release changed in
+between, it refuses and shows the new one instead. It downloads the installer and `SHA256SUMS.txt` from the release's own links into a
+new folder under the app's own data, checks the file in memory before writing it, and refuses one that does not match or is over 200 MB.
+It then quits and runs the installer silently. The setup exe is run with `/S /UPDATE /R` and the MSI with `AUTOLAUNCHAPP=True`, so the
+installer starts the new version itself. A portable copy cannot install itself: Update now opens the release page instead. A restart
+ends running agents, so nothing installs without the click.
+
+Every release needs an entry in `apps/desktop/src/lib/whats-new.ts` keyed by its version. The app shows it once after updating, and in
+Settings, Updates. Nothing needs signing in while the repository is public. If it goes private again, the app falls back
 to the GitHub CLI, which then has to be signed in on each PC with `gh auth login`. See `docs/DECISIONS.md`, D52 and D62.
 
 Copies from 0.5.0 and earlier update only through `gh`. A PC without it installs the next version once by hand, from the Releases page,

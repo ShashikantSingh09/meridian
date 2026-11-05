@@ -37,9 +37,10 @@ import type {
 } from "./types";
 import type { Mood } from "../island/faces";
 import type { VoiceState } from "./voice";
-import { lastMessage, mergeTodo, resetLabel } from "./sessions";
+import { lastMessage, limitName, mergeTodo, resetLabel } from "./sessions";
 import { applyTheme } from "./theme";
 import { defaultSettings } from "./types";
+import { whatsNew, type NewThing } from "./whats-new";
 
 export type Tab = "home" | "chat" | "agents" | "media" | "day" | "notes" | "inbox" | "settings";
 export type SettingsSection = "general" | "themes" | "island" | "assistant" | "voice" | "wake" | "screen" | "updates" | "models" | "providers" | "agents" | "privacy" | "about";
@@ -79,6 +80,8 @@ export interface SessionDetail extends SessionSummary {
   queued: Approval[];
   /** Runs in the user's own terminal: it can be followed and answered, not steered. */
   watched?: boolean;
+  /** The Claude Code process of a session in a terminal, to find its window. */
+  pid?: number | null;
   /** From an earlier run of the app, so there is no process left to talk to. */
   restored?: boolean;
   /** The agent's own id for this conversation, which is what lets it carry on after a restart. */
@@ -204,6 +207,10 @@ export interface AppState {
   update: UpdateStatus;
   /** What the update is doing. Here, because the panel can close while it runs. */
   updating: "checking" | "installing" | null;
+  /** How this copy was installed. A portable copy is sent to the release page instead of updating. */
+  updateKind: "setup" | "msi" | "portable";
+  /** What changed in this version, shown once after an update. */
+  whatsNew: NewThing[];
   /** Sign-ins under way. Each opens a browser, which closes the panel. */
   signingIn: string[];
   /** The message being written, kept while the panel is closed or on another page. */
@@ -286,6 +293,8 @@ let state: AppState = {
   version: "",
   update: { current: "", latest: null, available: false, notes: "", published: null, message: "" },
   updating: null,
+  updateKind: "setup",
+  whatsNew: [],
   signingIn: [],
   draft: "",
   draftFiles: [],
@@ -369,6 +378,16 @@ function reportContext() {
 
 
 export const getState = () => state;
+
+const sameFolder = (a: string, b: string) => a.replace(/[\\/]+$/, "").toLowerCase() === b.replace(/[\\/]+$/, "").toLowerCase();
+
+/** Folders the user has worked in: the default one and every project session. The assistant can
+ *  only start an agent in one of these; anywhere else the user starts it from Agents themselves. */
+export function knownFolder(folder: string | null | undefined, s: AppState = state): boolean {
+  if (!folder) return false;
+  const known = [s.settings.agentDefaultDir, ...s.sessions.filter((x) => x.mode === "project").map((x) => x.cwd)];
+  return known.some((k) => !!k && sameFolder(k, folder));
+}
 
 export function useApp<T>(selector: (s: AppState) => T): T {
   return useSyncExternalStore(
@@ -471,8 +490,24 @@ function leaveAfter(ms: number, leave: () => void) {
   setTimeout(expire, ms);
 }
 
-export function pushNotice(notice: Omit<Notice, "id">, ms = NOTICE_MS) {
-  const id = newId();
+/** The offer to stop a recording nobody speaks in. It counts down in place, and goes when someone speaks. */
+export function setQuietCall(left: number) {
+  const others = state.notices.filter((n) => n.id !== QUIET_CALL);
+  if (left <= 0) return set({ notices: others });
+  const notice: Notice = { id: QUIET_CALL, tone: "info", title: "No one has spoken for 15 minutes", body: "", quiet: left, sticky: true };
+  set({ notices: state.notices.some((n) => n.id === QUIET_CALL) ? state.notices.map((n) => (n.id === QUIET_CALL ? notice : n)) : [...state.notices, notice] });
+}
+
+export function keepRecording() {
+  setQuietCall(0);
+  void bridge.keepRecording();
+}
+
+const QUIET_CALL = "quiet-call";
+
+export function pushNotice(notice: Omit<Notice, "id"> & { id?: string }, ms = NOTICE_MS) {
+  const id = notice.id ?? newId();
+  if (state.notices.some((n) => n.id === id)) return;
   set({ notices: [...state.notices, { ...notice, id }] });
   leaveAfter(ms, () => dismissNotice(id));
 }
@@ -681,8 +716,11 @@ export async function chatEngine(): Promise<{ agent: string } | { provider: stri
 
 /** Chat opens on an AI, so nobody meets an empty choice. Asking from anywhere else gets the same one. */
 export function pickEngine() {
+  // Agents send what they are given to their makers, so local-only mode never picks one, and drops one picked before.
+  if (state.agentChat.agent && state.settings.localOnly) set({ agentChat: { ...state.agentChat, agent: null, sessionId: null } });
   if (state.agentChat.agent) return;
-  const next = nextEngine(state.chat.providerId, usableProvider()?.id, state.agents.find((a) => a.installed)?.id);
+  const agent = state.settings.localOnly ? undefined : state.agents.find((a) => a.installed)?.id;
+  const next = nextEngine(state.chat.providerId, usableProvider()?.id, agent);
   if (next) selectEngine(next);
 }
 
@@ -797,7 +835,7 @@ export function applyAgentEvent(envelope: AgentEnvelope) {
   // Sample sessions are on show. The real ones catch up when they come back.
   if (state.preview) return hold(envelope);
   if (event.type === "watched") {
-    addWatchedSession(sessionId, event.agent, event.cwd, event.title);
+    addWatchedSession(sessionId, event.agent, event.cwd, event.title, event.pid ?? null);
     return;
   }
   // Hooks can outrun the page at startup, and the one event naming a session is
@@ -885,9 +923,7 @@ export function applyAgentEvent(envelope: AgentEnvelope) {
       // A reply in Chat is the assistant answering, which is in front of the reader or being spoken, not work to review.
       if (event.status === "completed" && session.surface !== "chat") {
         // The only ending with a message is a terminal that went silent, which is not news of work done.
-        if (event.message) pushNotice({ tone: "info", title: `${session.project} went quiet`, body: event.message, sessionId });
-        else pushNotice({ tone: "success", title: `${session.project} is done`, body: lastMessage(session) ?? session.title, sessionId, finished: true }, FINISHED_MS);
-        if (state.settings.sounds && !state.panelOpen) chime("done");
+        void announceFinish(session, sessionId, event.message ?? null);
       }
       if (event.status === "failed") {
         pushError({ title: `${session.agent} failed`, body: event.message ?? session.project, sessionId });
@@ -899,10 +935,10 @@ export function applyAgentEvent(envelope: AgentEnvelope) {
   }
 }
 
-function addWatchedSession(id: string, agent: string, cwd: string, title: string | null) {
+function addWatchedSession(id: string, agent: string, cwd: string, title: string | null, pid: number | null = null) {
   // A session that went quiet and came back keeps its row.
   if (state.sessions.some((s) => s.id === id)) {
-    patchSession(id, (s) => ({ ...s, ...newTurn(s), status: "running", endedAt: null, restored: false }));
+    patchSession(id, (s) => ({ ...s, ...newTurn(s), status: "running", endedAt: null, restored: false, pid: pid ?? s.pid }));
     return;
   }
   const session: SessionDetail = {
@@ -914,6 +950,7 @@ function addWatchedSession(id: string, agent: string, cwd: string, title: string
     title: title ?? (projectName(cwd) || "Your terminal"),
     project: projectName(cwd) || "Your terminal",
     cwd,
+    pid,
     prompt: title ?? "",
     model: null,
     status: "running",
@@ -974,6 +1011,59 @@ let lastAnswerAt = 0;
 
 /** The next request can appear under the button that was just pressed, so the second
  *  half of a double click must not approve something nobody has read. */
+/** The assistant wants to send something out after reading other people's words. It shows as a
+ *  request on its chat, answered with the same buttons, and goes when the tool server stops waiting. */
+export function askConfirm(confirm: { id: string; tool: string; summary: string }) {
+  const chat = state.sessions.find((s) => s.id === state.agentChat.sessionId) ?? state.sessions.find((s) => s.mode === "general" && !ENDED.includes(s.status));
+  if (!chat) return;
+  const approval = { id: confirm.id, tool: confirm.tool, summary: confirm.summary, why: "This came up after it read your mail or notes." };
+  applyAgentEvent({ sessionId: chat.id, event: { type: "approval", approval } });
+}
+
+export function confirmGone(id: string) {
+  const owner = state.sessions.find((s) => s.approval?.id === id || s.queued.some((a) => a.id === id));
+  if (owner) applyAgentEvent({ sessionId: owner.id, event: { type: "approvalResolved", id } });
+}
+
+/** A finish says so on the island, with a chime. When the user is already looking at the terminal
+ *  it runs in, the session just shows as done, with no sound and nothing popping up. */
+async function announceFinish(session: SessionDetail, sessionId: string, message: string | null) {
+  if (session.pid && (await bridge.terminalInFront(session.pid).catch(() => false))) return;
+  // The only ending with a message is a terminal that went silent, which is not news of work done.
+  if (message) pushNotice({ tone: "info", title: `${session.project} went quiet`, body: message, sessionId });
+  else pushNotice({ tone: "success", title: `${session.project} is done`, body: lastMessage(session) ?? session.title, sessionId, finished: true }, FINISHED_MS);
+  if (state.settings.sounds && !state.panelOpen) chime("done");
+}
+
+/** What the agents are doing and how much of the plan is used, in words for the assistant. */
+export function agentsInWords(s: AppState = state): string {
+  const now = Date.now();
+  const lines = s.sessions
+    .filter((x) => x.surface === "agents" && (!ENDED.includes(x.status) || (x.endedAt ?? 0) > now - 60 * 60_000))
+    .map((x) => `${x.title || x.project} (${x.project}, ${x.agent}): ${ENDED.includes(x.status) ? x.status : x.approval ? "waiting for the user to answer a request" : x.activity || "working"}`);
+  const plan = s.limits["claude-code"]?.windows.map((w) => `${limitName(w.window)} ${Math.round(w.usedPercent)}% used, ${resetLabel(w.resetsAt, now)}`) ?? [];
+  return [lines.length ? lines.join("\n") : "No agents are running.", plan.length ? `Claude plan: ${plan.join("; ")}.` : ""].filter(Boolean).join("\n");
+}
+
+/** The most used of the Claude plan's limits, for the ring at rest. Null until a run has reported one. */
+export function planUse(s: AppState = state): { percent: number } | null {
+  const windows = s.limits["claude-code"]?.windows ?? [];
+  return windows.length ? { percent: Math.max(...windows.map((w) => w.usedPercent)) } : null;
+}
+
+/** Folds a request away to answer later, from the Agents page or when it comes back. The agent
+ *  keeps waiting, and the request goes when the agent stops waiting. */
+export function foldApproval(sessionId: string) {
+  patchSession(sessionId, (s) => ({ ...s, foldedId: s.approval?.id ?? null }));
+}
+
+/** Brings the window a terminal session runs in to the front, from a click. */
+export async function focusTerminal(session: Pick<SessionDetail, "pid" | "cwd" | "project">) {
+  if (!session.pid) return;
+  const found = await bridge.terminalFocus(session.pid, session.cwd || null).catch(() => false);
+  if (!found) pushError({ title: "Could not find its window", body: `The terminal ${session.project} runs in may have closed.` });
+}
+
 export function answerApproval(sessionId: string, approvalId: string, allow: boolean, answers?: Record<string, string | string[]>) {
   if (Date.now() - lastAnswerAt < ANSWER_GAP_MS) return;
   lastAnswerAt = Date.now();
@@ -1265,6 +1355,9 @@ export async function disconnectIntegration(integration: Integration) {
 const FETCH_EVERY_MS = 15 * 60_000;
 /** A PC left on for days still hears about a new version. */
 const UPDATE_EVERY_MS = 6 * 60 * 60_000;
+const ASK_UPDATES_AFTER_MS = 30_000;
+const ASK_FOREVER_MS = 24 * 60 * 60_000;
+const WHATS_NEW_MS = 12_000;
 /** The charge moves slowly, and the charger coming and going arrives at once as a level. */
 const CHARGE_EVERY_MS = 60_000;
 
@@ -1367,6 +1460,45 @@ export function testWake() {
 export function wakeTestHeard(word: string) {
   clearTimeout(wakeTestEnds);
   set({ wakeTest: { phase: "heard", word } });
+}
+
+/** How far the eyes travel each way, in CSS pixels. island.rs counts device pixels with the same numbers. */
+const GAZE_REACH = { x: 4, y: 3 };
+/** Glances, not tracking: at most four a second, and back to the middle after the pointer rests. */
+const GAZE_EVERY_MS = 250;
+const GAZE_HOME_MS = 6000;
+let gazeAt = 0;
+let gazed = "0,0";
+let gazeLater: ReturnType<typeof setTimeout> | undefined;
+let gazeHome: ReturnType<typeof setTimeout> | undefined;
+
+/** Points the eyes, on the faces themselves so only they restyle. A move smaller than one device
+ *  pixel is invisible, so it is not worth a repaint of the window. */
+function aim(gx: number, gy: number) {
+  for (const face of document.querySelectorAll<HTMLElement>(".island .face")) {
+    face.style.setProperty("--gx", `${gx}px`);
+    face.style.setProperty("--gy", `${gy}px`);
+  }
+}
+
+function look(x: number, y: number) {
+  if (document.documentElement.hasAttribute("data-reduced")) return;
+  const dpr = devicePixelRatio || 1;
+  const gx = Math.round(x * GAZE_REACH.x * dpr) / dpr;
+  const gy = Math.round(y * GAZE_REACH.y * dpr) / dpr;
+  clearTimeout(gazeLater);
+  if (`${gx},${gy}` === gazed) return;
+  const wait = gazeAt + GAZE_EVERY_MS - Date.now();
+  // The last move of a quick burst still lands, once the eyes may move again.
+  if (wait > 0) return void (gazeLater = setTimeout(() => look(x, y), wait));
+  gazeAt = Date.now();
+  gazed = `${gx},${gy}`;
+  aim(gx, gy);
+  clearTimeout(gazeHome);
+  gazeHome = setTimeout(() => {
+    gazed = "0,0";
+    aim(0, 0);
+  }, GAZE_HOME_MS);
 }
 
 let feelingTimer: ReturnType<typeof setTimeout> | undefined;
@@ -1600,16 +1732,45 @@ export async function checkForUpdates(announce = false) {
   }
 }
 
-/** Succeeding ends the app, so only a failure comes back here. */
+export const RELEASES_URL = "https://github.com/ShashikantSingh09/meridian/releases/latest";
+
+/** Succeeding ends the app, so only a failure comes back here. A copy that was not installed cannot
+ *  update itself, so it gets the release page instead of half-updating. */
 export async function installUpdate() {
   if (state.updating) return;
+  const tag = state.update.latest;
+  if (state.updateKind === "portable") return openLink(RELEASES_URL);
+  if (!tag) return;
   set({ updating: "installing" });
   try {
-    await bridge.installUpdate();
+    await bridge.installUpdate(tag);
   } catch (err) {
     set({ updating: null });
+    if (describe(err) === "portable") return openLink(RELEASES_URL);
     pushError({ title: "Could not update", body: describe(err), retry: () => void installUpdate() });
   }
+}
+
+/** Whether to look for new versions by itself. Asked once, a while after the first start. */
+export function setUpdateChecks(on: boolean) {
+  void updateSettings({ updateChecks: on });
+  dismissNotice("ask-updates");
+  if (on) void checkForUpdates(true);
+}
+
+/** A check nobody asked for, made only once the user has said yes to them. */
+const autoCheck = () => {
+  if (state.settings.updateChecks === true) void checkForUpdates(true);
+};
+
+/** Shows What's new once, then remembers this version as seen. */
+function noteVersion(version: string) {
+  const fresh = whatsNew(version, state.settings.lastSeenVersion);
+  if (fresh.length) {
+    set({ whatsNew: fresh });
+    pushNotice({ tone: "info", title: `New in ${version.replace(/^v/, "")}`, body: fresh.map((thing) => thing.title).join(" · "), update: true }, WHATS_NEW_MS);
+  }
+  if (state.settings.lastSeenVersion !== version) void updateSettings({ lastSeenVersion: version });
 }
 
 export const PREVIEWS: Preview[] = [
@@ -1774,9 +1935,25 @@ export async function boot() {
   void refreshIntegrations();
   void bridge.builtInClients().then((builtInClients) => set({ builtInClients }));
   void bridge.watchStatus().then((watching) => set({ watching }));
-  void bridge.appVersion().then((version) => set({ version }));
-  void checkForUpdates(true);
-  setInterval(() => void checkForUpdates(true), UPDATE_EVERY_MS);
+  void bridge.appVersion().then((version) => {
+    set({ version });
+    noteVersion(version);
+  });
+  void bridge.updateKind().then((updateKind) => set({ updateKind })).catch(() => undefined);
+  // Looking on GitHub is asked about once, a while after the first start, and never over a question.
+  setTimeout(() => {
+    if (state.settings.updateChecks === null && !state.settings.localOnly) {
+      pushNotice({ id: "ask-updates", tone: "info", title: "Check for new versions by itself?", body: "Meridian can look on GitHub when it starts and every few hours. Click to choose.", update: true, sticky: true }, ASK_FOREVER_MS);
+    }
+  }, ASK_UPDATES_AFTER_MS);
+  autoCheck();
+  setInterval(autoCheck, UPDATE_EVERY_MS);
+  // The assistant's agents_status reads what the agents are doing from here, kept current.
+  let told = "";
+  setInterval(() => {
+    const now = agentsInWords();
+    if (now !== told) void bridge.assistantContext((told = now)).catch(() => undefined);
+  }, 3000);
   void bridge.islandPlacement().then((islandPlace) => set({ islandPlace }));
   void refreshCharge();
   setInterval(() => void refreshCharge(), CHARGE_EVERY_MS);
@@ -1784,12 +1961,9 @@ export async function boot() {
   for (const a of agents) if (a.installed) void refreshAuth(a.id);
   await Promise.all([
     bridge.onAgentEvent(applyAgentEvent),
+    bridge.onAssistantConfirm(askConfirm, confirmGone),
     bridge.onHover(setHovered),
-    bridge.onGaze((x, y) => {
-      const island = document.querySelector<HTMLElement>(".island");
-      island?.style.setProperty("--gx", `${(x * 4).toFixed(1)}px`);
-      island?.style.setProperty("--gy", `${(y * 3).toFixed(1)}px`);
-    }),
+    bridge.onGaze(look),
     bridge.onTogglePanel(toggleFromCore),
     bridge.onBlur(closeOnBlur),
     bridge.onOpenTab((tab) => openPanel(tab as Tab)),

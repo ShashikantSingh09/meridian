@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 base64 = "0.22"
 serde.workspace = true
+serde_json.workspace = true
 windows = { version = "0.62", features = [
   "ApplicationModel",
   "Devices_Power",
@@ -22,6 +23,7 @@ windows = { version = "0.62", features = [
   "Win32_Storage_Packaging_Appx",
   "Win32_System_Com",
   "Win32_System_Com_StructuredStorage",
+  "Win32_System_Diagnostics_ToolHelp",
   "Win32_System_Ole",
   "Win32_System_Power",
   "Win32_System_Rpc",

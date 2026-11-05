@@ -20,7 +20,7 @@ import {
   useRunningClock,
   writeSummary,
 } from "../lib/notes";
-import { openSettings, pushError, showNote, useApp } from "../lib/store";
+import { openSettings, pushError, showNote, updateSettings, useApp } from "../lib/store";
 import type { Note, NoteLine, NoteSpeaker, NoteTodo } from "../lib/types";
 
 const HEARING: Record<string, string> = { elevenlabs: "ElevenLabs", deepgram: "Deepgram" };
@@ -57,6 +57,7 @@ function List({ selected }: { selected: Note | null }) {
   const recording = useApp((s) => s.notes.recording);
   const working = useApp((s) => s.notes.working);
   const byItself = useApp((s) => s.settings.notesSummary);
+  const stopQuiet = useApp((s) => s.settings.stopQuietCalls);
   const days = [...new Set(notes.map((note) => dayOf(note.startedAt)))];
   return (
     <div className="notes-list">
@@ -78,6 +79,10 @@ function List({ selected }: { selected: Note | null }) {
         <label className="setting toggle">
           <span className="label">Summary by itself</span>
           <input type="checkbox" role="switch" checked={byItself} onChange={(e) => setSummaryByItself(e.target.checked)} />
+        </label>
+        <label className="setting toggle">
+          <span className="label">Stop a quiet call</span>
+          <input type="checkbox" role="switch" checked={stopQuiet} onChange={(e) => void updateSettings({ stopQuietCalls: e.target.checked })} />
         </label>
       </div>
     </div>

@@ -170,14 +170,8 @@
   50% { opacity: 0.45; }
 }
 
-html[data-motion="reduced"] .live-dot {
+html[data-reduced] .live-dot {
   animation: none;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  html[data-motion="system"] .live-dot {
-    animation: none;
-  }
 }
 
 /* An empty list says so in the middle of its space. */

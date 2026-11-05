@@ -19,8 +19,10 @@ pub(crate) fn args(model: &str, most_usd: &str) -> Vec<String> {
 /// Starts a run in a folder of its own, and hands it the question.
 pub(crate) async fn start(name: &str, settings: &str, mut args: Vec<String>, message: &str) -> Result<Agent, String> {
     let exe = detect::locate("claude").ok_or("Claude Code is not installed on this PC.")?;
-    let folder = std::env::temp_dir().join("meridian-once");
-    std::fs::create_dir_all(&folder).map_err(|err| err.to_string())?;
+    // A new folder with a name nobody can guess, made here and nowhere else, so nothing can be
+    // waiting in it: it is the CLI's working folder, and a project folder can bring its own hooks.
+    let folder = std::env::temp_dir().join(format!("meridian-once-{}", uuid::Uuid::new_v4().simple()));
+    std::fs::create_dir(&folder).map_err(|err| err.to_string())?;
     // A file, because a shim from an npm install would mangle the quotes in JSON on a command line.
     let file = folder.join(format!("{name}.json"));
     std::fs::write(&file, settings).map_err(|err| err.to_string())?;

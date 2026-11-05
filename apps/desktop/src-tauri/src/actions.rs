@@ -4,11 +4,15 @@
 //!
 //! Tools named in `RUN_WITHOUT_ASKING` undo easily and go nowhere, so they just happen. Everything
 //! else stops on the island for a yes first, through the permission hook every run already has.
+//! Once the assistant has read other people's words (mail, invitations, calls, the day's events),
+//! its ways of sending something out ask first too, here in the server, and the CLI's own web tools
+//! are refused for a while, through a PreToolUse hook on this same address.
 
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::Mutex;
+use std::collections::HashMap;
+use std::sync::{mpsc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
 use agent_adapters::approvals::{read_request, respond};
@@ -35,8 +39,69 @@ const MOST_FILES: usize = 25;
 const MOST_LOOKED_AT: usize = 40_000;
 const SCREEN_CHARS: usize = 6000;
 const SERVER: &str = "meridian";
-const RUN_WITHOUT_ASKING: [&str; 17] = [
-    "open_app", "list_apps", "open_website", "search_web", "open_windows_settings", "open_path", "find_files", "media_control", "set_volume", "remind_me", "my_day", "my_mail",
+/// Tools whose answers carry other people's words.
+const READS_OTHERS: [&str; 4] = ["my_mail", "my_calendar", "my_notes", "my_day"];
+/// Tools that can carry something off the PC: an address, a search, or a path that may be on another computer.
+const SENDS_OUT: [&str; 3] = ["open_website", "search_web", "open_path"];
+/// How long after reading other people's words those ask first.
+const READ_OTHERS_FOR: Duration = Duration::from_secs(30 * 60);
+/// How long a question on the island waits. No answer is a no.
+const CONFIRM_WAIT: Duration = Duration::from_secs(120);
+
+static READ_OTHERS_AT: Mutex<Option<Instant>> = Mutex::new(None);
+static CONFIRMS: LazyLock<Mutex<HashMap<String, mpsc::Sender<bool>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+
+fn has_read_others() -> bool {
+    READ_OTHERS_AT.lock().unwrap().is_some_and(|at| at.elapsed() < READ_OTHERS_FOR)
+}
+
+#[derive(Clone, Serialize)]
+struct Confirm<'a> {
+    id: &'a str,
+    tool: &'a str,
+    summary: &'a str,
+}
+
+/// Asks on the island and waits for a click. No answer, or no island, is a no.
+fn confirm(app: &AppHandle, tool: &str, summary: &str) -> bool {
+    let id = format!("confirm:{}", uuid::Uuid::new_v4().simple());
+    let (tx, rx) = mpsc::channel();
+    CONFIRMS.lock().unwrap().insert(id.clone(), tx);
+    let asked = app.emit_to(island::LABEL, "assistant-confirm", Confirm { id: &id, tool, summary }).is_ok();
+    let allowed = asked && rx.recv_timeout(CONFIRM_WAIT).unwrap_or(false);
+    CONFIRMS.lock().unwrap().remove(&id);
+    let _ = app.emit_to(island::LABEL, "assistant-confirm-resolved", &id);
+    allowed
+}
+
+/// The user's click on a question `confirm` raised.
+pub fn answer_confirm(id: &str, allow: bool) -> Result<(), String> {
+    let sender = CONFIRMS.lock().unwrap().remove(id).ok_or("That request has gone.")?;
+    sender.send(allow).map_err(|_| "That request has gone.".to_string())
+}
+
+/// The CLI's own web tools, asked about before they run. After reading other people's words they
+/// are refused: a page or a search can carry what was read to someone else.
+fn before_web() -> String {
+    if !has_read_others() {
+        return "{}".to_string();
+    }
+    json!({ "hookSpecificOutput": { "hookEventName": "PreToolUse", "permissionDecision": "deny",
+        "permissionDecisionReason": "It read the user's mail, calendar or call notes in the last half hour, so it does not fetch or search the web by itself now. Tell the user what you would look up, and let them open it." } })
+    .to_string()
+}
+
+/// What the user's agents are doing and how much of the plan is used, as the page last told it.
+static AGENTS_NOW: Mutex<String> = Mutex::new(String::new());
+
+/// The page keeps this current, so the assistant can answer about agents without reaching into them.
+#[tauri::command]
+pub fn assistant_context(agents: String) {
+    *AGENTS_NOW.lock().unwrap() = agents.chars().take(4000).collect();
+}
+
+const RUN_WITHOUT_ASKING: [&str; 18] = [
+    "agents_status", "open_app", "list_apps", "open_website", "search_web", "open_windows_settings", "open_path", "find_files", "media_control", "set_volume", "remind_me", "my_day", "my_mail",
     "my_calendar", "my_notes", "show_panel", "pc_status", "stop_listening",
 ];
 
@@ -46,6 +111,7 @@ fn tools() -> Value {
         json!({ "name": name, "description": description, "inputSchema": { "type": "object", "properties": properties, "required": required } })
     };
     json!([
+        tool("agents_status", "Says what the user's coding agents are doing and how much of their Claude plan is used. It cannot answer, start or stop anything.", json!({}), &[]),
         tool("open_app", "Opens an installed app, such as Chrome, Spotify, Word or Calculator.", json!({ "name": text("The app's name, as the user said it") }), &["name"]),
         tool("list_apps", "Lists installed apps whose name contains some text. Use when open_app could not find one.", json!({ "contains": text("Part of the name") }), &[]),
         tool("open_website", "Opens a web address in the user's browser.", json!({ "url": text("A full http or https address") }), &["url"]),
@@ -174,19 +240,40 @@ fn resolve(path: &str) -> PathBuf {
     OWN_FOLDERS.iter().find(|name| name.eq_ignore_ascii_case(path)).map_or_else(|| PathBuf::from(path), |name| home().join(name))
 }
 
-/// These start a program rather than open a document, so they go through the question on the island.
-fn runs_something(path: &Path) -> bool {
+/// Documents that open with their normal app. Anything else, a program, a shortcut or a file Windows
+/// hands to a script host, is not opened this way: there are too many such kinds to list them all.
+const OPENS_UNASKED: [&str; 41] = [
+    "pdf", "txt", "md", "rtf", "csv", "log", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "ods", "odp", "epub", "png", "jpg", "jpeg", "gif", "bmp", "webp", "heic", "tif", "tiff",
+    "ico", "mp3", "wav", "flac", "m4a", "aac", "ogg", "wma", "opus", "mp4", "mkv", "mov", "avi", "wmv", "webm", "zip",
+];
+
+/// Whether a file is a plain document. Windows drops a trailing dot or space from a name, so a name
+/// ending in one could open as something else and never counts as a document.
+fn is_document(path: &Path) -> bool {
+    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or_default();
+    if name.ends_with('.') || name.ends_with(' ') {
+        return false;
+    }
     let kind = path.extension().and_then(|e| e.to_str()).unwrap_or_default().to_ascii_lowercase();
-    ["exe", "msi", "bat", "cmd", "ps1", "vbs", "vbe", "js", "jse", "wsf", "wsh", "scr", "lnk", "com", "pif", "reg", "hta", "cpl"].contains(&kind.as_str())
+    OPENS_UNASKED.contains(&kind.as_str())
+}
+
+/// A path on another computer. Even looking it up makes Windows connect there with the user's sign-in.
+fn on_network(path: &str) -> bool {
+    let path = path.trim();
+    path.starts_with(r"\\") || path.starts_with("//")
 }
 
 fn open_path(path: &str) -> Result<String, String> {
+    if on_network(path) {
+        return Err("Paths on other computers are not opened this way. The user can open it themselves.".into());
+    }
     let target = resolve(path);
     if !target.exists() {
         return Err(format!("{} does not exist.", target.display()));
     }
-    if target.is_file() && runs_something(&target) {
-        return Err("That file runs a program. Use Bash to run it, which asks the user first.".into());
+    if target.is_file() && !is_document(&target) {
+        return Err("Only documents, pictures, music and videos open this way. For anything else, use Bash, which asks the user first.".into());
     }
     Command::new("explorer.exe").arg(&target).spawn().map_err(|err| err.to_string())?;
     Ok(format!("Opened {}.", target.display()))
@@ -280,7 +367,21 @@ fn read_screen(app: &AppHandle) -> Result<String, String> {
 
 fn call(app: &AppHandle, name: &str, input: &Value) -> Result<String, String> {
     let text = |key: &str| input[key].as_str().unwrap_or_default();
+    if READS_OTHERS.contains(&name) {
+        *READ_OTHERS_AT.lock().unwrap() = Some(Instant::now());
+    }
+    if SENDS_OUT.contains(&name) && has_read_others() {
+        let (tool, what) = match name {
+            "open_website" => ("Open a website", text("url")),
+            "search_web" => ("Search the web", text("query")),
+            _ => ("Open a file", text("path")),
+        };
+        if !confirm(app, tool, what) {
+            return Err("The user did not allow it. It came up after reading their mail or notes, so it needs their OK.".into());
+        }
+    }
     match name {
+        "agents_status" => Ok(Some(AGENTS_NOW.lock().unwrap().clone()).filter(|now| !now.is_empty()).unwrap_or_else(|| "No agents are running.".to_string())),
         "open_app" => open_app(text("name")),
         "list_apps" => {
             let wanted = text("contains").to_lowercase();
@@ -350,7 +451,15 @@ async fn answer(app: &AppHandle, message: &Value) -> Result<Value, String> {
 
 async fn serve_one(mut socket: TcpStream, app: AppHandle, path: String) {
     let Ok(Some((head, body))) = tokio::time::timeout(READ_TIMEOUT, read_request(&mut socket, MOST_BYTES)).await else { return };
-    if !head.lines().next().is_some_and(|line| line.starts_with(&format!("POST {path} "))) {
+    // Only the agents call here. A request from a web page carries an Origin, and is refused.
+    if head.to_ascii_lowercase().contains("\norigin:") {
+        return respond(&mut socket, "403 Forbidden", "{}").await;
+    }
+    let line = head.lines().next().unwrap_or_default();
+    if line.starts_with(&format!("POST {path}/pre ")) {
+        return respond(&mut socket, "200 OK", &before_web()).await;
+    }
+    if !line.starts_with(&format!("POST {path} ")) {
         return respond(&mut socket, "405 Method Not Allowed", "{}").await;
     }
     let Ok(message) = serde_json::from_slice::<Value>(&body) else { return respond(&mut socket, "400 Bad Request", "{}").await };
@@ -408,12 +517,37 @@ mod tests {
 
     #[test]
     fn nothing_that_runs_a_program_opens_without_asking() {
-        for file in ["a.exe", "a.BAT", "a.ps1", "a.lnk", "a.vbs", "a.msi", "a.reg"] {
-            assert!(runs_something(Path::new(file)), "{file}");
+        // Kinds a list of programs would miss, and names Windows reads differently, are not documents.
+        for file in ["a.exe", "a.BAT", "a.ps1", "a.lnk", "a.vbs", "a.msi", "a.reg", "a.url", "a.appref-ms", "a.msc", "a.chm", "a.settingcontent-ms", "a.jar", "a.py", "a.html", "a.exe.", "a.exe ", "a.pdf.", "noextension"] {
+            assert!(!is_document(Path::new(file)), "{file}");
         }
-        for file in ["a.pdf", "a.mp3", "a.docx", "a.txt", "folder"] {
-            assert!(!runs_something(Path::new(file)), "{file}");
+        for file in ["a.pdf", "a.mp3", "a.DOCX", "a.txt", "photo.JPG", "clip.mp4"] {
+            assert!(is_document(Path::new(file)), "{file}");
         }
+    }
+
+    #[test]
+    fn paths_on_other_computers_are_not_looked_up() {
+        for path in [r"\\host\share\a.pdf", "//host/share/a.pdf", r"  \\?\UNC\host\a.pdf"] {
+            assert!(on_network(path), "{path}");
+            assert!(open_path(path).is_err(), "{path}");
+        }
+        assert!(!on_network(r"C:\Users\a.pdf"));
+    }
+
+    #[test]
+    fn web_tools_are_refused_for_a_while_after_reading_other_people() {
+        *READ_OTHERS_AT.lock().unwrap() = None;
+        assert_eq!(before_web(), "{}");
+        *READ_OTHERS_AT.lock().unwrap() = Some(Instant::now());
+        assert!(before_web().contains("\"deny\""));
+        *READ_OTHERS_AT.lock().unwrap() = Some(Instant::now() - READ_OTHERS_FOR - Duration::from_secs(1));
+        assert_eq!(before_web(), "{}");
+    }
+
+    #[test]
+    fn an_unknown_confirmation_is_refused() {
+        assert!(answer_confirm("confirm:nope", true).is_err());
     }
 
     #[test]

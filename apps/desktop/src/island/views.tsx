@@ -2,6 +2,7 @@
 // them; text only says what the face cannot.
 
 import type { Approval, Level } from "../lib/types";
+import { bridge } from "../lib/bridge";
 import { useEffect, useMemo, useState, useLayoutEffect, useRef } from "react";
 import { Markdown } from "../panel/Markdown";
 import { StepRow } from "../panel/LogLine";
@@ -16,6 +17,11 @@ import {
   dismissNotice,
   dismissReminder,
   ignoreSuggestion,
+  focusTerminal,
+  foldApproval,
+  planUse,
+  keepRecording,
+  knownFolder,
   openLink,
   openPanel,
   openSettings,
@@ -27,11 +33,11 @@ import {
   useApp,
   type SessionDetail,
 } from "../lib/store";
-import { actionOf, asking, changedFiles, clock, endFacts, lastMessage, needsFirst, planSteps, spent, stageLine, stagesOf, stepsOf, thisTurn, todoStep, todoWindow, turnStart } from "../lib/sessions";
+import { actionOf, asking, changedFiles, limitName, clock, endFacts, lastMessage, needsFirst, planSteps, spent, stageLine, stagesOf, stepsOf, thisTurn, todoStep, todoWindow, turnStart } from "../lib/sessions";
 import { Face, type Mood } from "./faces";
 import type { LineSegment } from "./line";
 import { focusActivity } from "./live";
-import { activeSessions, MULTITASK_MAX_ROWS, TODO_MAX_ROWS, waitingApproval } from "./machine";
+import { activeSessions, MULTITASK_MAX_ROWS, TODO_MAX_ROWS, waitingApproval, waitingCount } from "./machine";
 import { AgentMark, Bars, Sparks, Transport } from "./marks";
 import { MeridianLine } from "./MeridianLine";
 import { Progress } from "./Progress";
@@ -52,10 +58,10 @@ export const greetingWord = () => {
 };
 
 /** The face, showing how it feels about something that just happened, or else its mood here. */
-function Mine({ mood, scale = 0.62, reduced }: { mood: Mood; scale?: number; reduced: boolean }) {
+function Mine({ mood, reduced }: { mood: Mood; reduced: boolean }) {
   const id = useApp((s) => s.settings.face);
   const feeling = useApp((s) => s.feeling);
-  return <Face id={id} mood={feeling ?? mood} scale={scale} reduced={reduced} />;
+  return <Face id={id} mood={feeling ?? mood} reduced={reduced} />;
 }
 
 function Elapsed({ since }: { since: number }) {
@@ -103,13 +109,14 @@ function ChargeGlyph() {
 
 function Peek({ reduced }: { reduced: boolean }) {
   const next = useApp((s) => (s.settings.showNextMeeting ? s.activity.next : null));
+  const plan = useApp((s) => (s.settings.showUsage ? s.limits["claude-code"] ?? null : null));
   const sessions = useApp((s) => s.sessions);
   const active = activeSessions(sessions);
   const today = new Date().toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" });
   return (
     <div className="peek-card">
       <div className="row">
-        <span className="peek-face"><Mine mood="rest" scale={0.86} reduced={reduced} /></span>
+        <span className="peek-face"><Mine mood="rest" reduced={reduced} /></span>
         <div className="grow stacked">
           <span className="peek-title">{greetingWord()}</span>
           <span className="meta">{today}</span>
@@ -121,6 +128,12 @@ function Peek({ reduced }: { reduced: boolean }) {
           <span className="peek-chip-head">{next ? "Next" : "Nothing next"}</span>
           <span className="peek-chip-body truncate">{next ? `${next.title}${next.startsAt ? `, ${describeTime(next.startsAt)}` : ""}` : "Your day is clear"}</span>
         </div>
+        {plan && (
+          <div className="peek-chip" data-tone="plan">
+            <span className="peek-chip-head">Claude plan</span>
+            <span className="peek-chip-body truncate">{plan.windows.map((w) => `${limitName(w.window)} ${Math.round(w.usedPercent)}%`).join(", ")}</span>
+          </div>
+        )}
         <div className="peek-chip" data-tone="agents">
           <span className="peek-chip-head">{active.length === 0 ? "No agents running" : `${active.length} ${active.length === 1 ? "agent" : "agents"} running`}</span>
           <span className="peek-chip-body truncate">{active.length === 0 ? "Click to open" : active.map((s) => s.project).join(", ")}</span>
@@ -130,11 +143,31 @@ function Peek({ reduced }: { reduced: boolean }) {
   );
 }
 
+/** How much of the Claude plan is used: a small ring, green under half, amber to 80%, red above. */
+function UsageRing() {
+  const use = useApp(planUse);
+  if (!use) return null;
+  const tone = use.percent < 50 ? "low" : use.percent <= 80 ? "mid" : "high";
+  return (
+    <span className="usage-ring" data-tone={tone} role="img" aria-label={`Claude plan ${Math.round(use.percent)}% used`} title={`Claude plan ${Math.round(use.percent)}% used`} style={{ "--used": `${Math.min(100, use.percent)}%` } as React.CSSProperties}>
+      <span className="usage-hole" />
+    </span>
+  );
+}
+
 export function IdleView({ reduced, hovered, sliver }: { reduced: boolean; hovered: boolean; sliver: boolean }) {
   const clock = useApp((s) => s.settings.showClock);
   const charged = useApp((s) => s.settings.showBattery && s.charge !== null);
+  const usage = useApp((s) => s.settings.showUsage);
   const greeting = useApp((s) => s.greeting);
   const [tired, setTired] = useState<Mood>("rest");
+
+  // Asleep, the eyes do not follow the pointer, so the core need not report it.
+  useEffect(() => {
+    if (tired !== "asleep") return;
+    void bridge.islandGaze(false);
+    return () => void bridge.islandGaze(true);
+  }, [tired]);
 
   useEffect(() => {
     if (hovered) {
@@ -167,6 +200,7 @@ export function IdleView({ reduced, hovered, sliver }: { reduced: boolean; hover
   return (
     <div className="rest ambient">
       <Mine mood={tired} reduced={reduced} />
+      {usage && <UsageRing />}
       {clock && <Clock />}
       {charged && <ChargeGlyph />}
     </div>
@@ -228,7 +262,7 @@ export function ThinkingView({ reduced }: { reduced: boolean }) {
         <span className="label truncate">{provider ?? "Thinking"}</span>
         {task && <span className="meta truncate tiny">{task}</span>}
       </div>
-      <Mine mood="working" scale={0.5} reduced={reduced} />
+      <Mine mood="think" reduced={reduced} />
     </div>
   );
 }
@@ -279,14 +313,19 @@ function QuestionCard({ sessionId, approval, panel }: { sessionId: string; appro
 
 function PlanCard({ sessionId, approval, panel }: { sessionId: string; approval: Approval; panel?: boolean }) {
   const steps = planSteps(approval.plan!);
+  // Only Claude Code in a terminal can switch to accepting edits from the plan reply.
+  const terminal = sessionId.startsWith("watch:");
   return (
     <>
       {panel && <span className="label">Plan ready to read{steps > 0 && <span className="meta"> {steps} {steps === 1 ? "step" : "steps"}</span>}</span>}
       <div className="plan-text"><Markdown text={approval.plan!} /></div>
       <div className="row end">
         <button className="ghost" onClick={() => answerApproval(sessionId, approval.id, false)}>Keep planning</button>
+        {terminal && <span className="grow" />}
+        {terminal && <button className="ghost" onClick={() => answerApproval(sessionId, approval.id, true, { mode: "acceptEdits" })}>Approve, and accept edits</button>}
         <button className="allow" onClick={() => answerApproval(sessionId, approval.id, true)}>Approve plan</button>
       </div>
+      {terminal && <span className="meta plan-note">Accept edits lasts for this session only, and is never the default</span>}
     </>
   );
 }
@@ -296,14 +335,80 @@ function PlanCard({ sessionId, approval, panel }: { sessionId: string; approval:
 export function ApprovalCard({ sessionId, approval, panel }: { sessionId: string; approval: Approval; panel?: boolean }) {
   if (approval.questions?.length) return <QuestionCard key={approval.id} sessionId={sessionId} approval={approval} panel={panel} />;
   if (approval.plan) return <PlanCard sessionId={sessionId} approval={approval} panel={panel} />;
+  if (approval.tool === "Start an agent") return <StartAgentCard key={approval.id} sessionId={sessionId} approval={approval} panel={panel} />;
+  return <CommandCard key={approval.id} sessionId={sessionId} approval={approval} panel={panel} />;
+}
+
+/** How much of a request the one line leaves out. */
+const hiddenChars = (approval: Approval) => (approval.full ? (approval.length ?? [...approval.full].length) - [...approval.summary].length : 0);
+
+/** In the island's header, as on the board: "1 of 3" when more than one request waits, and a way to
+ *  fold this one away for later. */
+function Queue({ sessionId }: { sessionId: string }) {
+  const waiting = useApp((s) => waitingCount(s.sessions));
+  return (
+    <>
+      {waiting > 1 && <span className="meta queue-count">1 of {waiting}</span>}
+      <button className="round queue-fold" aria-label="Fold, answer later" title="Fold, answer later" onClick={() => foldApproval(sessionId)}><Icon name="close" size={11} /></button>
+    </>
+  );
+}
+
+/** A command, a path or anything else. When the line leaves something out it says so, and Allow
+ *  waits until the whole request has been opened: nobody approves what they could not see. */
+function CommandCard({ sessionId, approval, panel }: { sessionId: string; approval: Approval; panel?: boolean }) {
+  const [open, setOpen] = useState(false);
+  const hidden = hiddenChars(approval);
+  const tooLong = approval.length != null;
+  const ready = !approval.full || (open && !tooLong);
   return (
     <>
       {panel && <span className="approval-kicker">{asking(approval)}</span>}
-      <code className="command" title={approval.summary}>{approval.summary}</code>
+      {open && approval.full ? (
+        <code className="command whole">{approval.full}</code>
+      ) : (
+        <code className="command" title={approval.full ? undefined : approval.summary}>{approval.summary}</code>
+      )}
+      {approval.why && <span className="cut-note">{approval.why}</span>}
       <div className="row end">
+        {approval.full && !open && <span className="cut-note grow">{hidden} more characters not shown</span>}
+        {open && tooLong && <span className="cut-note grow">Too long to show in full. Deny it, or run it yourself.</span>}
+        {approval.full && !open && <button className="text-button show-all" onClick={() => setOpen(true)}>Show all</button>}
         <button className="ghost" onClick={() => answerApproval(sessionId, approval.id, false)}>Deny</button>
-        <button className="allow" onClick={() => answerApproval(sessionId, approval.id, true)}>Allow once</button>
+        <button className="allow" disabled={!ready} title={ready ? undefined : "Open the whole request first"} onClick={() => answerApproval(sessionId, approval.id, true)}>Allow once</button>
       </div>
+    </>
+  );
+}
+
+/** The assistant asking to start an agent: the task, the folder it would work in, and that it gets
+ *  the same full access as one started by hand. A folder the user never worked in is not offered. */
+function StartAgentCard({ sessionId, approval, panel }: { sessionId: string; approval: Approval; panel?: boolean }) {
+  const folder = useApp((s) => approval.folder || s.settings.agentDefaultDir || "");
+  const known = useApp((s) => knownFolder(folder, s));
+  const task = approval.summary.replace(/^Start an agent: /, "");
+  return (
+    <>
+      {panel && <span className="approval-kicker">{asking(approval)}</span>}
+      <span className="label approval-task">{task}</span>
+      <div className="row approval-chips">
+        <span className="approval-chip truncate" title={folder}><Icon name="folder" size={12} />{folder || "No folder chosen"}</span>
+        <span className="approval-chip">Full access</span>
+      </div>
+      {known ? (
+        <div className="row end">
+          <span className="cut-note grow">Uses your Claude Code settings and this folder's hooks</span>
+          <button className="ghost" onClick={() => answerApproval(sessionId, approval.id, false)}>Deny</button>
+          <button className="allow" onClick={() => answerApproval(sessionId, approval.id, true)}>Start</button>
+        </div>
+      ) : (
+        <>
+          <p className="approval-warn">This folder is not one you have used before. Start it yourself from Agents if you meant it.</p>
+          <div className="row end">
+            <button className="ghost" onClick={() => answerApproval(sessionId, approval.id, false)}>Deny</button>
+          </div>
+        </>
+      )}
     </>
   );
 }
@@ -382,9 +487,10 @@ export function WorkingView({ reduced, hovered }: { reduced: boolean; hovered: b
     return (
       <div className="stack pad-card">
         <div className="row">
-          <Mine mood="needs" scale={0.56} reduced={reduced} />
+          <Mine mood="needs" reduced={reduced} />
           <span className="grow label truncate">{blocked.agent} {asks}</span>
           <span className="meta">{blocked.project}</span>
+          <Queue sessionId={blocked.id} />
         </div>
         <ApprovalCard sessionId={blocked.id} approval={approval} />
         {others.map((s) => <SessionLine key={s.id} session={s} />)}
@@ -409,7 +515,7 @@ export function WorkingView({ reduced, hovered }: { reduced: boolean; hovered: b
         {todos.length > 0 ? <span>{todoStep(todos)}</span> : steps > 0 && <span>Step {steps}</span>}
         <Elapsed since={turnStart(session)} />
       </span>
-      <Mine mood="working" scale={0.5} reduced={reduced} />
+      <Mine mood="working" reduced={reduced} />
     </div>
   );
 }
@@ -433,7 +539,7 @@ function FinishedCard({ noticeId, title, session, reduced }: { noticeId: string;
     <div className="stack pad-card stage-end" data-tone="done">
       <div className="row">
         <span className="notice-face">
-          <Mine mood="done" scale={0.56} reduced={reduced} />
+          <Mine mood="done" reduced={reduced} />
           {!reduced && <Sparks />}
         </span>
         <span className="grow label truncate">{title}</span>
@@ -443,6 +549,7 @@ function FinishedCard({ noticeId, title, session, reduced }: { noticeId: string;
       {facts && <p className="meta truncate">{facts}</p>}
       <div className="row end stage-actions">
         <button className="stage-button" onClick={() => dismissNotice(noticeId)}>Dismiss</button>
+        {session.pid ? <button className="stage-button" onClick={() => { dismissNotice(noticeId); void focusTerminal(session); }}>Terminal</button> : null}
         <button className="stage-button" data-main="true" onClick={() => { dismissNotice(noticeId); openSession(session.id, changed ? "changes" : "activity"); }}>
           {changed ? "See what changed" : "Open"}
         </button>
@@ -457,7 +564,7 @@ function StoppedCard({ errorId, body, session }: { errorId: string; body: string
   return (
     <div className="stack pad-card stage-end" data-tone="bad">
       <div className="row">
-        <Mine mood="error" scale={0.56} reduced />
+        <Mine mood="error" reduced />
         <span className="grow label truncate">{session.project} stopped</span>
         <span className="meta tabular">{spent((session.endedAt ?? Date.now()) - turnStart(session))}</span>
       </div>
@@ -484,9 +591,26 @@ export function NotificationView({ reduced }: { reduced: boolean }) {
   const notice = useApp((s) => s.notices[0]);
   const sessions = useApp((s) => s.sessions);
   if (!notice) return null;
-  const mood: Mood = notice.tone === "success" ? "done" : notice.tone === "urgent" ? "needs" : "rest";
+  // Anything else is news, so the face glances at it as it arrives.
+  const mood: Mood = notice.tone === "success" ? "done" : notice.tone === "urgent" ? "needs" : "notice";
   const ended = notice.finished && sessions.find((s) => s.id === notice.sessionId);
   if (ended) return <FinishedCard noticeId={notice.id} title={notice.title} session={ended} reduced={reduced} />;
+
+  if (notice.quiet) {
+    return (
+      <div className="stack pad-card">
+        <div className="row">
+          <span className="rec-dot" aria-hidden="true" />
+          <span className="grow label truncate">{notice.title}</span>
+          <span className="quiet-left" role="timer">Stops in 0:{String(notice.quiet).padStart(2, "0")}</span>
+        </div>
+        <div className="row end">
+          <button className="ghost" onClick={() => void stopRecording()}>Stop now</button>
+          <button className="allow" onClick={keepRecording}>Keep recording</button>
+        </div>
+      </div>
+    );
+  }
 
   if (notice.note) {
     const id = notice.note;
@@ -503,7 +627,7 @@ export function NotificationView({ reduced }: { reduced: boolean }) {
     return (
       <div className="stack pad-card">
         <div className="row">
-          <Mine mood={mood} scale={0.56} reduced={reduced} />
+          <Mine mood={mood} reduced={reduced} />
           <button className="grow text-button stacked" onClick={() => { dismissNotice(notice.id); openPanel("day"); }}>
             <span className="label truncate">{notice.title}</span>
             <span className="meta truncate">{notice.body}</span>
@@ -524,7 +648,7 @@ export function NotificationView({ reduced }: { reduced: boolean }) {
   return (
     <div className="row pad-pill">
       <span className="notice-face">
-        <Mine mood={mood} scale={0.56} reduced={reduced} />
+        <Mine mood={mood} reduced={reduced} />
         {notice.tone === "success" && !reduced && <Sparks />}
       </span>
       <button className="grow text-button stacked" onClick={() => { dismissNotice(notice.id); if (notice.update) openSettings("updates"); openPanel(notice.sessionId ? (sessions.find((s) => s.id === notice.sessionId)?.surface === "chat" ? "chat" : "agents") : undefined); }}>
@@ -542,7 +666,7 @@ export function ContextualView({ reduced }: { reduced: boolean }) {
   return (
     <div className="stack pad-card">
       <div className="row">
-        <Mine mood="needs" scale={0.5} reduced={reduced} />
+        <Mine mood="needs" reduced={reduced} />
         <span className="grow label">{suggestion.title}</span>
       </div>
       <p className="body">{suggestion.body}</p>
@@ -559,7 +683,7 @@ export function ContextualView({ reduced }: { reduced: boolean }) {
 export function ScreenView({ reduced }: { reduced: boolean }) {
   return (
     <div className="row pad-pill">
-      <Mine mood="working" scale={0.56} reduced={reduced} />
+      <Mine mood="working" reduced={reduced} />
       <div className="grow stacked">
         <span className="label">Reading your screen</span>
         <span className="meta tiny">Stays on this PC until you share it</span>
@@ -666,25 +790,45 @@ function LevelIcon({ level, story, reduced }: { level: Level; story: LevelStory;
 }
 
 const VOICE_WORDS = { listening: "Listening", pause: "Still with you", thinking: "Thinking", speaking: "Speaking" };
-const VOICE_MOODS: Record<VoiceState["phase"], Mood> = { listening: "needs", pause: "curious", thinking: "curious", speaking: "rest" };
+const VOICE_MOODS: Record<VoiceState["phase"], Mood> = { listening: "listen", pause: "listen", thinking: "think", speaking: "speak" };
 const WAVE_BARS = 26;
+/** Speech changes at the rate of syllables, so 30 a second is plenty, and a sixth of a 180 Hz display. */
+const WAVE_FRAME_MS = 33;
+/** The face follows the voice in steps: up to 2 while it listens, 3 while it speaks. Quieter than this is none. */
+const VOICE_STEPS = { listen: 2, speak: 3 };
+const VOICE_GATE = 0.12;
 
-/** Bars that follow the real sound, so it is plain the app can hear you. */
-function Wave({ tone, reduced }: { tone: string; reduced: boolean }) {
+/** Bars that follow the real sound, so it is plain the app can hear you. The face beside them
+ *  follows it too, rising in 25 ms and falling in 110 ms, and only redraws when its step changes. */
+function Wave({ tone, reduced, steps }: { tone: string; reduced: boolean; steps: number }) {
   const box = useRef<HTMLSpanElement>(null);
   useEffect(() => {
     if (reduced) return;
     const heights = new Array<number>(WAVE_BARS).fill(0.08);
     let frame = 0;
-    const draw = () => {
-      heights.push(Math.max(0.08, voiceLevel()));
+    let last = 0;
+    let level = 0;
+    const voice = box.current?.closest(".voice");
+    const draw = (now: number) => {
+      frame = requestAnimationFrame(draw);
+      if (now - last < WAVE_FRAME_MS) return;
+      const dt = (now - last) / 1000;
+      last = now;
+      const heard = voiceLevel();
+      level += (heard - level) * (1 - Math.exp(-dt / (heard > level ? 0.025 : 0.11)));
+      heights.push(Math.max(0.08, heard));
       heights.shift();
       box.current?.childNodes.forEach((bar, i) => ((bar as HTMLElement).style.scale = `1 ${heights[i]}`));
-      frame = requestAnimationFrame(draw);
+      const face = voice?.querySelector<HTMLElement>(".face");
+      const step = String(level < VOICE_GATE ? 0 : Math.min(steps, Math.round(level * steps)));
+      if (face && face.dataset.lv !== step) face.dataset.lv = step;
     };
     frame = requestAnimationFrame(draw);
-    return () => cancelAnimationFrame(frame);
-  }, [reduced]);
+    return () => {
+      cancelAnimationFrame(frame);
+      voice?.querySelector(".face")?.setAttribute("data-lv", "0");
+    };
+  }, [reduced, steps]);
   return (
     <span ref={box} className="voice-wave" aria-hidden="true">
       {Array.from({ length: WAVE_BARS }, (_, i) => <i key={i} style={{ background: tone }} />)}
@@ -699,11 +843,11 @@ export function VoiceView({ reduced }: { reduced: boolean }) {
   return (
     <div className="voice" data-phase={voice.phase}>
       <div className="row voice-head">
-        <Mine mood={VOICE_MOODS[voice.phase]} scale={0.56} reduced={reduced} />
+        <Mine mood={VOICE_MOODS[voice.phase]} reduced={reduced} />
         {voice.phase === "thinking" ? (
           <span className="voice-dots grow" aria-hidden="true"><i /><i /><i /></span>
         ) : (
-          <Wave tone={hearing ? "#5ac8fa" : "#fff"} reduced={reduced} />
+          <Wave tone={hearing ? "#5ac8fa" : "#fff"} reduced={reduced} steps={hearing ? VOICE_STEPS.listen : VOICE_STEPS.speak} />
         )}
         <span className="meta">{VOICE_WORDS[voice.phase]}</span>
         {iconButton("Stop talking", "close", endConversation)}
@@ -728,7 +872,7 @@ export function LevelView({ hovered, reduced }: { hovered: boolean; reduced: boo
     <div className="level" data-shake={Boolean(told.shake) && !reduced}>
       {told.glow && <span className="level-glow" style={{ "--tone": told.tone } as React.CSSProperties} aria-hidden="true" />}
       <div className="level-row">
-        <Mine mood={told.mood} scale={0.56} reduced={reduced} />
+        <Mine mood={told.mood} reduced={reduced} />
         <LevelIcon level={level} story={told} reduced={reduced} />
         {told.title ? (
           <span className="stacked grow">
@@ -848,7 +992,7 @@ export function ErrorView({ reduced }: { reduced: boolean }) {
     const id = error.note;
     return (
       <div className="row pad-pill note-bar">
-        <Mine mood="error" scale={0.56} reduced={reduced} />
+        <Mine mood="error" reduced={reduced} />
         <span className="grow note-ready truncate" title={error.body}>{error.title}</span>
         <button className="text-button note-open" onClick={() => openFailedNote(error.id, id)}>Open</button>
       </div>
@@ -856,7 +1000,7 @@ export function ErrorView({ reduced }: { reduced: boolean }) {
   }
   return (
     <div className="row pad-pill">
-      <Mine mood="error" scale={0.56} reduced={reduced} />
+      <Mine mood="error" reduced={reduced} />
       <div className="grow stacked">
         <span className="label truncate">{error.title}</span>
         <span className="meta truncate" title={error.body}>{error.body}</span>

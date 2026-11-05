@@ -405,6 +405,12 @@ fn joined(pick: Value) -> Value {
 fn reply_body(tool: &str, input: &Value, reply: Reply) -> String {
     let updated = match tool {
         _ if !reply.allow => return decision_body(false),
+        // Approve, and accept edits: the same plan, and edits go ahead without asking for the rest of
+        // this session only. One click asked for it, and it is never the default.
+        "ExitPlanMode" if reply.answers.as_ref().is_some_and(|a| a.get("mode").and_then(Value::as_str) == Some("acceptEdits")) => {
+            let decision = json!({ "behavior": "allow", "updatedInput": input.clone(), "updatedPermissions": [{ "type": "setMode", "mode": "acceptEdits", "destination": "session" }] });
+            return json!({ "hookSpecificOutput": { "hookEventName": "PermissionRequest", "decision": decision } }).to_string();
+        }
         "ExitPlanMode" => input.clone(),
         "AskUserQuestion" => {
             let Some(answers) = reply.answers.filter(|answers| answers_fit(input, answers)) else { return String::new() };
@@ -502,7 +508,8 @@ impl Shared {
             let prompt = (name == "UserPromptSubmit").then(|| hook["prompt"].as_str().unwrap_or_default());
             let title = prompt.map(|p| first_line(p, TITLE_CHARS)).filter(|t| !t.is_empty());
             let cwd = hook["cwd"].as_str().unwrap_or_default().to_string();
-            self.send(session, AgentEvent::Watched { agent: AGENT.to_string(), cwd, title });
+            // A hook does not say which process sent it. The app fills that in from Claude Code's records.
+            self.send(session, AgentEvent::Watched { agent: AGENT.to_string(), cwd, title, pid: None });
             Tracked { running: true, last_hook: now }
         });
         tracked.last_hook = now;
@@ -566,7 +573,9 @@ async fn ask(mut socket: TcpStream, shared: &Shared, session: String, hook: &Val
     shared.observe(&session, "PermissionRequest", hook);
     // Waiting before the app hears of it, so even a fast click finds it.
     shared.state.lock().unwrap().waiting.insert(id.clone(), (session.clone(), tool.clone(), tx));
-    let approval = Approval { id: id.clone(), tool: tool.clone(), summary, questions, plan };
+    // The terminal shows the whole request too, but the island should not need it to.
+    let whole = crate::approvals::approval(String::new(), &tool, input);
+    let approval = Approval { id: id.clone(), tool: tool.clone(), summary, questions, plan, full: whole.full, length: whole.length, folder: None };
     shared.send(&session, AgentEvent::Approval { approval });
 
     let decision = tokio::select! {
@@ -694,6 +703,22 @@ impl Watcher {
 mod tests {
     use super::*;
     use tokio::io::AsyncWriteExt;
+
+    #[test]
+    fn a_plan_can_be_approved_with_edits_accepted_for_this_session_only() {
+        let plan = json!({ "plan": "## Do it" });
+        let plain: Value = serde_json::from_str(&reply_body("ExitPlanMode", &plan, Reply { allow: true, answers: None })).unwrap();
+        assert!(plain["hookSpecificOutput"]["decision"]["updatedPermissions"].is_null());
+        let mut asked = Map::new();
+        asked.insert("mode".into(), json!("acceptEdits"));
+        let accepted: Value = serde_json::from_str(&reply_body("ExitPlanMode", &plan, Reply { allow: true, answers: Some(asked.clone()) })).unwrap();
+        let decision = &accepted["hookSpecificOutput"]["decision"];
+        assert_eq!(decision["updatedInput"], plan);
+        assert_eq!(decision["updatedPermissions"][0]["destination"], "session");
+        // It never widens anything for another tool, or when the plan is turned down.
+        assert!(!reply_body("Bash", &json!({"command": "x"}), Reply { allow: true, answers: Some(asked.clone()) }).contains("setMode"));
+        assert!(!reply_body("ExitPlanMode", &plan, Reply { allow: false, answers: Some(asked) }).contains("setMode"));
+    }
 
     #[test]
     fn an_edit_shows_its_lines_and_a_command_shows_its_end() {
@@ -1252,6 +1277,7 @@ mod tests {
                     agent: "Claude Code".into(),
                     cwd: "C:\\w".into(),
                     title: Some("t".repeat(64)),
+                    pid: None,
                 },
                 AgentEvent::status(SessionStatus::Running),
             ]
@@ -1652,9 +1678,9 @@ mod tests {
 
     #[test]
     fn watched_serialises_the_way_the_interface_expects() {
-        let event = AgentEvent::Watched { agent: AGENT.into(), cwd: "C:\\w".into(), title: None };
+        let event = AgentEvent::Watched { agent: AGENT.into(), cwd: "C:\\w".into(), title: None, pid: Some(42) };
         let value = serde_json::to_value(event).unwrap();
-        assert_eq!(value, json!({ "type": "watched", "agent": "Claude Code", "cwd": "C:\\w", "title": null }));
+        assert_eq!(value, json!({ "type": "watched", "agent": "Claude Code", "cwd": "C:\\w", "title": null, "pid": 42 }));
     }
 
     #[test]

@@ -13,7 +13,7 @@ import { useState, useEffect } from "react";
 import { Face, FACES, type Mood } from "../island/faces";
 import { bridge } from "../lib/bridge";
 import { Brand } from "../lib/brands";
-import { checkForUpdates, clearHistory, feel, installUpdate, PREVIEWS, refreshAuth, resetIslandPlace, setSettingsSection, showPreview, testWake, updateSettings, useApp, type SettingsSection } from "../lib/store";
+import { checkForUpdates, setUpdateChecks, clearHistory, feel, installUpdate, PREVIEWS, refreshAuth, resetIslandPlace, setSettingsSection, showPreview, testWake, updateSettings, useApp, type SettingsSection } from "../lib/store";
 import { Icon, type IconName } from "../lib/icons";
 import { teachWakeWord } from "../lib/voice";
 import type { AgentInfo, Settings, WakeWord } from "../lib/types";
@@ -40,7 +40,7 @@ function Choice<K extends keyof Settings>({ name, label, options }: {
   );
 }
 
-type Flag = "wakeEnabled" | "wakePauseCalls" | "wakePauseLocked" | "ambient" | "autostart" | "localOnly" | "showClock" | "showBattery" | "islandAutoHide" | "mediaEnabled" | "monitoringPaused" | "showNextMeeting" | "sounds";
+type Flag = "wakeEnabled" | "wakePauseCalls" | "wakePauseLocked" | "ambient" | "autostart" | "localOnly" | "showClock" | "showBattery" | "showUsage" | "stopQuietCalls" | "islandAutoHide" | "mediaEnabled" | "monitoringPaused" | "showNextMeeting" | "sounds";
 
 function Toggle({ name, label, hint }: { name: Flag; label: string; hint: string }) {
   const value = useApp((s) => s.settings[name]);
@@ -66,7 +66,7 @@ function General() {
       <div className="stack">
         <Toggle name="autostart" label="Start with Windows" hint="Off by default." />
         <Toggle name="sounds" label="Sounds" hint="A soft chime when an agent finishes or needs you." />
-        <Toggle name="localOnly" label="Local-only mode" hint="Requests to cloud providers are refused. Only servers on this machine are used." />
+        <Toggle name="localOnly" label="Local-only mode" hint="Nothing goes to a cloud service, including Claude Code and Codex. Only AI running on this PC is used." />
       </div>
       <label className="field">
         <span className="label">Custom instructions</span>
@@ -87,6 +87,12 @@ const MOODS: [Mood, string][] = [
   ["needs", "Surprised"],
   ["curious", "Curious"],
   ["working", "Focused"],
+  ["listen", "Listening"],
+  ["think", "Thinking"],
+  ["speak", "Speaking"],
+  ["heard", "Heard you"],
+  ["notice", "Something new"],
+  ["drag", "Being moved"],
   ["wink", "Wink"],
   ["love", "Love"],
   ["dizzy", "Dizzy"],
@@ -103,7 +109,7 @@ function FacePicker() {
       <div className="pick-grid face-grid">
         {FACES.map((f) => (
           <button key={f.id} className="pick" aria-pressed={f.id === chosen} title={f.note} onClick={() => void updateSettings({ face: f.id })}>
-            <span className="pick-stage"><Face id={f.id} mood={feeling ?? "rest"} scale={0.62} /></span>
+            <span className="pick-stage"><Face id={f.id} mood={feeling ?? "rest"} /></span>
             <span className="pick-name">{f.name}</span>
           </button>
         ))}
@@ -159,6 +165,7 @@ function IslandSection() {
       <div className="stack">
         <Toggle name="showClock" label="Show the time" hint="Beside the line while idle." />
         <Toggle name="showBattery" label="Show the battery" hint="On a laptop: the charge beside the time, with a bolt while it charges." />
+        <Toggle name="showUsage" label="Show plan use" hint="A small ring by the time for how much of your Claude plan is used. Point at it for both limits." />
         <Toggle name="mediaEnabled" label="Show what is playing" hint="Any player that publishes to Windows media controls." />
         <Toggle name="showNextMeeting" label="Show the next meeting" hint="On the island when you point at it." />
         <Toggle name="islandAutoHide" label="Hide when idle" hint="Shrinks to a sliver, and returns on hover or activity." />
@@ -266,10 +273,14 @@ function UpdatesSection() {
   const version = useApp((s) => s.version);
   const update = useApp((s) => s.update);
   const busy = useApp((s) => s.updating);
+  const kind = useApp((s) => s.updateKind);
+  const checks = useApp((s) => s.settings.updateChecks);
+  const fresh = useApp((s) => s.whatsNew);
 
+  // Only once the user said yes. Before that, Check for updates is the only way it asks GitHub.
   useEffect(() => {
-    void checkForUpdates();
-  }, []);
+    if (checks === true) void checkForUpdates();
+  }, [checks]);
 
   const when = update.published ? new Date(update.published).toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" }) : null;
   return (
@@ -282,8 +293,9 @@ function UpdatesSection() {
             <span className="meta" role="status">{busy === "checking" ? "Checking" : busy === "installing" ? "Downloading and checking the update. Meridian will restart by itself." : update.message}</span>
           </span>
           <button className="ghost" disabled={busy !== null} onClick={() => void checkForUpdates()}>Check for updates</button>
-          {update.available && <button className="solid" disabled={busy !== null} onClick={() => void installUpdate()}>Update now</button>}
+          {update.available && <button className="solid" disabled={busy !== null} onClick={() => void installUpdate()}>{kind === "portable" ? `Get ${update.latest?.replace(/^v/, "")} on GitHub` : "Update now"}</button>}
         </div>
+        {kind === "portable" && update.available && <p className="meta">This copy was not installed, so it cannot update itself. Get the new version from its release page.</p>}
         {update.notes && (
           <>
             <h2>What is new in {update.latest?.replace(/^v/, "")}{when ? `, ${when}` : ""}</h2>
@@ -291,7 +303,36 @@ function UpdatesSection() {
           </>
         )}
       </div>
-      <p className="meta">Updating ends any agent running here, so nothing installs until you press Update now. Meridian looks for new versions when it starts and every few hours. Downloads come from its releases on GitHub, and each one is checked against its published checksum.</p>
+      {checks === null ? (
+        <div className="update-card stack">
+          <span className="label">Check for new versions by itself?</span>
+          <span className="meta">Meridian can look at its releases on GitHub when it starts and every few hours. Nothing else is sent.</span>
+          <div className="row end">
+            <button className="ghost" onClick={() => setUpdateChecks(false)}>Not now</button>
+            <button className="solid" onClick={() => setUpdateChecks(true)}>Yes, check</button>
+          </div>
+        </div>
+      ) : (
+        <label className="setting toggle">
+          <span className="stacked grow">
+            <span className="label">Check for new versions by itself</span>
+            <span className="meta">When it starts and every few hours. Check for updates works either way.</span>
+          </span>
+          <input type="checkbox" role="switch" checked={checks} onChange={(e) => setUpdateChecks(e.target.checked)} />
+        </label>
+      )}
+      {fresh.length > 0 && (
+        <div className="stack">
+          <h2>New in {version}</h2>
+          {fresh.map((thing) => (
+            <span key={thing.title} className="stacked">
+              <span className="label">{thing.title}</span>
+              <span className="meta">{thing.line}</span>
+            </span>
+          ))}
+        </div>
+      )}
+      <p className="meta">Updating ends any agent running here, so nothing installs until you press Update now. The installer opens the new version when it is done. Downloads come from Meridian's releases on GitHub, are checked against their published checksum, and run only if they match.</p>
     </section>
   );
 }
@@ -503,7 +544,7 @@ export function SettingsPage() {
           <div className="settings-group" key={group[0]!.id}>
             {group.map((s) => (
               <button key={s.id} className="settings-tab" aria-current={current === s.id ? "page" : undefined} onClick={() => setSettingsSection(s.id)}>
-                {current === s.id && <motion.span layoutId="settings-pill" className="settings-pill" transition={spring.hover} />}
+                {current === s.id && <motion.span layoutId="settings-pill" className="settings-pill" transition={spring.snap} />}
                 <span className="settings-icon" style={{ background: s.tone }}><Icon name={s.icon} size={13} /></span>
                 <span className="settings-tab-label">{s.label}</span>
               </button>

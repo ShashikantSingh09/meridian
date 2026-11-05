@@ -42,10 +42,13 @@ const NEAR_BAND: f64 = 80.0;
 /// Position and fullscreen state change rarely, and reading the window's
 /// position crosses to the main thread, so neither happens at poll rate.
 const SLOW_EVERY: u32 = 40;
-/// The eyes follow the pointer, in small steps, and a still pointer costs nothing.
-const GAZE_EVERY: Duration = Duration::from_millis(66);
+/// The eyes glance at the pointer rather than track it: at most four times a second, and only
+/// when where they look moves by a whole device pixel. A still pointer costs nothing.
+const GAZE_EVERY: Duration = Duration::from_millis(250);
 const GAZE_STEP: f64 = 10.0;
 const GAZE_RANGE: f64 = 900.0;
+/// How far the eyes travel each way, in CSS pixels. Matches GAZE_REACH in the store.
+const GAZE_REACH: (f64, f64) = (4.0, 3.0);
 /// Floating, the island sits this far inside its window, so its shadow is not cut off. Matches the styles.
 const FLOAT_INSET: f64 = 12.0;
 /// The middle of the island stays this far from a side, so its widest compact form stays on screen.
@@ -97,6 +100,8 @@ pub struct Gate {
     home: Mutex<Option<(f64, f64)>>,
     /// "top" for the notch, or floating and growing "down" or "up". Empty until placed, which is the notch.
     place: Mutex<&'static str>,
+    /// The face is asleep, so its eyes do not follow the pointer.
+    pub face_asleep: AtomicBool,
 }
 
 /// How the island sits: the notch, or floating and growing down or up.
@@ -424,12 +429,19 @@ fn gaze(rect: &Rect, x: f64, y: f64) -> (f64, f64) {
     ((side).clamp(-1.0, 1.0), (y / reach).clamp(-1.0, 1.0))
 }
 
+/// Where the eyes would look, in whole device pixels. Only a change here is worth a repaint.
+fn gaze_target(rect: &Rect, x: f64, y: f64) -> (f64, f64) {
+    let (gx, gy) = gaze(rect, x, y);
+    ((gx * GAZE_REACH.0 * rect.dpr).round(), (gy * GAZE_REACH.1 * rect.dpr).round())
+}
+
 pub fn spawn_poll(app: AppHandle, gate: Arc<Gate>) {
     std::thread::spawn(move || {
         let Some(win) = app.get_webview_window(LABEL) else { return };
         let mut tick = 0u32;
         let mut displays = display_signature(&app);
         let mut gazed = (0.0, 0.0, Instant::now());
+        let mut looked = (0.0, 0.0);
         loop {
             if tick % SLOW_EVERY == 0 {
                 gate.fullscreen.store(fullscreen_in_front(), Ordering::Relaxed);
@@ -471,8 +483,15 @@ pub fn spawn_poll(app: AppHandle, gate: Arc<Gate>) {
             if gate.hovered.swap(on_island, Ordering::Relaxed) != on_island {
                 let _ = app.emit_to(LABEL, "island-hover", on_island);
             }
-            if (x - gazed.0).abs() + (y - gazed.1).abs() > GAZE_STEP * rect.dpr && gazed.2.elapsed() >= GAZE_EVERY {
+            // Nobody sees the eyes while the window is hidden or the face sleeps.
+            let watching = !gate.hidden.load(Ordering::Relaxed) && !gate.face_asleep.load(Ordering::Relaxed);
+            if watching
+                && (x - gazed.0).abs() + (y - gazed.1).abs() > GAZE_STEP * rect.dpr
+                && gazed.2.elapsed() >= GAZE_EVERY
+                && gaze_target(&rect, x, y) != looked
+            {
                 gazed = (x, y, Instant::now());
+                looked = gaze_target(&rect, x, y);
                 let _ = app.emit_to(LABEL, "island-gaze", gaze(&rect, x, y));
             }
             std::thread::sleep(if rect.contains(x, y, NEAR_BAND) { NEAR } else { FAR });
@@ -490,6 +509,17 @@ mod tests {
     fn hit_test_works_in_physical_pixels() {
         assert!(RECT.contains(200.0 * 1.5, 25.0 * 1.5, 0.0));
         assert!(!RECT.contains(500.0, 25.0 * 1.5, 0.0));
+    }
+
+    #[test]
+    fn the_eyes_move_only_for_a_whole_device_pixel() {
+        let at = |x: f64| gaze_target(&RECT, x, 300.0);
+        let middle = 200.0 * 1.5;
+        // Less than a device pixel of travel is not a move.
+        assert_eq!(at(middle), at(middle + 30.0));
+        // A pointer far to the side turns the eyes all the way: 4 CSS pixels, 6 device pixels here.
+        assert_eq!(at(middle + 5000.0).0, 6.0);
+        assert_eq!(at(middle - 5000.0).0, -6.0);
     }
 
     #[test]

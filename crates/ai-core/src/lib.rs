@@ -164,6 +164,9 @@ pub fn client(protocol: Protocol, endpoint: Endpoint) -> Result<Box<dyn Provider
         .connect_timeout(std::time::Duration::from_secs(10))
         // Long, because a local model can load for minutes before its first byte.
         .read_timeout(std::time::Duration::from_secs(300))
+        // A key goes only to the address it was set for. A redirect could carry it elsewhere, and
+        // local-only mode decides on the first address alone.
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(ProviderError::from_reqwest)?;
     Ok(match protocol {
@@ -203,7 +206,8 @@ pub fn is_loopback(base_url: &str) -> bool {
     let host = host.trim_start_matches('[').trim_end_matches(']').to_ascii_lowercase();
     match host.parse::<std::net::IpAddr>() {
         Ok(ip) => ip.is_loopback(),
-        Err(_) => host == "localhost" || host.ends_with(".localhost"),
+        // Only the name itself. A name under it is up to whatever resolves it on this PC.
+        Err(_) => host == "localhost",
     }
 }
 
@@ -237,10 +241,11 @@ mod tests {
 
     #[test]
     fn recognises_loopback_addresses() {
-        for local in ["http://localhost:1234/v1", "http://127.0.0.1:8080", "http://[::1]:11434", "http://foo.localhost"] {
+        for local in ["http://localhost:1234/v1", "http://127.0.0.1:8080", "http://[::1]:11434"] {
             assert!(is_loopback(local), "{local}");
         }
-        for remote in ["https://api.openai.com/v1", "http://192.168.1.4:1234", "http://localhost.evil.com", "nonsense"] {
+        // A name under localhost resolves however this PC resolves it, so it is not trusted to stay here.
+        for remote in ["https://api.openai.com/v1", "http://192.168.1.4:1234", "http://localhost.evil.com", "http://foo.localhost", "nonsense"] {
             assert!(!is_loopback(remote), "{remote}");
         }
     }

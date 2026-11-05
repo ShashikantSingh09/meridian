@@ -13,6 +13,7 @@ use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut,
 mod actions;
 mod commands;
 mod following;
+mod hush;
 mod island;
 mod life;
 mod links;
@@ -20,6 +21,7 @@ mod log;
 mod notetaker;
 mod secrets;
 mod settings;
+mod terminal;
 mod update;
 mod voice;
 mod wake;
@@ -56,6 +58,10 @@ fn toggle_monitoring(app: &AppHandle) {
 /// The only way out, so no agent outlives the app.
 fn quit(app: &AppHandle) {
     app.state::<Core>().sessions.shutdown();
+    // Other apps get their sound back, and the terminal hooks go until the next start, so nothing
+    // else can answer on their address while the app is closed.
+    app.state::<media::Hush>().release();
+    app.state::<following::Following>().withdraw();
     // Give adapters a moment to end their process trees.
     let app = app.clone();
     std::thread::spawn(move || {
@@ -141,6 +147,8 @@ fn setup(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     log::on_panic(app.path().app_log_dir()?);
     app.manage(links::state(app)?);
     app.manage(following::state(app)?);
+    // This also gives back sound a crash left muted.
+    app.manage(hush::restore_on_start(app)?);
     app.manage(voice::state(app)?);
     app.manage(wake::Wake::default());
     app.manage(notetaker::state(app)?);
@@ -198,12 +206,24 @@ fn setup(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// The island only ever shows the app's own pages. Anything else, a dropped file, a link that slipped
+/// through, is refused before it loads, because every page here can reach the app's commands.
+fn bundled(url: &tauri::Url) -> bool {
+    match (url.scheme(), url.host_str()) {
+        ("tauri", _) | ("http" | "https", Some("tauri.localhost")) => true,
+        ("about", _) => url.as_str() == "about:blank",
+        ("http", Some("localhost")) => cfg!(debug_assertions) && url.port() == Some(1420),
+        _ => false,
+    }
+}
+
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _, _| toggle(app)))
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, None))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri::plugin::Builder::<tauri::Wry>::new("stay-home").on_navigation(|_, url| bundled(url)).build())
         .on_window_event(|window, event| {
             // Click-away closes the panel, like any flyout.
             if let WindowEvent::Focused(false) = event {
@@ -213,6 +233,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::island_set_rect,
             commands::island_drag,
+            commands::island_gaze,
             commands::island_reset,
             commands::island_placement,
             commands::battery_now,
@@ -276,6 +297,13 @@ pub fn run() {
             commands::app_version,
             update::update_check,
             update::update_install,
+            update::update_kind,
+            hush::hush_on,
+            hush::hush_off,
+            notetaker::notes_keep_going,
+            actions::assistant_context,
+            terminal::terminal_focus,
+            terminal::terminal_in_front,
             commands::open_logs,
             voice::voice_status,
             voice::voice_list,
@@ -308,4 +336,19 @@ pub fn run() {
         .setup(setup)
         .run(tauri::generate_context!())
         .expect("Meridian failed to start");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::bundled;
+
+    #[test]
+    fn the_island_never_leaves_its_own_pages() {
+        for url in ["http://tauri.localhost/index.html", "https://tauri.localhost/", "tauri://localhost/", "about:blank"] {
+            assert!(bundled(&url.parse().unwrap()), "{url}");
+        }
+        for url in ["file:///C:/Users/x/probe.html", "https://example.com/", "http://127.0.0.1:9/", "http://tauri.localhost.evil.com/", "about:srcdoc"] {
+            assert!(!bundled(&url.parse().unwrap()), "{url}");
+        }
+    }
 }

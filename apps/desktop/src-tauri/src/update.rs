@@ -1,8 +1,12 @@
 //! Updating from inside the app. Releases are read from GitHub: straight from its public pages while
 //! the repository is public, and through the GitHub command line the owner signed in to if it is ever
-//! private again. No token is read or kept here. Nothing is installed without a click, and an
-//! installer must match the checksums published beside it.
+//! private again. No token is read or kept here. Nothing is installed without a click, only the release
+//! the user was shown is installed, and an installer must match the checksums published beside it
+//! before it is written to disk.
 
+use std::ffi::OsString;
+use std::io::{Read, Write};
+use std::os::windows::ffi::OsStringExt;
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
@@ -10,7 +14,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
-use tauri::AppHandle;
+use sha2::{Digest, Sha256};
+use tauri::{AppHandle, Manager};
+
+use crate::commands::Core;
+use crate::links::refuse_if_local;
 
 const REPO: &str = "ShashikantSingh09/meridian";
 const NO_WINDOW: u32 = 0x0800_0000;
@@ -18,6 +26,19 @@ const NOT_READY: &str = "Updating needs the GitHub command line, signed in. Run 
 const OFFLINE: &str = "Could not reach GitHub. Check the connection and try again.";
 const UNREADABLE: &str = "GitHub sent something this version cannot read.";
 const CHECKSUMS: &str = "SHA256SUMS.txt";
+/// The release on GitHub is no longer the one the user was shown.
+const MOVED: &str = "A newer version appeared. Check again.";
+/// This copy was not installed, so it has no installer to update it. The page opens the release instead.
+const PORTABLE: &str = "portable";
+const NO_INSTALLER: &str = "The release has no installer, so nothing was installed.";
+const NO_SUMS: &str = "The release has no checksums, so it was not installed.";
+const NO_CHECKSUM: &str = "The release has no checksum for its installer, so it was not installed.";
+const MISMATCH: &str = "The download does not match its checksum, so it was not installed.";
+const TOO_BIG: &str = "The download is larger than an installer can be, so it was not installed.";
+const MAX_INSTALLER: usize = 200 * 1024 * 1024;
+const MAX_SUMS: usize = 64 * 1024;
+/// Downloads left by an update that failed or already ran.
+const KEEP_FOR: Duration = Duration::from_secs(24 * 60 * 60);
 /// Set from a click until the install fails or the app exits.
 static INSTALLING: AtomicBool = AtomicBool::new(false);
 
@@ -56,9 +77,22 @@ pub struct UpdateStatus {
     current: String,
     latest: Option<String>,
     available: bool,
+    /// The release notes, for What's new.
     notes: String,
     published: Option<String>,
     message: String,
+}
+
+/// How this copy got onto the PC, which decides what can update it.
+#[derive(Serialize, Clone, Copy, PartialEq, Eq, Debug)]
+#[serde(rename_all = "lowercase")]
+pub enum InstallKind {
+    /// The per-user setup exe: `%LOCALAPPDATA%\Meridian`, with its `uninstall.exe`.
+    Setup,
+    /// The MSI, under Program Files.
+    Msi,
+    /// Anything else, such as the portable exe. It updates by hand.
+    Portable,
 }
 
 fn parts(version: &str) -> Option<(u32, u32, u32)> {
@@ -72,6 +106,47 @@ fn newer(latest: &str, current: &str) -> bool {
     matches!((parts(latest), parts(current)), (Some(latest), Some(current)) if latest > current)
 }
 
+/// Only the release the user saw is installed, never one published while they read it.
+fn still_latest(seen: &str, latest: &str) -> Result<(), String> {
+    if seen == latest { Ok(()) } else { Err(MOVED.to_string()) }
+}
+
+/// Windows paths ignore case. An empty root holds nothing, so an unset variable matches no path.
+fn under(path: &Path, root: &Path) -> bool {
+    let lower = |path: &Path| PathBuf::from(path.to_string_lossy().to_lowercase());
+    !root.as_os_str().is_empty() && lower(path).starts_with(lower(root))
+}
+
+/// The NSIS template installs a per-user copy to `$LOCALAPPDATA\${PRODUCTNAME}` and writes
+/// `$INSTDIR\uninstall.exe` beside it. The WiX template installs under Program Files.
+pub fn install_kind(exe: &Path, local_app_data: &Path, program_files: &[PathBuf]) -> InstallKind {
+    let beside_uninstaller = exe.parent().is_some_and(|dir| dir.join("uninstall.exe").is_file());
+    if under(exe, local_app_data) && beside_uninstaller {
+        InstallKind::Setup
+    } else if program_files.iter().any(|root| under(exe, root)) {
+        InstallKind::Msi
+    } else {
+        InstallKind::Portable
+    }
+}
+
+fn kind_of(app: &AppHandle) -> InstallKind {
+    let (Ok(exe), Ok(local)) = (std::env::current_exe(), app.path().local_data_dir()) else {
+        return InstallKind::Portable;
+    };
+    let program_files: Vec<PathBuf> = ["ProgramFiles", "ProgramW6432", "ProgramFiles(x86)"].iter().filter_map(|name| std::env::var_os(name)).map(PathBuf::from).collect();
+    install_kind(&exe, &local, &program_files)
+}
+
+/// The release's file for this kind of install, by the names the release workflow gives them.
+fn asset_name(tag: &str, kind: InstallKind) -> String {
+    let version = tag.trim_start_matches('v');
+    match kind {
+        InstallKind::Msi => format!("Meridian-{version}.msi"),
+        _ => format!("Meridian-{version}-setup.exe"),
+    }
+}
+
 /// The checksum published for a file, from a `SHA256SUMS.txt`.
 fn checksum_of(sums: &str, file: &str) -> Option<String> {
     sums.lines().find_map(|line| {
@@ -80,9 +155,69 @@ fn checksum_of(sums: &str, file: &str) -> Option<String> {
     })
 }
 
-/// Where a release's file can be downloaded, by its exact name.
-fn link_of<'a>(assets: &'a [Asset], name: &str) -> Option<&'a str> {
-    assets.iter().find(|asset| asset.name == name).map(|asset| asset.browser_download_url.as_str())
+/// The bytes in hand are the bytes checked, so nothing can swap the file between check and run.
+fn verify(bytes: &[u8], sums: &str, file: &str) -> Result<(), String> {
+    let expected = checksum_of(sums, file).ok_or(NO_CHECKSUM)?;
+    if format!("{:x}", Sha256::digest(bytes)) != expected {
+        return Err(MISMATCH.to_string());
+    }
+    Ok(())
+}
+
+/// Adds a piece of a download, refusing one that grows past the cap before it is all in memory.
+fn append(into: &mut Vec<u8>, chunk: &[u8], cap: usize) -> Result<(), String> {
+    if into.len() + chunk.len() > cap {
+        return Err(TOO_BIG.to_string());
+    }
+    into.extend_from_slice(chunk);
+    Ok(())
+}
+
+/// A file `gh` downloaded, read no further than the cap.
+fn read_capped(path: &Path, cap: usize, missing: &str) -> Result<Vec<u8>, String> {
+    let mut bytes = Vec::new();
+    std::fs::File::open(path).and_then(|file| file.take(cap as u64 + 1).read_to_end(&mut bytes)).map_err(|_| missing.to_string())?;
+    if bytes.len() > cap {
+        return Err(TOO_BIG.to_string());
+    }
+    Ok(bytes)
+}
+
+/// A new folder of this download's own, under the app's per-user data. `create_dir` fails if the
+/// name is already there, so nothing left in place beforehand is ever reused.
+fn fresh_folder(root: &Path, name: &str) -> Result<PathBuf, String> {
+    std::fs::create_dir_all(root).map_err(|err| err.to_string())?;
+    for entry in std::fs::read_dir(root).map_err(|err| err.to_string())?.flatten() {
+        let stale = entry.metadata().and_then(|meta| meta.modified()).ok().and_then(|at| at.elapsed().ok()).is_some_and(|age| age > KEEP_FOR);
+        if stale {
+            let _ = std::fs::remove_dir_all(entry.path());
+        }
+    }
+    let folder = root.join(name);
+    std::fs::create_dir(&folder).map_err(|err| err.to_string())?;
+    Ok(folder)
+}
+
+/// Windows' own System32, from Windows itself rather than from a name looked up on the PATH.
+fn system_dir() -> Result<PathBuf, String> {
+    let mut buffer = [0u16; 260];
+    // SAFETY: the buffer is valid for its whole length, which the binding passes alongside it.
+    let length = unsafe { windows::Win32::System::SystemInformation::GetSystemDirectoryW(Some(&mut buffer)) } as usize;
+    if length == 0 || length >= buffer.len() {
+        return Err("Could not find the Windows system folder.".to_string());
+    }
+    Ok(PathBuf::from(OsString::from_wide(&buffer[..length])))
+}
+
+/// What runs once the app has quit: a pause so it is gone, then the installer, which starts the new
+/// version itself. `/S` is silent, `/UPDATE` installs over the old copy and keeps its shortcuts, and
+/// `/R` runs `$INSTDIR\meridian.exe` when it succeeds. The MSI's `AUTOLAUNCHAPP` does the same.
+fn script(kind: InstallKind, installer: &Path, system: &Path) -> String {
+    let run = match kind {
+        InstallKind::Msi => format!("\"{}\" /i \"{}\" /passive /promptrestart AUTOLAUNCHAPP=True", system.join("msiexec.exe").display(), installer.display()),
+        _ => format!("\"{}\" /S /UPDATE /R", installer.display()),
+    };
+    format!("\"{}\" -n 3 127.0.0.1 >nul & {run}", system.join("PING.EXE").display())
 }
 
 fn gh(args: &[&str]) -> Result<Output, String> {
@@ -97,6 +232,7 @@ fn gh(args: &[&str]) -> Result<Output, String> {
 fn web() -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
         .user_agent(concat!("Meridian/", env!("CARGO_PKG_VERSION")))
+        .https_only(true)
         .connect_timeout(Duration::from_secs(15))
         .timeout(Duration::from_secs(600))
         .build()
@@ -138,16 +274,15 @@ async fn latest() -> Result<(Published, Source), String> {
     }
 }
 
-fn sha256_of(path: &Path) -> Result<String, String> {
-    let output = Command::new("certutil").args(["-hashfile"]).arg(path).arg("SHA256").creation_flags(NO_WINDOW).output().map_err(|e| e.to_string())?;
-    let text = String::from_utf8_lossy(&output.stdout);
-    text.lines().map(str::trim).find(|line| line.len() == 64 && line.chars().all(|c| c.is_ascii_hexdigit())).map(str::to_ascii_lowercase).ok_or_else(|| "Could not check the download.".to_string())
-}
-
 #[tauri::command]
 pub async fn update_check(app: AppHandle) -> UpdateStatus {
     let current = app.package_info().version.to_string();
-    match latest().await {
+    let allowed = refuse_if_local(&app.state::<Core>());
+    let found = match allowed {
+        Ok(()) => latest().await,
+        Err(why) => Err(why),
+    };
+    match found {
         Err(message) => UpdateStatus { current, latest: None, available: false, notes: String::new(), published: None, message },
         Ok((release, _)) => {
             let available = newer(&release.tag_name, &current);
@@ -157,72 +292,113 @@ pub async fn update_check(app: AppHandle) -> UpdateStatus {
     }
 }
 
-async fn download(client: &reqwest::Client, url: &str, to: &Path) -> Result<(), String> {
-    let response = client.get(url).send().await.and_then(reqwest::Response::error_for_status).map_err(|_| OFFLINE.to_string())?;
-    let bytes = response.bytes().await.map_err(|_| OFFLINE.to_string())?;
-    std::fs::write(to, &bytes).map_err(|err| err.to_string())
+/// How this copy was installed, so the page can open the release instead for a portable one.
+#[tauri::command]
+pub fn update_kind(app: AppHandle) -> InstallKind {
+    kind_of(&app)
 }
 
-async fn fetch(release: &Published, source: Source) -> Result<PathBuf, String> {
-    let folder = std::env::temp_dir().join("meridian-update");
-    let _ = std::fs::remove_dir_all(&folder);
-    std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
-    let installer = format!("Meridian-{}-setup.exe", release.tag_name.trim_start_matches('v'));
+async fn download(client: &reqwest::Client, url: &str, cap: usize) -> Result<Vec<u8>, String> {
+    let mut response = client.get(url).send().await.and_then(reqwest::Response::error_for_status).map_err(|_| OFFLINE.to_string())?;
+    if response.content_length().is_some_and(|length| length > cap as u64) {
+        return Err(TOO_BIG.to_string());
+    }
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(|_| OFFLINE.to_string())? {
+        append(&mut bytes, &chunk, cap)?;
+    }
+    Ok(bytes)
+}
+
+/// The installer and the checksums, both in memory.
+async fn gather(release: &Published, source: Source, name: &str, folder: &Path) -> Result<(Vec<u8>, Vec<u8>), String> {
     match source {
         Source::Web => {
             let client = web()?;
-            let link = link_of(&release.assets, &installer).ok_or("The release has no installer, so nothing was installed.")?;
-            download(&client, link, &folder.join(&installer)).await?;
-            if let Some(link) = link_of(&release.assets, CHECKSUMS) {
-                download(&client, link, &folder.join(CHECKSUMS)).await?;
-            }
+            let installer = link_of(&release.assets, name).ok_or(NO_INSTALLER)?;
+            let sums = link_of(&release.assets, CHECKSUMS).ok_or(NO_SUMS)?;
+            Ok((download(&client, installer, MAX_INSTALLER).await?, download(&client, sums, MAX_SUMS).await?))
         }
         Source::Gh => {
-            let (tag, pattern, target) = (release.tag_name.clone(), installer.clone(), folder.to_string_lossy().into_owned());
+            // gh only writes to disk, so it gets a folder of its own, which is read back and removed.
+            let staging = folder.join("gh");
+            let (tag, pattern, target) = (release.tag_name.clone(), name.to_string(), staging.to_string_lossy().into_owned());
             tauri::async_runtime::spawn_blocking(move || gh(&["release", "download", &tag, "--repo", REPO, "--pattern", &pattern, "--pattern", CHECKSUMS, "--dir", &target]))
                 .await
                 .map_err(|e| e.to_string())??;
+            let read = (read_capped(&staging.join(name), MAX_INSTALLER, NO_INSTALLER), read_capped(&staging.join(CHECKSUMS), MAX_SUMS, NO_SUMS));
+            let _ = std::fs::remove_dir_all(&staging);
+            Ok((read.0?, read.1?))
         }
     }
-    let sums = std::fs::read_to_string(folder.join(CHECKSUMS)).map_err(|_| "The release has no checksums, so it was not installed.".to_string())?;
-    let expected = checksum_of(&sums, &installer).ok_or("The release has no checksum for its installer, so it was not installed.")?;
-    let path = folder.join(&installer);
-    let checked = path.clone();
-    let found = tauri::async_runtime::spawn_blocking(move || sha256_of(&checked)).await.map_err(|e| e.to_string())??;
-    if found != expected {
-        return Err("The download does not match its checksum, so it was not installed.".into());
-    }
-    Ok(path)
 }
 
-/// Only ever from a click. Installing restarts the app, which would end a running agent.
+async fn fetch(release: &Published, source: Source, kind: InstallKind, root: &Path) -> Result<PathBuf, String> {
+    let name = asset_name(&release.tag_name, kind);
+    let folder = fresh_folder(root, &uuid::Uuid::new_v4().to_string())?;
+    let saved = async {
+        let (installer, sums) = gather(release, source, &name, &folder).await?;
+        verify(&installer, &String::from_utf8_lossy(&sums), &name)?;
+        let path = folder.join(&name);
+        std::fs::File::create_new(&path).and_then(|mut file| file.write_all(&installer)).map_err(|err| err.to_string())?;
+        Ok::<_, String>(path)
+    }
+    .await;
+    if saved.is_err() {
+        let _ = std::fs::remove_dir_all(&folder);
+    }
+    saved
+}
+
+/// Where a release's file can be downloaded, by its exact name.
+fn link_of<'a>(assets: &'a [Asset], name: &str) -> Option<&'a str> {
+    assets.iter().find(|asset| asset.name == name).map(|asset| asset.browser_download_url.as_str())
+}
+
+/// Only ever from a click, with the tag the page showed. Installing restarts the app, which would
+/// end a running agent.
 #[tauri::command]
-pub async fn update_install(app: AppHandle) -> Result<(), String> {
+pub async fn update_install(app: AppHandle, tag: String) -> Result<(), String> {
     // The panel can close and reopen during a download, and a second run would delete the first's.
     if INSTALLING.swap(true, Ordering::SeqCst) {
         return Err("An update is already being installed.".to_string());
     }
-    let outcome = install(&app).await;
+    let outcome = install(&app, &tag).await;
     if outcome.is_err() {
         INSTALLING.store(false, Ordering::SeqCst);
     }
     outcome
 }
 
-async fn install(app: &AppHandle) -> Result<(), String> {
+async fn install(app: &AppHandle, seen: &str) -> Result<(), String> {
+    refuse_if_local(&app.state::<Core>())?;
+    let kind = kind_of(app);
+    if kind == InstallKind::Portable {
+        return Err(PORTABLE.to_string());
+    }
     let current = app.package_info().version.to_string();
     let (release, source) = latest().await?;
+    still_latest(seen, &release.tag_name)?;
     if !newer(&release.tag_name, &current) {
         return Err("You are already on the latest version.".to_string());
     }
-    let installer = fetch(&release, source).await?;
+    let root = app.path().app_local_data_dir().map_err(|err| err.to_string())?.join("updates");
+    let installer = fetch(&release, source, kind, &root).await?;
 
-    let exe = std::env::current_exe().map_err(|e| e.to_string())?;
     // The app has to be gone before the installer can replace it, so a small script outlives it.
-    // A pause, the quiet install, then the new version starts where the old one was.
-    let script = format!("ping -n 3 127.0.0.1 >nul & \"{}\" /S & start \"\" \"{}\"", installer.display(), exe.display());
+    let system = system_dir()?;
+    let script = script(kind, &installer, &system);
     // Not detached: ping would then open a console window of its own.
-    Command::new("cmd").arg("/c").raw_arg(format!("\"{script}\"")).creation_flags(NO_WINDOW).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().map_err(|e| e.to_string())?;
+    Command::new(system.join("cmd.exe"))
+        .arg("/c")
+        .raw_arg(format!("\"{script}\""))
+        .current_dir(&system)
+        .creation_flags(NO_WINDOW)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|e| e.to_string())?;
     crate::quit(app);
     Ok(())
 }
@@ -230,6 +406,11 @@ async fn install(app: &AppHandle) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A folder of the test's own under the temp folder, removed by the test.
+    fn scratch() -> PathBuf {
+        std::env::temp_dir().join(format!("meridian-update-test-{}", uuid::Uuid::new_v4()))
+    }
 
     #[test]
     fn only_a_plain_newer_version_counts() {
@@ -244,11 +425,96 @@ mod tests {
     }
 
     #[test]
+    fn only_the_release_that_was_shown_installs() {
+        assert!(still_latest("v0.5.2", "v0.5.2").is_ok());
+        assert_eq!(still_latest("v0.5.2", "v0.5.3").unwrap_err(), MOVED);
+        assert_eq!(still_latest("", "v0.5.3").unwrap_err(), MOVED);
+    }
+
+    #[test]
     fn a_checksum_is_found_by_exact_name() {
         let sums = "ABC123  Meridian-0.4.0-setup.exe\ndef456  Meridian-0.4.0.msi\n";
         assert_eq!(checksum_of(sums, "Meridian-0.4.0-setup.exe").as_deref(), Some("abc123"));
         assert_eq!(checksum_of(sums, "Meridian-0.4.0.msi").as_deref(), Some("def456"));
         assert_eq!(checksum_of(sums, "setup.exe"), None);
+    }
+
+    #[test]
+    fn the_bytes_in_memory_are_checked() {
+        // SHA-256 of "abc", from FIPS 180-2.
+        let abc = "BA7816BF8F01CFEA414140DE5DAE2223B00361A396177A9CB410FF61F20015AD";
+        let sums = format!("{abc}  Meridian-0.6.0-setup.exe\n");
+        assert_eq!(verify(b"abc", &sums, "Meridian-0.6.0-setup.exe"), Ok(()));
+        assert_eq!(verify(b"abd", &sums, "Meridian-0.6.0-setup.exe").unwrap_err(), MISMATCH);
+        assert_eq!(verify(b"abc", &sums, "Meridian-0.6.0.msi").unwrap_err(), NO_CHECKSUM);
+        assert_eq!(verify(b"abc", "", "Meridian-0.6.0-setup.exe").unwrap_err(), NO_CHECKSUM);
+    }
+
+    #[test]
+    fn a_download_past_the_cap_is_refused() {
+        let mut bytes = Vec::new();
+        assert!(append(&mut bytes, b"12345", 8).is_ok());
+        assert!(append(&mut bytes, b"678", 8).is_ok(), "exactly the cap fits");
+        assert_eq!(append(&mut bytes, b"9", 8).unwrap_err(), TOO_BIG);
+        assert_eq!(bytes, b"12345678");
+        assert_eq!(MAX_INSTALLER, 200 * 1024 * 1024);
+
+        let root = scratch();
+        std::fs::create_dir_all(&root).unwrap();
+        let file = root.join("setup.exe");
+        std::fs::write(&file, b"123456789").unwrap();
+        assert_eq!(read_capped(&file, 9, NO_INSTALLER).unwrap(), b"123456789");
+        assert_eq!(read_capped(&file, 8, NO_INSTALLER).unwrap_err(), TOO_BIG);
+        assert_eq!(read_capped(&root.join("missing.exe"), 8, NO_INSTALLER).unwrap_err(), NO_INSTALLER);
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_download_folder_is_never_reused() {
+        let root = scratch();
+        let folder = fresh_folder(&root, "one").unwrap();
+        assert!(folder.is_dir());
+        assert!(fresh_folder(&root, "one").is_err(), "the folder was already there");
+        assert!(fresh_folder(&root, "two").is_ok());
+        assert!(folder.is_dir(), "a folder from today is kept");
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn the_install_kind_follows_where_the_app_runs() {
+        let root = scratch();
+        let local = root.join("AppData").join("Local");
+        let installed = local.join("Meridian");
+        std::fs::create_dir_all(&installed).unwrap();
+        let program_files = vec![PathBuf::from(r"C:\Program Files"), PathBuf::from(r"C:\Program Files (x86)"), PathBuf::new()];
+
+        // Before the uninstaller is there, a copy in local data is just a copy.
+        assert_eq!(install_kind(&installed.join("meridian.exe"), &local, &program_files), InstallKind::Portable);
+        std::fs::write(installed.join("uninstall.exe"), b"").unwrap();
+        assert_eq!(install_kind(&installed.join("meridian.exe"), &local, &program_files), InstallKind::Setup);
+        let shouted = PathBuf::from(installed.to_string_lossy().to_uppercase()).join("MERIDIAN.EXE");
+        assert_eq!(install_kind(&shouted, &local, &program_files), InstallKind::Setup, "case is ignored");
+
+        assert_eq!(install_kind(Path::new(r"C:\Program Files\Meridian\meridian.exe"), &local, &program_files), InstallKind::Msi);
+        assert_eq!(install_kind(Path::new(r"c:\program files\Meridian\meridian.exe"), &local, &program_files), InstallKind::Msi);
+        assert_eq!(install_kind(Path::new(r"D:\Tools\Meridian-0.5.1-portable.exe"), &local, &program_files), InstallKind::Portable);
+        assert_eq!(install_kind(Path::new(r"C:\Program Files Extra\meridian.exe"), &local, &program_files), InstallKind::Portable, "whole folder names only");
+        assert_eq!(serde_json::to_string(&InstallKind::Portable).unwrap(), "\"portable\"");
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn the_installer_runs_from_windows_folders_and_starts_the_new_version() {
+        let system = Path::new(r"C:\Windows\system32");
+        let setup = script(InstallKind::Setup, Path::new(r"C:\Users\u\AppData\Local\dev.meridian.companion\updates\x\Meridian-0.6.0-setup.exe"), system);
+        assert!(setup.starts_with(r#""C:\Windows\system32\PING.EXE" -n 3 127.0.0.1 >nul & "#), "{setup}");
+        assert!(setup.ends_with(r#"\Meridian-0.6.0-setup.exe" /S /UPDATE /R"#), "{setup}");
+        let msi = script(InstallKind::Msi, Path::new(r"C:\u\Meridian-0.6.0.msi"), system);
+        assert!(msi.contains(r#""C:\Windows\system32\msiexec.exe" /i "C:\u\Meridian-0.6.0.msi" /passive"#), "{msi}");
+        assert!(msi.ends_with("AUTOLAUNCHAPP=True"), "{msi}");
+        assert_eq!(asset_name("v0.6.0", InstallKind::Setup), "Meridian-0.6.0-setup.exe");
+        assert_eq!(asset_name("v0.6.0", InstallKind::Msi), "Meridian-0.6.0.msi");
+        assert!(system_dir().unwrap().join("cmd.exe").is_file());
     }
 
     /// The shape GitHub's public API sends, with the notes left empty as it can.
@@ -275,7 +541,7 @@ mod tests {
             Unseen::Failed(why) => why,
         });
         let release = release.unwrap();
-        let installer = format!("Meridian-{}-setup.exe", release.tag_name.trim_start_matches('v'));
+        let installer = asset_name(&release.tag_name, InstallKind::Setup);
         assert!(link_of(&release.assets, &installer).is_some(), "{installer}");
         assert!(link_of(&release.assets, CHECKSUMS).is_some());
     }
@@ -285,8 +551,9 @@ mod tests {
     #[ignore = "downloads the installer from GitHub"]
     async fn the_published_installer_downloads_and_matches_its_checksum() {
         let release = from_web().await.ok().expect("a public release");
-        let path = fetch(&release, Source::Web).await.unwrap();
+        let root = scratch();
+        let path = fetch(&release, Source::Web, InstallKind::Setup, &root).await.unwrap();
         assert!(std::fs::metadata(&path).unwrap().len() > 1_000_000);
-        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

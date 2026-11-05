@@ -29,6 +29,34 @@ use crate::{island, voice as hearing};
 
 /// A recording left running by mistake should not run all night.
 const LONGEST_RECORDING: Duration = Duration::from_secs(4 * 60 * 60);
+/** After this long with nobody speaking on either side, a recording offers to stop. */
+const QUIET_FOR: Duration = Duration::from_secs(15 * 60);
+/** How long that offer waits for Keep recording before it stops. */
+const QUIET_GRACE: Duration = Duration::from_secs(30);
+/** A peak this loud, on either side, is someone speaking. The same as VOICED_LEVEL, as a fraction. */
+const VOICED_PEAK: f32 = VOICED_LEVEL as f32 / 32768.0;
+
+/** Keep recording was pressed, so the quiet so far no longer counts. */
+static KEEP_GOING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+#[derive(Debug, PartialEq)]
+enum Quiet {
+    Fine,
+    /** Stops in this many seconds unless someone speaks or Keep recording is pressed. */
+    Warn(u64),
+    Stop,
+}
+
+/** What a recording that has been quiet this long should do. */
+fn quiet_step(quiet_for: Duration) -> Quiet {
+    if quiet_for >= QUIET_FOR + QUIET_GRACE {
+        Quiet::Stop
+    } else if quiet_for >= QUIET_FOR {
+        Quiet::Warn((QUIET_FOR + QUIET_GRACE - quiet_for).as_secs().max(1))
+    } else {
+        Quiet::Fine
+    }
+}
 const LOOK_EVERY: Duration = Duration::from_millis(250);
 /// The microphone arrives every 100 ms, so this far behind means it has stopped.
 const MIC_GONE_SAMPLES: u64 = RATE as u64 * 2;
@@ -273,7 +301,10 @@ pub fn stop(app: &AppHandle) {
 /// Keeps both files safe on disk and the meters moving, for as long as the recording lasts. Pausing
 /// all monitoring ends it, whichever way it was paused.
 fn watch(app: AppHandle, id: String) {
-    std::thread::spawn(move || loop {
+    std::thread::spawn(move || {
+    let (mut voiced_at, mut warned) = (Instant::now(), false);
+    KEEP_GOING.store(false, std::sync::atomic::Ordering::Relaxed);
+    loop {
         std::thread::sleep(LOOK_EVERY);
         let taker = app.state::<NoteTaker>();
         let guard = taker.recording.lock().unwrap();
@@ -288,13 +319,45 @@ fn watch(app: AppHandle, id: String) {
             let _ = system.file.flush();
             Levels { you: mic.take_peak(), others: system.take_peak() }
         };
-        let over = recording.began.elapsed() >= LONGEST_RECORDING || app.state::<Core>().settings.lock().unwrap().monitoring_paused;
+        let core = app.state::<Core>();
+        let (paused, stop_quiet) = {
+            let settings = core.settings.lock().unwrap();
+            (settings.monitoring_paused, settings.stop_quiet_calls)
+        };
+        let over = recording.began.elapsed() >= LONGEST_RECORDING || paused;
         drop(guard);
+        if levels.you > VOICED_PEAK || levels.others > VOICED_PEAK || KEEP_GOING.swap(false, std::sync::atomic::Ordering::Relaxed) {
+            voiced_at = Instant::now();
+        }
         let _ = app.emit_to(island::LABEL, "note-levels", levels);
         if over {
             stop(&app);
+            return;
         }
+        match if stop_quiet { quiet_step(voiced_at.elapsed()) } else { Quiet::Fine } {
+            Quiet::Fine if warned => {
+                warned = false;
+                let _ = app.emit_to(island::LABEL, "note-quiet", 0u64);
+            }
+            Quiet::Fine => {}
+            Quiet::Warn(left) => {
+                warned = true;
+                let _ = app.emit_to(island::LABEL, "note-quiet", left);
+            }
+            Quiet::Stop => {
+                stop(&app);
+                let _ = app.emit_to(island::LABEL, "note-stopped-quiet", &id);
+                return;
+            }
+        }
+    }
     });
+}
+
+/** Keep recording, from the island's offer to stop a quiet call. */
+#[tauri::command]
+pub fn notes_keep_going() {
+    KEEP_GOING.store(true, std::sync::atomic::Ordering::Relaxed);
 }
 
 /// The app is told what there is once it is listening, so nothing it should hear about is missed.
@@ -469,16 +532,36 @@ pub fn notes_markdown(taker: State<'_, NoteTaker>, id: String) -> Result<String,
     Ok(note.markdown(&date_of(&note)))
 }
 
-/// Saves to where the user picked in the save dialog.
+/// Saves where the user picks. The save dialog opens here, in the core, so the page never chooses
+/// where a note is written. False when the dialog was closed without choosing.
 #[tauri::command]
-pub fn notes_export(taker: State<'_, NoteTaker>, id: String, path: String) -> Result<(), String> {
+pub async fn notes_export(app: AppHandle, taker: State<'_, NoteTaker>, id: String, name: String) -> Result<bool, String> {
+    use tauri_plugin_dialog::DialogExt;
     let note = taker.find(&id).ok_or("That note is gone.")?;
-    fs::write(path, note.markdown(&date_of(&note))).map_err(|err| err.to_string())
+    let name: String = name.chars().filter(|c| c.is_alphanumeric() || " -".contains(*c)).collect();
+    let name = if name.trim().is_empty() { "Notes".to_string() } else { name.trim().to_string() };
+    let picker = app.clone();
+    let chosen = tauri::async_runtime::spawn_blocking(move || picker.dialog().file().set_file_name(format!("{name}.md")).add_filter("Markdown", &["md"]).blocking_save_file())
+        .await
+        .map_err(|err| err.to_string())?;
+    let Some(path) = chosen else { return Ok(false) };
+    let path = path.into_path().map_err(|err| err.to_string())?;
+    fs::write(path, note.markdown(&date_of(&note))).map_err(|err| err.to_string())?;
+    Ok(true)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_quiet_call_warns_then_stops() {
+        assert_eq!(quiet_step(Duration::from_secs(60)), Quiet::Fine);
+        assert_eq!(quiet_step(QUIET_FOR - Duration::from_secs(1)), Quiet::Fine);
+        assert_eq!(quiet_step(QUIET_FOR), Quiet::Warn(30));
+        assert_eq!(quiet_step(QUIET_FOR + Duration::from_secs(29)), Quiet::Warn(1));
+        assert_eq!(quiet_step(QUIET_FOR + QUIET_GRACE), Quiet::Stop);
+    }
 
     #[test]
     fn silence_and_a_click_are_not_someone_speaking() {

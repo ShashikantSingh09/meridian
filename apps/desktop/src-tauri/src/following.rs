@@ -17,7 +17,9 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::island;
 
-/// Hooks name a fixed address, so the port and token outlive a restart.
+/// Hooks name a fixed address, so the port and token outlive a restart. The hooks themselves are
+/// taken out when the app quits and put back when it starts, so nothing else can answer on that
+/// address while it is closed, and a new port always comes with a new token.
 pub type Answers = serde_json::Map<String, serde_json::Value>;
 
 const CHECK_RUNNING_EVERY: Duration = Duration::from_secs(2);
@@ -26,6 +28,14 @@ const CHECK_RUNNING_EVERY: Duration = Duration::from_secs(2);
 struct Address {
     port: u16,
     token: String,
+    /// Whether following is on. The hooks are out of the settings file while the app is closed, so
+    /// this is what remembers it. Files from before this was kept were only written while on.
+    #[serde(default = "yes")]
+    on: bool,
+}
+
+const fn yes() -> bool {
+    true
 }
 
 pub struct Following {
@@ -66,7 +76,18 @@ impl Following {
     /// Listens on the saved port if it is free. Another app may have taken it, in
     /// which case a new one is picked, and the caller rewrites the hooks.
     async fn listen(&self, app: &AppHandle, address: &Address) -> Result<Watcher, String> {
-        let emit = |app: AppHandle| move |envelope| drop(app.emit_to(island::LABEL, "agent-event", envelope));
+        let dir = self.settings.as_ref().and_then(|s| s.parent()).map(PathBuf::from);
+        let emit = |app: AppHandle| {
+            let dir = dir.clone();
+            move |mut envelope: Envelope| {
+                // A hook does not name its process, and Claude Code's record of the session does.
+                // ponytail: looked up once, when first heard. A record written after that first hook leaves it unknown.
+                if let (AgentEvent::Watched { pid, .. }, Some(dir)) = (&mut envelope.event, &dir) {
+                    *pid = running::pid_of(dir, &envelope.session_id, alive);
+                }
+                drop(app.emit_to(island::LABEL, "agent-event", envelope))
+            }
+        };
         match Watcher::start(address.port, address.token.clone(), emit(app.clone())).await {
             Ok(watcher) => Ok(watcher),
             Err(_) => Watcher::start(0, address.token.clone(), emit(app.clone())).await.map_err(stringify),
@@ -77,10 +98,25 @@ impl Following {
         let settings = self.settings.as_ref().ok_or("Could not find your Claude Code settings.")?;
         let mut address = match self.saved() {
             Some(address) => address,
-            None => Address { port: 0, token: new_token()? },
+            None => Address { port: 0, token: new_token()?, on: true },
         };
         let watcher = self.listen(app, &address).await?;
+        // A new port is a new address. The old token may be known to whoever took the port.
+        if address.port != 0 && watcher.port() != address.port {
+            address.token = new_token()?;
+            watcher.stop();
+            let renewed = self.listen(app, &Address { port: 0, ..address.clone() }).await?;
+            address.port = renewed.port();
+            return self.adopt(renewed, address, settings);
+        }
         address.port = watcher.port();
+        address.on = true;
+        self.adopt(watcher, address, settings)
+    }
+
+    /// Writes the hooks for a listening watcher, and keeps both.
+    fn adopt(&self, watcher: Watcher, mut address: Address, settings: &std::path::Path) -> Result<(), String> {
+        address.on = true;
         let url = format!("http://127.0.0.1:{}{HOOK_PATH}", address.port);
         if let Err(err) = watch::install(settings, &url, &address.token) {
             watcher.stop();
@@ -94,13 +130,25 @@ impl Following {
     }
 
     fn turn_off(&self) -> Result<(), String> {
+        self.withdraw();
+        if let Some(mut address) = self.saved() {
+            address.on = false;
+            self.save(&address)?;
+        }
+        Ok(())
+    }
+
+    /// Takes the hooks out and stops listening, leaving following on for the next start. Runs when
+    /// the app quits, so a closed app leaves no address in Claude Code's settings for anything else to take.
+    pub fn withdraw(&self) {
         if let Some(settings) = &self.settings {
-            watch::uninstall(settings).map_err(stringify)?;
+            if watch::installed(settings) {
+                let _ = watch::uninstall(settings);
+            }
         }
         if let Some(watcher) = self.watcher.lock().unwrap().take() {
             watcher.stop();
         }
-        Ok(())
     }
 
     fn hears(&self, session_id: &str) -> bool {
@@ -108,7 +156,7 @@ impl Following {
     }
 
     fn on(&self) -> bool {
-        self.settings.as_deref().is_some_and(watch::installed)
+        self.settings.as_deref().is_some_and(watch::installed) || self.saved().is_some_and(|address| address.on)
     }
 
     pub fn answer(&self, session_id: &str, approval_id: &str, allow: bool, answers: Option<Answers>) -> Result<(), String> {
@@ -164,7 +212,7 @@ pub fn watch_running(app: &AppHandle) {
                 }
                 let before = shown.get(id);
                 if before.is_none() {
-                    send(id, AgentEvent::Watched { agent: "Claude Code".into(), cwd: session.cwd.clone(), title: session.title.clone() });
+                    send(id, AgentEvent::Watched { agent: "Claude Code".into(), cwd: session.cwd.clone(), title: session.title.clone(), pid: Some(session.pid) });
                     send(id, AgentEvent::status(SessionStatus::Running));
                 }
                 if before.is_none_or(|known| *known != session.activity) {

@@ -44,6 +44,12 @@ pub fn island_set_rect(core: State<'_, Core>, rect: Rect) {
     *core.gate.rect.lock().unwrap() = rect;
 }
 
+/// Off while the face sleeps, so the pointer is not reported to eyes that are shut.
+#[tauri::command]
+pub fn island_gaze(core: State<'_, Core>, on: bool) {
+    core.gate.face_asleep.store(!on, std::sync::atomic::Ordering::Relaxed);
+}
+
 /// A press on the island that moved starts a drag, and its release ends it.
 #[tauri::command]
 pub fn island_drag(app: AppHandle, core: State<'_, Core>, start: bool) -> Result<(), String> {
@@ -289,16 +295,20 @@ pub fn assistant_dir(app: AppHandle) -> Result<String, String> {
 
 #[tauri::command]
 pub async fn session_start(core: State<'_, Core>, request: StartRequest) -> Result<String, String> {
+    // Claude Code and Codex send what they are given to their makers' servers, so local-only stops them too.
+    crate::links::refuse_if_local(&core)?;
     core.sessions.start(request).map_err(stringify)
 }
 
 #[tauri::command]
 pub async fn session_send(core: State<'_, Core>, id: String, text: String, images: Vec<String>) -> Result<(), String> {
+    crate::links::refuse_if_local(&core)?;
     core.sessions.send(&id, text, images).map_err(stringify)
 }
 
 #[tauri::command]
 pub fn session_adopt(core: State<'_, Core>, earlier: agent_adapters::Earlier) -> Result<(), String> {
+    crate::links::refuse_if_local(&core)?;
     core.sessions.adopt(earlier).map_err(stringify)
 }
 
@@ -318,6 +328,10 @@ pub async fn session_answer(
 ) -> Result<(), String> {
     if Watcher::owns(&session_id) {
         return following.answer(&session_id, &approval_id, allow, answers);
+    }
+    // A question the assistant's own tool server raised, after it read other people's words.
+    if approval_id.starts_with("confirm:") {
+        return crate::actions::answer_confirm(&approval_id, allow);
     }
     core.sessions.answer(&session_id, &approval_id, allow).map_err(stringify)
 }

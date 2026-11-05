@@ -40,6 +40,8 @@ const HEARING = [
 const size = (bytes: number) => (bytes >= 1e9 ? `${(bytes / 1e9).toFixed(1)} GB` : `${Math.round(bytes / 1e6)} MB`);
 
 export function VoiceSection() {
+  const hush = useApp((s) => s.settings.hushWhileTalking);
+  const leaveCalls = useApp((s) => s.settings.hushLeaveCalls);
   const provider = useApp((s) => s.settings.voiceProvider);
   const chosen = useApp((s) => s.settings.voiceId);
   const hearing = useApp((s) => s.settings.voiceHearing);
@@ -206,6 +208,22 @@ export function VoiceSection() {
           </span>
           <input type="checkbox" role="switch" checked={interrupt} onChange={(e) => void updateSettings({ voiceInterrupt: e.target.checked })} />
         </label>
+        <label className="setting toggle">
+          <span className="stacked grow">
+            <span className="label">Lower other sound while I talk</span>
+            <span className="meta">Music and videos go quiet while you talk to it, then come back. An app you muted yourself stays muted.</span>
+          </span>
+          <input type="checkbox" role="switch" checked={hush} onChange={(e) => void updateSettings({ hushWhileTalking: e.target.checked })} />
+        </label>
+        {hush && (
+          <label className="setting toggle">
+            <span className="stacked grow">
+              <span className="label">Leave calls alone</span>
+              <span className="meta">Teams, Zoom and other call apps keep their sound.</span>
+            </span>
+            <input type="checkbox" role="switch" checked={leaveCalls} onChange={(e) => void updateSettings({ hushLeaveCalls: e.target.checked })} />
+          </label>
+        )}
       </div>
 
       <DevicesSection />

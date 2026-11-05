@@ -110,23 +110,13 @@ pub fn parse_notification(method: &str, params: &Value, last_error: &mut Option<
 
 pub fn approval_for(method: &str, params: &Value, id: &str) -> Option<Approval> {
     let reason = params["reason"].as_str();
-    match method {
-        "item/commandExecution/requestApproval" => Some(Approval {
-            questions: Vec::new(),
-            plan: None,
-            id: id.to_string(),
-            tool: "Shell".to_string(),
-            summary: params["command"].as_str().or(reason).unwrap_or("Run a command").chars().take(240).collect(),
-        }),
-        "item/fileChange/requestApproval" => Some(Approval {
-            questions: Vec::new(),
-            plan: None,
-            id: id.to_string(),
-            tool: "File change".to_string(),
-            summary: reason.or(params["grantRoot"].as_str()).unwrap_or("Change files").chars().take(240).collect(),
-        }),
-        _ => None,
-    }
+    let (tool, text) = match method {
+        "item/commandExecution/requestApproval" => ("Shell", params["command"].as_str().or(reason).unwrap_or("Run a command")),
+        "item/fileChange/requestApproval" => ("File change", reason.or(params["grantRoot"].as_str()).unwrap_or("Change files")),
+        _ => return None,
+    };
+    let (summary, full, length) = crate::approvals::shown(text);
+    Some(Approval { id: id.to_string(), tool: tool.to_string(), summary, full, length, ..Default::default() })
 }
 
 struct Rpc {

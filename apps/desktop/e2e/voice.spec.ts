@@ -120,10 +120,10 @@ test("hearing that is here still offers the engine it needs", async ({ page }) =
 test("every state of a conversation has its own face and words", async ({ page }) => {
   const show = (name: string | null) => page.evaluate((n) => (window as never as { __meridian: { showPreview(n: string | null): void } }).__meridian.showPreview(n), name);
   for (const [name, label, mood] of [
-    ["voice listening", "Listening", "needs"],
-    ["voice pause", "Still with you", "curious"],
-    ["voice thinking", "Thinking", "curious"],
-    ["voice speaking", "Speaking", "rest"],
+    ["voice listening", "Listening", "listen"],
+    ["voice pause", "Still with you", "listen"],
+    ["voice thinking", "Thinking", "think"],
+    ["voice speaking", "Speaking", "speak"],
   ]) {
     await show(name!);
     await expect(island(page)).toContainText(label!);

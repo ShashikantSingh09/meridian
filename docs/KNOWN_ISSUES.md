@@ -191,6 +191,19 @@ What stands between this build and a stranger installing it. Only the owner can 
 
 ## Behaviour to be aware of
 
+- After the assistant reads mail, the calendar, call notes or the day's events, it asks before opening a website, searching or opening a
+  file, and cannot use web fetch or web search for half an hour. That is on purpose, D69.
+- Allowing a command by voice needs the word the island shows, not yes. No is still enough to deny.
+- Local-only mode now stops Claude Code and Codex chats and the assistant, as well as cloud providers.
+- The terminal button finds the window Claude Code runs in by walking up its parent processes. A console Windows handed to Windows Terminal
+  after it started has the terminal outside that chain, so no window is found, and it does not switch to the right tab. Any window of the
+  same terminal app counts as "in front" for staying quiet.
+- Quieting the room mutes the apps playing at the moment you start talking, on the default output only. An app that starts playing during
+  a conversation is not muted, and a call in a browser (Meet in Chrome) is not recognised as a call.
+- An MSI install updates through msiexec, which asks for administrator rights after the app has quit. If that is declined, nothing installs
+  and Meridian has to be opened again by hand.
+- A release built from this code needs `npm ci --ignore-scripts` and `cargo --locked` to pass in CI. Not yet seen on a real release run.
+
 - Wake words have to be taught. Words in English letters are also heard by Windows' engine in any voice, and the rest only in the voices
   that taught them. Speech that sounds close can still wake it.
 - An approval answered in the terminal clears from the island when the tool finishes, or at once if Claude Code hangs up its hook, so a long command can leave it showing until then.

@@ -10,3 +10,12 @@ apps/desktop/src-tauri/gen/
 
 # Registered app IDs, which go to the build and never in the repository.
 .oauth.local
+
+# Agent worktrees, never part of the repository.
+.claude/worktrees/
+
+# Signing keys and certificates never go in the repository.
+*.pem
+*.key
+*.pfx
+*.p12

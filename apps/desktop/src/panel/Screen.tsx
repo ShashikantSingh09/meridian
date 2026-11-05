@@ -71,7 +71,7 @@ export function ScreenSection() {
       <div className="aware-modes" role="group" aria-label="Screen awareness mode">
         {MODES.map((m) => (
           <button key={m.value} className="aware-mode" aria-pressed={mode === m.value} onClick={() => void updateSettings({ screenMode: m.value })}>
-            {mode === m.value && <motion.span layoutId="aware-pill" className="aware-pill" transition={spring.hover} />}
+            {mode === m.value && <motion.span layoutId="aware-pill" className="aware-pill" transition={spring.snap} />}
             <Icon name={m.icon} size={17} />
             <span className="aware-mode-name">{m.label}</span>
             <span className="meta">{m.note}</span>

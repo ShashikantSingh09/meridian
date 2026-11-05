@@ -1,271 +1,254 @@
-/* The faces. --gx and --gy are set on the island as the pointer moves, so a look costs one
-   small transform and no React render. A blink is the data-blink attribute, for 170 ms. */
+/* The faces, drawn at their real size so every dot and stroke lands on whole pixels.
+   A rig of layers that never overwrite each other: the whole face moves with translate, rotate
+   and scale; an .eye follows the gaze with transform and swells with scale; a .lid blinks with
+   scale; and a .shape changes with the mood. --gx and --gy are set on the face by the store,
+   data-lv by the voice view. A mood's one-shot plays when data-play is set: "1" as it arrives,
+   "2" for a heartbeat now and then. Nothing here loops for ever. The curves are motion.ts's
+   springs: face 0.37s cubic-bezier(0.34, 1.36, 0.64, 1), pop 0.55s cubic-bezier(0.34, 1.56,
+   0.64, 1), drift 0.9s cubic-bezier(0.33, 0, 0.2, 1). */
 
-@keyframes face-blink { 0%, 100% { transform: scaleY(1); } 50% { transform: scaleY(0.1); } }
-@keyframes face-dart { 0%, 100% { translate: -3px 0; } 50% { translate: 3px 0; } }
+/* Registered, so a change of colour fades instead of snapping. */
+@property --c {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #eef2f8;
+}
+
+@keyframes face-blink { 0% { scale: 1 1; animation-timing-function: ease-in; } 32%, 45% { scale: 1 0.08; animation-timing-function: ease-out; } 100% { scale: 1 1; } }
+@keyframes face-heard { 0% { scale: 1; translate: 0 0; } 12% { scale: 1.05 0.88; } 40% { scale: 1.15; translate: 0 -2px; } 70% { scale: 0.98; translate: 0 0; } 100% { scale: 1; } }
 @keyframes face-hop { 0%, 100% { translate: 0 0; } 40% { translate: 0 -3px; } }
-@keyframes face-shake { 0%, 100% { translate: 0 0; } 25% { translate: -1.5px 0; } 75% { translate: 1.5px 0; } }
-@keyframes face-bounce { 0%, 100% { translate: 0 0; rotate: -7deg; } 50% { translate: 0 -2px; rotate: 7deg; } }
-@keyframes face-scan { 0%, 100% { left: 2%; } 50% { left: 62%; } }
-@keyframes face-read { 0%, 100% { translate: -2px 0; } 50% { translate: 2px 0; } }
-@keyframes face-drift { 0%, 100% { translate: 0 4px; } 50% { translate: 0 6px; } }
+@keyframes face-shake { 0% { translate: 0 0; } 12% { translate: -2.6px 0; } 28% { translate: 2.2px 0; } 44% { translate: -1.6px 0; } 60% { translate: 1.1px 0; } 76% { translate: -0.5px 0; } 100% { translate: 0 0; } }
+@keyframes face-drag { 0% { scale: 1; rotate: 0deg; } 14% { scale: 1.035; rotate: -6deg; } 36% { scale: 1.035; rotate: 5deg; } 58% { scale: 1.035; rotate: -3deg; } 72% { scale: 1.04 0.94; rotate: 0deg; } 84% { scale: 0.99 1.02; } 100% { scale: 1; rotate: 0deg; } }
+@keyframes face-nod { 0%, 40% { translate: 0 0; } 55% { translate: 0 1.5px; } 65% { translate: 0 0; } 80%, 100% { translate: 0 1px; } }
+@keyframes face-sag { 0% { scale: 1 1; } 18% { scale: 1 0.7; } 22% { scale: 1 0.1; } 30% { scale: 1 0.62; } 52% { scale: 1 0.45; } 72% { scale: 1 0.35; } 88% { scale: 1 0.12; } 100% { scale: 1 0.1; } }
+@keyframes face-notice { 0% { translate: 0 0; } 12%, 72% { translate: 3px -1px; } 100% { translate: 0 0; } }
+/* Starts and ends at rest, so nothing jumps as it begins or stops. */
+@keyframes face-read { 0%, 100% { translate: 0 0; } 25% { translate: -2px 0; } 75% { translate: 2px 0; } }
+@keyframes face-z { 0% { opacity: 0; translate: 0 4px; scale: 0.7; } 30% { opacity: 1; } 100% { opacity: 0; translate: 8px -10px; scale: 1.3; } }
 @keyframes face-beat { 0%, 100% { scale: 1; } 50% { scale: 1.16; } }
 @keyframes face-spin { to { rotate: 360deg; } }
-@keyframes face-snore { from { opacity: 0; translate: 0 4px; scale: 0.7; } 30% { opacity: 1; } to { opacity: 0; translate: 10px -12px; scale: 1.3; } }
-@keyframes face-flash { 0%, 100% { opacity: 0.45; } 50% { opacity: 1; } }
+@keyframes face-bounce { 0%, 100% { translate: 0 0; rotate: 0deg; } 25% { rotate: -7deg; } 50% { translate: 0 -2px; } 75% { rotate: 7deg; } }
 
 .face {
   position: relative;
-  --gx: inherit;
-  --gy: inherit;
   display: inline-flex;
+  flex: none;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  flex: none;
+  gap: 9px;
+  transform-origin: 50% 60%;
+  transition: --c 0.24s ease;
 }
 
-.face[data-reduced="true"] * {
-  animation: none !important;
+.face * { box-sizing: border-box; }
+.face i { display: block; font-style: normal; }
+
+.face .eye {
+  position: relative;
+  display: grid;
+  place-items: center;
+  transform: translate(var(--gx, 0px), var(--gy, 0px));
+  transition: transform 0.08s cubic-bezier(0.25, 0.8, 0.25, 1), translate 0.24s cubic-bezier(0.34, 1.36, 0.64, 1), scale 0.08s ease-out;
 }
 
-.face i {
-  display: block;
-  font-style: normal;
-}
+/* Closes from a little above the middle, so it reads as a lid coming down, not a squeeze. */
+.face .lid { display: grid; place-items: center; transform-origin: 50% 40%; }
+.face .shape { transition: width 0.37s cubic-bezier(0.34, 1.36, 0.64, 1), height 0.37s cubic-bezier(0.34, 1.36, 0.64, 1), border-radius 0.37s ease, background-color 0.24s ease, box-shadow 0.24s ease, translate 0.37s cubic-bezier(0.34, 1.36, 0.64, 1); }
 
-/* Soft eyes */
-.oval {
-  width: 12px;
-  height: 22px;
-  border-radius: 7px;
-  background: var(--c);
-  box-shadow: 0 0 9px var(--c);
-  transform: translate(var(--gx, 0), var(--gy, 0));
-  transition: transform 0.14s ease-out, height 0.2s ease, width 0.2s ease, background-color 0.2s ease;
-}
+/* A blink: closes in 70 ms, holds 30, opens in 120. Plastic eyes have no lids. */
+.face[data-blink] .lid { animation: face-blink 0.22s both; }
+.face[data-face="googly"] .lid { animation: none !important; }
+
+/* Glances, not tracking. A look aside at rest, and none once it is drowsy. */
+.face[data-glance="l"] .eye { translate: -3px 0; }
+.face[data-glance="r"] .eye { translate: 3px 0; }
+.face[data-mood="asleep"] .eye,
+.face[data-mood="sleepy"] .eye { transform: none; }
+
+/* The voice, in steps: up to 2 while listening and 3 while speaking. */
+.face[data-lv="1"] { --lv: 1; }
+.face[data-lv="2"] { --lv: 2; }
+.face[data-lv="3"] { --lv: 3; }
+.face[data-mood="listen"] .eye { scale: calc(1.04 + var(--lv, 0) * 0.04); }
+.face[data-mood="speak"] .eye { scale: 1 calc(1 + var(--lv, 0) * 0.08); }
+
+/* One-shot moments: each plays once, then the face holds still. A heartbeat plays one round. */
+.face[data-play][data-mood="heard"] { animation: face-heard 0.7s cubic-bezier(0.3, 0.7, 0.4, 1) both; }
+.face[data-play][data-mood="heard"] .lid { animation: face-blink 0.22s 0.3s both; }
+.face[data-play][data-mood="needs"] { animation: face-hop 0.7s ease-in-out 2; }
+.face[data-play][data-mood="done"] { animation: face-hop 0.6s ease-in-out 0.15s 1; }
+.face[data-play][data-mood="error"] { animation: face-shake 0.5s ease-out 1; }
+.face[data-play][data-mood="drag"] { animation: face-drag 1.6s cubic-bezier(0.3, 0.7, 0.4, 1) 1; }
+.face[data-play][data-mood="sleepy"] { animation: face-nod 4s ease-in-out both; }
+.face[data-play][data-mood="sleepy"] .lid { animation: face-sag 4s ease-in-out both; }
+.face[data-play][data-mood="notice"] .eye { animation: face-notice 1s cubic-bezier(0.25, 0.8, 0.25, 1) 0.15s 1; }
+.face[data-play][data-mood="working"] .eye { animation: face-read 1.4s ease-in-out 2; }
+.face[data-play="2"],
+.face[data-play="2"] * { animation-iteration-count: 1 !important; }
+
+/* Thinking looks up and away, then to the other side, every few seconds. */
+.face[data-mood="think"] .eye { translate: 3px -3px; }
+.face[data-mood="think"][data-side="l"] .eye { translate: -3px -3px; }
+
+/* Asleep, a z now and then. */
+.face[data-snore]::after { content: "z"; position: absolute; right: -8px; top: -4px; font: 700 9px var(--font-ui, sans-serif); color: #8a8f99; animation: face-z 2.4s ease-out both; }
 
 /* Soft eyes stay white and show how they feel by their shape, the way real eyes do. */
-.face[data-face="soft"] .oval { position: relative; }
-.face[data-blink] .oval { animation: face-blink 0.17s ease-in-out; }
-.face[data-glance] .oval { translate: 4px 0; transition: translate 0.18s ease; }
+.face .s-oval { width: 11px; height: 20px; border-radius: 6px; background: var(--c); box-shadow: 0 0 8px var(--c); }
+.face[data-mood="listen"] .s-oval { width: 12px; height: 22px; }
+.face[data-mood="think"] .s-oval { height: 15px; }
+.face[data-mood="heard"] .s-oval { width: 13px; height: 23px; box-shadow: 0 0 14px var(--c); }
+.face[data-mood="working"] .s-oval { width: 13px; height: 9px; border-radius: 5px; }
+.face[data-mood="needs"] .s-oval { width: 14px; height: 23px; border-radius: 7px; }
+.face[data-mood="done"] .s-oval { width: 15px; height: 7px; border-radius: 7px 7px 3px 3px; translate: 0 -1px; }
+.face[data-mood="error"] .s-oval { height: 14px; }
+.face[data-mood="asleep"] .s-oval { width: 12px; height: 3px; border-radius: 2px; box-shadow: none; }
 
-/* Concentrating: narrowed, reading from side to side. */
-.face[data-face="soft"][data-mood="working"] .oval { width: 14px; height: 10px; border-radius: 6px; animation: face-read 2.6s ease-in-out infinite; }
-
-/* Needs you: wide awake, with a small jump. */
-.face[data-face="soft"][data-mood="needs"] .oval { width: 16px; height: 25px; border-radius: 9px; animation: face-hop 0.7s ease-in-out infinite; }
-
-/* Pleased: closed, curving up. */
-.face[data-face="soft"][data-mood="done"] .oval { width: 19px; height: 12px; background: none; border: 0; border-top: 6px solid var(--c); border-radius: 50% 50% 0 0; box-shadow: none; translate: 0 3px; animation: face-hop 0.6s ease-in-out 2; }
-
-/* Unhappy: tilted down at the outer corners, and sunk a little. */
-.face[data-face="soft"][data-mood="error"] .oval { height: 19px; width: 15px; border-radius: 8px; box-shadow: none; translate: 0 2px; }
-.face[data-face="soft"][data-mood="error"] .oval:first-child { clip-path: polygon(0 58%, 100% 8%, 100% 100%, 0 100%); }
-.face[data-face="soft"][data-mood="error"] .oval:last-child { clip-path: polygon(0 8%, 100% 58%, 100% 100%, 0 100%); }
-
-/* Drowsy: lids half down, sinking, and slow. */
-.face[data-face="soft"][data-mood="sleepy"] .oval { height: 8px; width: 13px; border-radius: 4px 4px 7px 7px; translate: 0 4px; animation: face-drift 3.4s ease-in-out infinite; }
-
-/* Asleep: shut, with a z now and then. */
-.face[data-face="soft"][data-mood="asleep"] .oval { height: 3px; width: 13px; border-radius: 2px; translate: 0 4px; opacity: 0.8; box-shadow: none; }
-.face[data-snore]::after { content: "z"; position: absolute; margin: -16px 0 0 34px; font: 700 11px var(--font-ui, sans-serif); color: #eef2f8; animation: face-snore 2.4s ease-out both; }
-
-/* Thinking: looking up to one side, one eye larger. */
+/* A few moods only soft eyes draw. The other faces use the nearest one they have. */
 .face[data-face="soft"][data-mood="curious"] { rotate: -6deg; }
-.face[data-face="soft"][data-mood="curious"] .oval:first-child { height: 24px; translate: 2px -2px; }
-.face[data-face="soft"][data-mood="curious"] .oval:last-child { height: 15px; translate: 2px -2px; }
+.face[data-face="soft"][data-mood="curious"] > .eye:first-child .s-oval { height: 22px; translate: 2px -2px; }
+.face[data-face="soft"][data-mood="curious"] > .eye:last-child .s-oval { height: 14px; translate: 2px -2px; }
+.face[data-face="soft"][data-mood="wink"] > .eye:last-child .s-oval { width: 16px; height: 10px; background: none; border-top: 4px solid var(--c); border-radius: 50% 50% 0 0; box-shadow: none; translate: 0 3px; }
+.face[data-face="soft"][data-mood="love"] .s-oval { width: 18px; height: 16px; border-radius: 0; box-shadow: none; clip-path: path("M9 16 C2 10 0 7 0 4.4 C0 2 2 0 4.4 0 C6 0 7.8 1 9 2.8 C10.2 1 12 0 13.6 0 C16 0 18 2 18 4.4 C18 7 16 10 9 16 Z"); }
+.face[data-play][data-face="soft"][data-mood="love"] .s-oval { animation: face-beat 0.5s ease-in-out 2; }
+.face[data-face="soft"][data-mood="dizzy"] .s-oval { width: 14px; height: 14px; border-radius: 50%; background: none; border: 3px solid var(--c); border-right-color: transparent; box-shadow: none; }
+.face[data-play][data-face="soft"][data-mood="dizzy"] .s-oval { animation: face-spin 0.7s cubic-bezier(0.65, 0, 0.35, 1) 2; }
+.face[data-play][data-face="soft"][data-mood="music"] { animation: face-bounce 0.62s ease-in-out 3; }
 
-/* A wink. */
-.face[data-face="soft"][data-mood="wink"] .oval:last-child { width: 18px; height: 11px; background: none; border: 0; border-top: 5px solid var(--c); border-radius: 50% 50% 0 0; box-shadow: none; translate: 0 3px; }
+/* Googly eyes: plastic, so no lids. The pupils jiggle when they move. */
+.face .g-ball { position: relative; width: 17px; height: 17px; border-radius: 50%; background: #fff; overflow: hidden; }
+.face .g-pupil { position: absolute; left: 50%; top: 50%; width: 8px; height: 8px; margin: -4px 0 0 -4px; border-radius: 50%; background: #0a0a0c; transform: translate(calc(var(--gx, 0px) * 1.1), calc(var(--gy, 0px) * 1.1)); transition: transform 0.45s cubic-bezier(0.3, 1.6, 0.5, 1), width 0.3s ease, height 0.3s ease, margin 0.3s ease, background-color 0.24s ease, translate 0.45s cubic-bezier(0.3, 1.6, 0.5, 1); }
+.face[data-face="googly"] .eye { transform: none; }
+.face[data-face="googly"][data-mood="listen"] .g-pupil { width: 9px; height: 9px; margin: -4.5px 0 0 -4.5px; }
+.face[data-face="googly"][data-mood="heard"] .g-pupil { width: 5px; height: 5px; margin: -2.5px 0 0 -2.5px; }
+.face[data-face="googly"][data-mood="think"] .g-pupil { translate: -3px -4px; }
+.face[data-face="googly"][data-mood="notice"] .g-pupil { translate: 4px -1px; }
+.face[data-face="googly"][data-mood="working"] .g-pupil { background: #1763bd; }
+.face[data-face="googly"][data-mood="needs"] .g-ball { width: 19px; height: 19px; }
+.face[data-face="googly"][data-mood="needs"] .g-pupil { width: 6px; height: 6px; margin: -3px 0 0 -3px; background: #b86a00; }
+.face[data-face="googly"][data-mood="done"] .g-pupil { translate: 0 -4px; background: #17853a; }
+.face[data-face="googly"][data-mood="error"] .g-pupil { translate: 3px 0; background: #c21f15; }
+.face[data-face="googly"][data-mood="error"] .g-right { translate: -3px 0; }
+.face[data-face="googly"][data-mood="sleepy"] .g-ball { background: #b9bcc4; }
+.face[data-face="googly"][data-mood="asleep"] .g-ball { background: #6d7078; }
+.face[data-face="googly"][data-mood="asleep"] .g-pupil { translate: 0 4px; }
+.face[data-face="googly"][data-mood="sleepy"] .g-pupil { translate: 0 3px; }
 
-/* Hearts. */
-.face[data-face="soft"][data-mood="love"] .oval { width: 18px; height: 16px; border-radius: 0; box-shadow: none; clip-path: path("M9 16 C2 10 0 7 0 4.4 C0 2 2 0 4.4 0 C6 0 7.8 1 9 2.8 C10.2 1 12 0 13.6 0 C16 0 18 2 18 4.4 C18 7 16 10 9 16 Z"); animation: face-beat 0.5s ease-in-out infinite; }
+/* Robot visor: moves in deliberate steps, like a machine would. */
+@keyframes v-sweep { 0%, 100% { left: 37%; } 25% { left: 4%; } 75% { left: 70%; } }
+@keyframes v-flash { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+.face .v-bar { position: relative; width: 74px; height: 12px; border-radius: 6px; background: #14161b; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12); overflow: hidden; }
+.face .v-light { position: absolute; top: 2px; bottom: 2px; left: 37%; width: 26%; border-radius: 4px; background: var(--c); box-shadow: 0 0 8px var(--c); transform: translateX(calc(var(--gx, 0px) * 2.4)); transition: left 0.24s steps(4), width 0.24s steps(4), transform 0.25s steps(3), background-color 0.24s ease, opacity 0.24s ease; }
+.face[data-face="visor"][data-mood="listen"] .v-light { left: calc(37% - var(--lv, 0) * 7%); width: calc(26% + var(--lv, 0) * 14%); }
+.face[data-face="visor"][data-mood="speak"] .v-light { left: 4%; width: calc(12% + var(--lv, 0) * 28%); transform: none; }
+.face[data-face="visor"][data-mood="think"] .v-light { left: 6%; width: 18%; }
+.face[data-face="visor"][data-mood="notice"] .v-light { left: 72%; width: 24%; transform: none; }
+.face[data-face="visor"][data-mood="heard"] .v-light,
+.face[data-face="visor"][data-mood="needs"] .v-light,
+.face[data-face="visor"][data-mood="done"] .v-light,
+.face[data-face="visor"][data-mood="error"] .v-light { left: 4%; width: 92%; transform: none; }
+.face[data-play][data-face="visor"][data-mood="working"] .v-light { animation: v-sweep 1.4s steps(10) 2; }
+.face[data-play][data-face="visor"][data-mood="needs"] .v-light { animation: v-flash 0.7s ease-in-out 2; }
+.face[data-play][data-face="visor"][data-mood="error"] .v-light { animation: v-flash 0.5s ease-out 1; }
+.face[data-face="visor"][data-mood="sleepy"] .v-light { left: 42%; width: 16%; opacity: 0.6; }
+.face[data-face="visor"][data-mood="asleep"] .v-light { left: 46%; width: 8%; opacity: 0.45; box-shadow: none; transform: none; }
 
-/* Dizzy: spinning rings. */
-.face[data-face="soft"][data-mood="dizzy"] .oval { width: 16px; height: 16px; border-radius: 50%; background: none; border: 3px solid var(--c); border-right-color: transparent; box-shadow: none; animation: face-spin 0.7s linear infinite; }
+/* Smiley: the mouth is one path that morphs, so it can carry speech. */
+.face .sm { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+.face .sm-eyes { display: flex; gap: 13px; }
+.face .d-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--c); }
+.face .sm-mouth { display: block; overflow: visible; transition: scale 0.08s ease-out; transform-origin: 50% 20%; }
+.face .mouth { fill: transparent; stroke: var(--c); stroke-width: 2.4; stroke-linecap: round; d: path("M4 3 Q12 9 20 3"); transition: d 0.37s cubic-bezier(0.34, 1.36, 0.64, 1), stroke 0.24s ease, fill 0.24s ease; }
+.face[data-mood="listen"] .mouth { d: path("M7 4 Q12 6 17 4"); }
+.face[data-mood="think"] .mouth { d: path("M9 5 Q13 4 17 3"); }
+.face[data-mood="speak"] .mouth { d: path("M6 2 Q12 10 18 2"); fill: var(--c); }
+.face[data-face="smile"][data-mood="speak"] .eye { scale: 1; }
+.face[data-face="smile"][data-mood="speak"] .sm-mouth { scale: 1 calc(0.45 + var(--lv, 0) * 0.4); }
+.face[data-mood="heard"] .mouth { d: path("M9 3 Q12 9 15 3"); }
+.face[data-mood="working"] .mouth { d: path("M7 5 Q12 5 17 5"); }
+.face[data-mood="needs"] .mouth { d: path("M8 6 Q12 2 16 6"); }
+.face[data-mood="done"] .mouth { d: path("M3 2 Q12 12 21 2"); fill: var(--c); }
+.face[data-mood="done"] .d-dot { height: 3px; width: 8px; border-radius: 2px; }
+.face[data-mood="error"] .mouth { d: path("M5 8 Q12 1 19 8"); }
+.face[data-mood="drag"] .mouth { d: path("M6 4 Q12 10 18 4"); }
+.face[data-mood="sleepy"] .mouth { d: path("M8 5 Q12 6 16 5"); }
+.face[data-mood="asleep"] .mouth { d: path("M9 5 Q12 5 15 5"); }
+.face[data-mood="asleep"] .d-dot { height: 2px; width: 7px; border-radius: 1px; }
 
-.face[data-face="soft"][data-mood="music"] .oval { animation: face-bounce 0.62s ease-in-out infinite; }
+/* Pixel face: whole-pixel dots, 2 px with 1 px gaps, that redraw row by row. A dot lists the voice
+   steps it is lit at, so speaking swaps the mouth without a render. */
+.face .px { display: grid; grid-template-columns: repeat(17, 2px); grid-auto-rows: 2px; gap: 1px; transform: translateX(round(calc(var(--gx, 0px) * 0.5), 1px)); transition: transform 0.2s steps(2); }
+.face .px i { width: 2px; height: 2px; background: rgba(255, 255, 255, 0.06); transition: background-color 0.01s linear; }
+.face[data-lv="0"] .px i[data-on*="0"],
+.face[data-lv="1"] .px i[data-on*="1"],
+.face[data-lv="2"] .px i[data-on*="2"],
+.face[data-lv="3"] .px i[data-on*="3"] { background: var(--c); box-shadow: 0 0 2px var(--c); }
 
-/* Googly eyes */
-.googly {
-  position: relative;
-  display: block;
-  width: 19px;
-  height: 19px;
-  border-radius: 50%;
-  background: #fff;
-  overflow: hidden;
-}
+/* Cat: ears that flick at news and flatten at errors, and pupils that widen with interest. */
+@keyframes ear-flick { 0%, 100% { rotate: 14deg; } 30% { rotate: 34deg; } 55% { rotate: 6deg; } }
+.face .cat { position: relative; display: flex; flex-direction: column; align-items: center; gap: 2px; padding-top: 4px; }
+.face .ears { position: absolute; top: -4px; left: 50%; width: 50px; margin-left: -25px; display: flex; justify-content: space-between; }
+.face .ear { width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-bottom: 7px solid var(--c); transform-origin: 50% 100%; transition: rotate 0.3s cubic-bezier(0.34, 1.36, 0.64, 1), border-bottom-color 0.24s ease; }
+.face .ear.l { rotate: -14deg; }
+.face .ear.r { rotate: 14deg; }
+.face .c-eyes { display: flex; gap: 11px; }
+.face .c-eye { position: relative; width: 18px; height: 12px; border-radius: 60% 60% 60% 60% / 80% 80% 60% 60%; background: var(--c); box-shadow: 0 0 6px var(--c); overflow: hidden; }
+.face .slit { position: absolute; left: 50%; top: 1px; bottom: 1px; width: 4px; margin-left: -2px; border-radius: 50%; background: #000; transition: width 0.37s cubic-bezier(0.34, 1.36, 0.64, 1), margin 0.37s cubic-bezier(0.34, 1.36, 0.64, 1); }
+.face .nose { width: 5px; height: 4px; border-radius: 40% 40% 60% 60%; background: var(--c); }
+.face[data-play][data-face="cat"][data-mood="notice"] .ear.r { animation: ear-flick 0.5s ease-out 0.1s 1; }
+.face[data-face="cat"][data-mood="listen"] .slit { width: 6px; margin-left: -3px; }
+.face[data-face="cat"][data-mood="heard"] .slit,
+.face[data-face="cat"][data-mood="needs"] .slit,
+.face[data-face="cat"][data-mood="notice"] .slit { width: 9px; margin-left: -4.5px; }
+.face[data-face="cat"][data-mood="working"] .c-eye { height: 7px; }
+.face[data-face="cat"][data-mood="done"] .c-eye { height: 6px; border-radius: 9px 9px 2px 2px; }
+.face[data-face="cat"][data-mood="error"] .ear.l { rotate: -48deg; }
+.face[data-face="cat"][data-mood="error"] .ear.r { rotate: 48deg; }
+.face[data-face="cat"][data-mood="drag"] .ear.l { rotate: -32deg; }
+.face[data-face="cat"][data-mood="drag"] .ear.r { rotate: 32deg; }
+.face[data-face="cat"][data-mood="asleep"] .c-eye { height: 2px; box-shadow: none; }
 
-.pupil {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  width: 9px;
-  height: 9px;
-  margin: -4.5px 0 0 -4.5px;
-  border-radius: 50%;
-  background: #0a0a0c;
-  transform: translate(var(--gx, 0), var(--gy, 0));
-  transition: transform 0.14s ease-out;
-}
+/* Horizon: the Meridian line, with two eyes sitting in it. */
+.face .hz { display: flex; align-items: center; }
+.face .seg { height: 2px; border-radius: 1px; background: var(--c); box-shadow: 0 0 6px var(--c); transform-origin: 50% 50%; transition: translate 0.37s cubic-bezier(0.34, 1.36, 0.64, 1), rotate 0.37s cubic-bezier(0.34, 1.36, 0.64, 1), scale 0.08s ease-out, background-color 0.24s ease; }
+.face .seg.a,
+.face .seg.c { width: 18px; }
+.face .seg.b { width: 12px; }
+.face .hz .eye { width: 12px; height: 12px; }
+.face .h-eye { width: 5px; height: 8px; border-radius: 3px; background: var(--c); box-shadow: 0 0 6px var(--c); }
+.face[data-face="horizon"][data-mood="speak"] .seg.b,
+.face[data-face="horizon"][data-mood="listen"] .seg.b { scale: 1 calc(1 + var(--lv, 0) * 1.4); }
+.face[data-face="horizon"][data-mood="done"] .seg.a { rotate: -14deg; translate: 0 -1px; }
+.face[data-face="horizon"][data-mood="done"] .seg.c { rotate: 14deg; translate: 0 -1px; }
+.face[data-face="horizon"][data-mood="done"] .h-eye { height: 4px; }
+.face[data-face="horizon"][data-mood="error"] .seg.a { rotate: 12deg; }
+.face[data-face="horizon"][data-mood="error"] .seg.c { rotate: -12deg; }
+.face[data-face="horizon"][data-mood="working"] .h-eye { height: 3px; }
+.face[data-face="horizon"][data-mood="needs"] .h-eye,
+.face[data-face="horizon"][data-mood="heard"] .h-eye { height: 11px; }
+.face[data-face="horizon"][data-mood="asleep"] .h-eye { height: 2px; width: 8px; box-shadow: none; }
+.face[data-face="horizon"][data-mood="asleep"] .seg { box-shadow: none; }
 
-.face[data-blink] .googly { animation: face-blink 0.17s ease-in-out; }
-.face[data-mood="working"] .pupil { background: #1763bd; animation: face-dart 0.9s ease-in-out infinite; }
-.face[data-mood="needs"] .googly { width: 22px; height: 22px; animation: face-hop 0.7s ease-in-out infinite; }
-.face[data-mood="needs"] .pupil { width: 7px; height: 7px; margin: -3.5px 0 0 -3.5px; background: #b86a00; }
-.face[data-mood="done"] .googly { height: 10px; border-radius: 19px 19px 0 0; animation: face-hop 0.8s ease-in-out infinite; }
-.face[data-mood="done"] .pupil { background: #17853a; }
-.face[data-mood="error"] .googly { background: #ffd9d6; animation: face-shake 0.3s linear infinite; }
-.face[data-mood="error"] .pupil { background: #c21f15; }
-.face[data-mood="music"] .googly { height: 10px; border-radius: 19px 19px 0 0; animation: face-bounce 0.62s ease-in-out infinite; }
-.face[data-mood="asleep"] .googly { height: 3px; border-radius: 3px; background: #6d7078; }
-.face[data-mood="asleep"] .pupil { display: none; }
+/* Moons: the lit part of two moons shows the mood. Only the light moves. */
+@keyframes moon-wax { 0%, 100% { translate: 3px 0; } 50% { translate: -12px 0; } }
+.face .moon { position: relative; width: 15px; height: 15px; border-radius: 50%; background: #2a2e37; overflow: hidden; box-shadow: 0 0 calc(4px + var(--lv, 0) * 3px) rgba(255, 255, 255, 0.18); }
+.face .lit { position: absolute; inset: 0; border-radius: 50%; background: var(--c); translate: 3px 0; transition: translate 0.9s cubic-bezier(0.33, 0, 0.2, 1), background-color 0.24s ease; }
+.face[data-face="moons"][data-mood="listen"] .lit,
+.face[data-face="moons"][data-mood="speak"] .lit,
+.face[data-face="moons"][data-mood="heard"] .lit,
+.face[data-face="moons"][data-mood="needs"] .lit,
+.face[data-face="moons"][data-mood="done"] .lit { translate: 0 0; }
+.face[data-face="moons"][data-mood="think"] .lit { translate: 8px 0; }
+.face[data-face="moons"][data-mood="error"] .lit { translate: 7px 0; }
+.face[data-face="moons"][data-mood="sleepy"] .lit { translate: 11px 0; }
+.face[data-face="moons"][data-mood="asleep"] .lit { translate: 13px 0; }
+.face[data-play][data-face="moons"][data-mood="working"] .lit { animation: moon-wax 1.8s ease-in-out 2; }
 
-/* Robot visor */
-.visor {
-  position: relative;
-  display: block;
-  width: 84px;
-  height: 15px;
-  border-radius: 8px;
-  overflow: hidden;
-  background: #17181c;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
-}
-
-.scan {
-  position: absolute;
-  top: 2px;
-  bottom: 2px;
-  left: calc(32% + var(--gx, 0px) * 4);
-  width: 36%;
-  border-radius: 6px;
-  background: var(--c);
-  box-shadow: 0 0 10px var(--c);
-  transition: left 0.18s ease-out;
-}
-
-.face[data-mood="working"] .scan { animation: face-scan 1.1s ease-in-out infinite; }
-.face[data-mood="needs"] .scan { left: 2%; width: 96%; animation: face-flash 0.7s ease-in-out infinite; }
-.face[data-mood="done"] .scan { left: 2%; width: 96%; }
-.face[data-mood="error"] .scan { left: 2%; width: 96%; animation: face-flash 0.28s linear infinite; }
-.face[data-mood="music"] .scan { animation: face-scan 0.62s ease-in-out infinite; }
-.face[data-mood="asleep"] .scan { left: 40%; width: 20%; opacity: 0.5; }
-
-/* Smiley */
-.smile,
-.kitty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 3px;
-}
-
-.smile-eyes {
-  display: flex;
-  gap: 14px;
-}
-
-.kitty .smile-eyes {
-  gap: 12px;
-}
-
-.dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--c);
-  transform: translate(var(--gx, 0), var(--gy, 0));
-  transition: transform 0.14s ease-out;
-}
-
-.mouth {
-  width: 18px;
-  height: 8px;
-  box-sizing: border-box;
-  border: 2.5px solid var(--c);
-  border-top: 0;
-  border-radius: 0 0 14px 14px;
-  transition: all 0.2s ease;
-}
-
-.face[data-blink] .dot { animation: face-blink 0.17s ease-in-out; }
-.face[data-mood="working"] .mouth { width: 12px; height: 0; border-width: 0 0 2.5px; border-radius: 2px; }
-.face[data-mood="needs"] .mouth { width: 9px; height: 9px; border: 2.5px solid var(--c); border-radius: 50%; }
-.face[data-mood="done"] .mouth { width: 22px; height: 10px; background: var(--c); }
-.face[data-mood="done"] .dot { animation: face-hop 0.8s ease-in-out infinite; }
-.face[data-mood="error"] .mouth { height: 7px; border: 2.5px solid var(--c); border-bottom: 0; border-radius: 14px 14px 0 0; }
-.face[data-mood="error"] .dot { animation: face-shake 0.3s linear infinite; }
-.face[data-mood="music"] .mouth { width: 20px; height: 9px; background: var(--c); animation: face-bounce 0.62s ease-in-out infinite; }
-.face[data-mood="asleep"] .mouth { width: 8px; height: 0; border-width: 0 0 2px; }
-.face[data-mood="asleep"] .dot { height: 2.5px; border-radius: 2px; }
-
-/* Pixel face */
-.pixels {
-  display: grid;
-  grid-template-columns: repeat(17, 3px);
-  grid-auto-rows: 3px;
-  gap: 0.7px;
-}
-
-.pixels i {
-  border-radius: 0.6px;
-  background: rgba(255, 255, 255, 0.05);
-}
-
-.pixels i[data-on="true"] {
-  background: var(--c);
-  box-shadow: 0 0 3px var(--c);
-}
-
-.face[data-blink] .pixels { animation: face-blink 0.17s ease-in-out; }
-
-/* Cat */
-.cat {
-  position: relative;
-  display: block;
-  width: 22px;
-  height: 15px;
-  border-radius: 60% 60% 60% 60% / 80% 80% 60% 60%;
-  background: var(--c);
-  overflow: hidden;
-  box-shadow: 0 0 7px var(--c);
-  transition: height 0.2s ease;
-}
-
-.slit {
-  position: absolute;
-  left: 50%;
-  top: 1px;
-  bottom: 1px;
-  width: 4px;
-  margin-left: -2px;
-  border-radius: 50%;
-  background: #000;
-  transform: translate(var(--gx, 0), 0);
-  transition: transform 0.14s ease-out, width 0.2s ease;
-}
-
-.nose {
-  width: 5px;
-  height: 4px;
-  border-radius: 40% 40% 60% 60%;
-  background: var(--c);
-}
-
-.face[data-blink] .cat { animation: face-blink 0.17s ease-in-out; }
-.face[data-mood="working"] .cat { height: 9px; }
-.face[data-mood="needs"] .slit { width: 11px; margin-left: -5.5px; }
-.face[data-mood="needs"] .cat { animation: face-hop 0.7s ease-in-out infinite; }
-.face[data-mood="done"] .cat { height: 8px; border-radius: 22px 22px 0 0; animation: face-hop 0.8s ease-in-out infinite; }
-.face[data-mood="error"] .cat { animation: face-shake 0.3s linear infinite; }
-.face[data-mood="music"] .cat { height: 8px; border-radius: 22px 22px 0 0; animation: face-bounce 0.62s ease-in-out infinite; }
-.face[data-mood="asleep"] .cat { height: 3px; box-shadow: none; }
-
-@media (prefers-reduced-motion: reduce) {
-  .face * {
-    animation: none !important;
-  }
-}
+/* Reduced motion: nothing moves, only colour and shape change. */
+.face[data-reduced="true"],
+.face[data-reduced="true"] *,
+.face[data-reduced="true"]::after { animation: none !important; transition: none !important; }
+.face[data-reduced="true"] .eye,
+.face[data-reduced="true"] .g-pupil,
+.face[data-reduced="true"] .v-light,
+.face[data-reduced="true"] .px { transform: none !important; }

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { bridge } from "../lib/bridge";
 import { Icon } from "../lib/icons";
 import { ago, blocksOf, changedFiles, doing, groupSessions, lastActive, limitName, limitStop, memoryUsed, modelName, recentLines, resetLabel, tileState, type FileChange, type Step } from "../lib/sessions";
-import { cancelSession, clearAgentFocus, clearFinished, sendToSession, startSession, useApp, type SessionDetail, openSettings } from "../lib/store";
+import { cancelSession, clearAgentFocus, clearFinished, focusTerminal, sendToSession, startSession, useApp, type SessionDetail, openSettings } from "../lib/store";
 import { AgentMark } from "../island/marks";
 import { ApprovalCard } from "../island/views";
 import { LogLine, StepRow, useFollow } from "./LogLine";
@@ -95,7 +95,11 @@ function Session({ session, view, setView }: { session: SessionDetail; view: Vie
             <span className="label truncate" title={session.title}>{session.title || session.project}</span>
             <span className="meta truncate">{session.project}, {doing(session)}</span>
           </span>
-          {session.watched && <span className="cap" title="Started in your own terminal">Terminal</span>}
+          {session.watched && (session.pid ? (
+            <button className="cap cap-button" title="Bring its terminal to the front" onClick={() => void focusTerminal(session)}>Terminal</button>
+          ) : (
+            <span className="cap" title="Started in your own terminal">Terminal</span>
+          ))}
           <button className="round" aria-label="Open project" title="Open project folder" onClick={() => void bridge.openProject(session.cwd)}>
             <Icon name="folder" size={14} />
           </button>
