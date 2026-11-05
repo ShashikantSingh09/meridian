@@ -15,7 +15,7 @@
   initial-value: #eef2f8;
 }
 
-@keyframes face-blink { 0% { scale: 1 1; animation-timing-function: ease-in; } 32%, 45% { scale: 1 0.08; animation-timing-function: ease-out; } 100% { scale: 1 1; } }
+@keyframes face-blink { 0%, 100% { scale: 1 1; } 50% { scale: 1 0.1; } }
 @keyframes face-heard { 0% { scale: 1; translate: 0 0; } 12% { scale: 1.05 0.88; } 40% { scale: 1.08; translate: 0 -1.5px; } 70% { scale: 0.98; translate: 0 0; } 100% { scale: 1; } }
 @keyframes face-hop { 0%, 100% { translate: 0 0; } 40% { translate: 0 -2px; } }
 @keyframes face-shake { 0% { translate: 0 0; } 12% { translate: -2.6px 0; } 28% { translate: 2.2px 0; } 44% { translate: -1.6px 0; } 60% { translate: 1.1px 0; } 76% { translate: -0.5px 0; } 100% { translate: 0 0; } }
@@ -50,20 +50,20 @@
   display: grid;
   place-items: center;
   transform: translate(var(--gx, 0px), var(--gy, 0px));
-  transition: transform 0.16s cubic-bezier(0.2, 0.7, 0.2, 1), translate 0.45s cubic-bezier(0.4, 0, 0.2, 1), scale 0.16s ease-out;
+  transition: transform 0.14s ease-out, translate 0.18s ease, scale 0.16s ease-out;
 }
 
-/* Closes from a little above the middle, so it reads as a lid coming down, not a squeeze. */
-.face .lid { display: grid; place-items: center; transform-origin: 50% 40%; }
-.face .shape { transition: width 0.4s cubic-bezier(0.22, 1, 0.36, 1), height 0.4s cubic-bezier(0.22, 1, 0.36, 1), border-radius 0.37s ease, background-color 0.24s ease, box-shadow 0.24s ease, translate 0.4s cubic-bezier(0.22, 1, 0.36, 1); }
+/* A blink squeezes the eye to its middle and back, as in 0.5.1. */
+.face .lid { display: grid; place-items: center; transform-origin: 50% 50%; }
+.face .shape { transition: width 0.2s ease, height 0.2s ease, border-radius 0.2s ease, background-color 0.2s ease, box-shadow 0.2s ease, translate 0.2s ease; }
 
-/* A blink: closes in 70 ms, holds 30, opens in 120. Plastic eyes have no lids. */
-.face[data-blink] .lid { animation: face-blink 0.22s both; }
+/* A blink: 170 ms, evenly in and out. Plastic eyes have no lids. */
+.face[data-blink] .lid { animation: face-blink 0.17s ease-in-out; }
 .face[data-face="googly"] .lid { animation: none !important; }
 
-/* Glances, not tracking. A look aside at rest, and none once it is drowsy. */
-.face[data-glance="l"] .eye { translate: -3px 0; }
-.face[data-glance="r"] .eye { translate: 3px 0; }
+/* The eyes follow the pointer, gliding, and now and then glance aside. None once it is drowsy. */
+.face[data-glance="l"] .eye { translate: -4px 0; }
+.face[data-glance="r"] .eye { translate: 4px 0; }
 .face[data-mood="asleep"] .eye,
 .face[data-mood="sleepy"] .eye { transform: none; }
 
@@ -77,7 +77,7 @@
 
 /* One-shot moments: each plays once, then the face holds still. A heartbeat plays one round. */
 .face[data-play][data-mood="heard"] { animation: face-heard 0.7s cubic-bezier(0.3, 0.7, 0.4, 1) both; }
-.face[data-play][data-mood="heard"] .lid { animation: face-blink 0.22s 0.3s both; }
+.face[data-play][data-mood="heard"] .lid { animation: face-blink 0.17s ease-in-out 0.3s both; }
 .face[data-play][data-mood="needs"] { animation: face-hop 0.8s ease-in-out 1; }
 .face[data-play][data-mood="done"] { animation: face-hop 0.6s ease-in-out 0.15s 1; }
 .face[data-play][data-mood="error"] { animation: face-shake 0.5s ease-out 1; }
@@ -105,15 +105,22 @@
 .face[data-mood="heard"] .s-oval { width: 13px; height: 23px; box-shadow: 0 0 14px var(--c); }
 .face[data-mood="working"] .s-oval { width: 13px; height: 9px; border-radius: 5px; }
 .face[data-mood="needs"] .s-oval { width: 14px; height: 23px; border-radius: 7px; }
-.face[data-mood="done"] .s-oval { width: 15px; height: 7px; border-radius: 7px 7px 3px 3px; translate: 0 -1px; }
-.face[data-mood="error"] .s-oval { height: 14px; }
-.face[data-mood="asleep"] .s-oval { width: 12px; height: 3px; border-radius: 2px; box-shadow: none; }
+/* Pleased: closed, curving up. */
+/* The border sits outside the box, as in 0.5.1, so it curves into a thin arc rather than a dome. */
+.face[data-mood="done"] .s-oval { box-sizing: content-box; width: 17px; height: 11px; background: none; border-top: 5px solid var(--c); border-radius: 50% 50% 0 0; box-shadow: none; translate: 0 3px; }
+/* Unhappy: tilted down at the outer corners, and sunk a little. */
+.face[data-mood="error"] .s-oval { width: 14px; height: 17px; border-radius: 7px; box-shadow: none; translate: 0 2px; }
+.face[data-face="soft"][data-mood="error"] > .eye:first-child .s-oval { clip-path: polygon(0 58%, 100% 8%, 100% 100%, 0 100%); }
+.face[data-face="soft"][data-mood="error"] > .eye:last-child .s-oval { clip-path: polygon(0 8%, 100% 58%, 100% 100%, 0 100%); }
+/* Drowsy: lids half down, sinking. */
+.face[data-mood="sleepy"] .s-oval { width: 12px; height: 8px; border-radius: 4px 4px 7px 7px; translate: 0 3px; }
+.face[data-mood="asleep"] .s-oval { width: 12px; height: 3px; border-radius: 2px; box-shadow: none; translate: 0 3px; opacity: 0.8; }
 
 /* A few moods only soft eyes draw. The other faces use the nearest one they have. */
 .face[data-face="soft"][data-mood="curious"] { rotate: -6deg; }
 .face[data-face="soft"][data-mood="curious"] > .eye:first-child .s-oval { height: 22px; translate: 2px -2px; }
 .face[data-face="soft"][data-mood="curious"] > .eye:last-child .s-oval { height: 14px; translate: 2px -2px; }
-.face[data-face="soft"][data-mood="wink"] > .eye:last-child .s-oval { width: 16px; height: 10px; background: none; border-top: 4px solid var(--c); border-radius: 50% 50% 0 0; box-shadow: none; translate: 0 3px; }
+.face[data-face="soft"][data-mood="wink"] > .eye:last-child .s-oval { box-sizing: content-box; width: 16px; height: 10px; background: none; border-top: 4px solid var(--c); border-radius: 50% 50% 0 0; box-shadow: none; translate: 0 3px; }
 .face[data-face="soft"][data-mood="love"] .s-oval { width: 18px; height: 16px; border-radius: 0; box-shadow: none; clip-path: path("M9 16 C2 10 0 7 0 4.4 C0 2 2 0 4.4 0 C6 0 7.8 1 9 2.8 C10.2 1 12 0 13.6 0 C16 0 18 2 18 4.4 C18 7 16 10 9 16 Z"); }
 .face[data-play][data-face="soft"][data-mood="love"] .s-oval { animation: face-beat 0.5s ease-in-out 2; }
 .face[data-face="soft"][data-mood="dizzy"] .s-oval { width: 14px; height: 14px; border-radius: 50%; background: none; border: 3px solid var(--c); border-right-color: transparent; box-shadow: none; }
@@ -122,7 +129,7 @@
 
 /* Googly eyes: plastic, so no lids. The pupils jiggle when they move. */
 .face .g-ball { position: relative; width: 17px; height: 17px; border-radius: 50%; background: #fff; overflow: hidden; }
-.face .g-pupil { position: absolute; left: 50%; top: 50%; width: 8px; height: 8px; margin: -4px 0 0 -4px; border-radius: 50%; background: #0a0a0c; transform: translate(calc(var(--gx, 0px) * 1.1), calc(var(--gy, 0px) * 1.1)); transition: transform 0.5s cubic-bezier(0.3, 1.3, 0.5, 1), width 0.3s ease, height 0.3s ease, margin 0.3s ease, background-color 0.24s ease, translate 0.5s cubic-bezier(0.3, 1.3, 0.5, 1); }
+.face .g-pupil { position: absolute; left: 50%; top: 50%; width: 8px; height: 8px; margin: -4px 0 0 -4px; border-radius: 50%; background: #0a0a0c; transform: translate(calc(var(--gx, 0px) * 1.1), calc(var(--gy, 0px) * 1.1)); transition: transform 0.14s ease-out, width 0.3s ease, height 0.3s ease, margin 0.3s ease, background-color 0.24s ease, translate 0.2s ease; }
 .face[data-face="googly"] .eye { transform: none; }
 .face[data-face="googly"][data-mood="listen"] .g-pupil { width: 9px; height: 9px; margin: -4.5px 0 0 -4.5px; }
 .face[data-face="googly"][data-mood="heard"] .g-pupil { width: 5px; height: 5px; margin: -2.5px 0 0 -2.5px; }
@@ -163,7 +170,7 @@
 .face .sm-eyes { display: flex; gap: 13px; }
 .face .d-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--c); }
 /* The mouth turns with the eyes, a little less far, so the whole face looks at you. */
-.face .sm-mouth { display: block; overflow: visible; translate: calc(var(--gx, 0px) * 0.4) calc(var(--gy, 0px) * 0.3); transition: translate 0.45s cubic-bezier(0.4, 0, 0.2, 1); }
+.face .sm-mouth { display: block; overflow: visible; translate: calc(var(--gx, 0px) * 0.4) calc(var(--gy, 0px) * 0.3); transition: translate 0.14s ease-out; }
 .face[data-face="smile"][data-glance="l"] .sm-mouth { translate: -1.5px 0; }
 .face[data-face="smile"][data-glance="r"] .sm-mouth { translate: 1.5px 0; }
 .face[data-face="smile"][data-mood="think"] .sm-mouth { translate: 2px -1px; }

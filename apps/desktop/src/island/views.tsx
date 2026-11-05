@@ -860,7 +860,7 @@ function Wave({ tone, reduced, steps, listening }: { tone: string; reduced: bool
       else if (listening && face && !blinked && now - spokeAt > PAUSE_BLINK_MS) {
         blinked = true;
         face.dataset.blink = "true";
-        setTimeout(() => delete face.dataset.blink, 220);
+        setTimeout(() => delete face.dataset.blink, 170);
       }
     };
     frame = requestAnimationFrame(draw);

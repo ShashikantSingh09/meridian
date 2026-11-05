@@ -42,12 +42,10 @@ const NEAR_BAND: f64 = 80.0;
 /// Position and fullscreen state change rarely, and reading the window's
 /// position crosses to the main thread, so neither happens at poll rate.
 const SLOW_EVERY: u32 = 40;
-/// The eyes glance at the pointer rather than track it, and only when it comes near the island,
-/// the way someone notices a hand reaching toward them. Anywhere else they look ahead. Sent only
-/// when where they look moves by a whole CSS pixel. A still pointer costs nothing.
-const GAZE_EVERY: Duration = Duration::from_millis(300);
-/// Near is within this share of GAZE_RANGE each way, about 300 CSS pixels. Matches GAZE_NEAR in the store.
-const GAZE_NEAR: f64 = 0.33;
+/// The eyes follow the pointer smoothly, as they did in 0.5.1: where it is goes out up to 15 times a
+/// second, and the styles glide the eyes there. Sent only when where they look moves by a whole
+/// device pixel, since a smaller move cannot be seen. A still pointer costs nothing.
+const GAZE_EVERY: Duration = Duration::from_millis(66);
 const GAZE_STEP: f64 = 10.0;
 const GAZE_RANGE: f64 = 900.0;
 /// How far the eyes travel each way, in CSS pixels. Matches GAZE_REACH in the store.
@@ -440,14 +438,10 @@ fn lean_for(css_px_per_second: f64) -> i32 {
     (css_px_per_second / LEAN_PX_PER_DEGREE).clamp(-LEAN_MOST, LEAN_MOST).round() as i32
 }
 
-/// Where the eyes would look, in whole CSS pixels: toward a pointer near the island, ahead otherwise.
-/// Only a change here is worth a repaint.
+/// Where the eyes would look, in whole device pixels. Only a change here is worth a repaint.
 fn gaze_target(rect: &Rect, x: f64, y: f64) -> (f64, f64) {
     let (gx, gy) = gaze(rect, x, y);
-    if gx.abs() > GAZE_NEAR || gy.abs() > GAZE_NEAR {
-        return (0.0, 0.0);
-    }
-    (((gx / GAZE_NEAR) * GAZE_REACH.0).round(), ((gy / GAZE_NEAR) * GAZE_REACH.1).round())
+    ((gx * GAZE_REACH.0 * rect.dpr).round(), (gy * GAZE_REACH.1 * rect.dpr).round())
 }
 
 pub fn spawn_poll(app: AppHandle, gate: Arc<Gate>) {
@@ -552,19 +546,16 @@ mod tests {
     }
 
     #[test]
-    fn the_eyes_look_only_at_a_pointer_near_the_island() {
-        let at = |x: f64, y: f64| gaze_target(&RECT, x, y);
+    fn the_eyes_follow_the_pointer_anywhere_in_whole_device_pixels() {
+        let at = |x: f64| gaze_target(&RECT, x, 300.0);
         let middle = 200.0 * 1.5;
-        // Straight below and close: looking ahead.
-        assert_eq!(at(middle, 60.0).0, 0.0);
-        // Less than a CSS pixel of travel for the eyes is not a move.
-        assert_eq!(at(middle + 120.0, 60.0), at(middle + 150.0, 60.0));
-        // Near, off to the side: all the way, 4 CSS pixels.
-        assert_eq!(at(middle + 290.0 * 1.5, 60.0).0, 4.0);
-        assert_eq!(at(middle - 290.0 * 1.5, 60.0).0, -4.0);
-        // Anywhere farther, the eyes look ahead.
-        assert_eq!(at(middle + 5000.0, 60.0), (0.0, 0.0));
-        assert_eq!(at(middle, 2000.0), (0.0, 0.0));
+        // Less than a device pixel of travel is not a move.
+        assert_eq!(at(middle), at(middle + 30.0));
+        // A pointer far to the side turns the eyes all the way: 4 CSS pixels, 6 device pixels here.
+        assert_eq!(at(middle + 5000.0).0, 6.0);
+        assert_eq!(at(middle - 5000.0).0, -6.0);
+        // Halfway out, halfway round.
+        assert_eq!(at(middle + 450.0 * 1.5).0, 3.0);
     }
 
     #[test]

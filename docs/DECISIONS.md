@@ -544,6 +544,13 @@ a pulse; content settles in from 98.5% instead of 96%. Speech moves the mouth by
 level, and a step changes only once the voice is clearly past it. Pointer wandering went from 138 animation starts in 17 s to 48 in
 the browser build, and the finished card from 46 to 32.
 
+Then the owner said the eyes looked odd, and that up to 0.5 they were right. Comparing the two explained the clutter as well: 0.5.1's
+eyes glided after the pointer, a new place up to 15 times a second eased over 0.14 s, while 0.6.0 jumped to a new whole pixel every
+quarter of a second, which reads as darting, and 0.6.2 then barely looked at all. So the soft eyes move as in 0.5.1 again: they
+follow the pointer anywhere in range and glide, blink with an even 170 ms squeeze every 2.5 to 6 s, glance 4 px aside now and then,
+and change shape in 0.2 s; pleased is a pair of closed arcs and unhappy is tilted, as before. What stays from the calmer pass is
+everything that was not the eyes: no sparks, fewer laps, one-shots instead of loops.
+
 ## D69. A security review's fixes, built from its boards
 
 A source-only security audit on 2026-11-05 found ten leads, none confirmed because nothing could be run in a sandbox. The report is in

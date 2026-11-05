@@ -1,5 +1,19 @@
 # Development ledger
 
+## 2026-11-05: The eyes as they were in 0.5
+
+The owner said the eye animation looked odd, and that it was right up to 0.5. See D70, last paragraph. The 0.5.1 styles and timers
+were read from the v0.5.1 tag and brought back for the soft eyes, in the new face rig. Pleased eyes drew as domes at first, because
+the rig sizes each part with its border inside; that one shape sizes the 0.5.1 way, and is a thin arc again.
+
+### Proved
+
+The core sends the pointer from anywhere in range, in whole device pixels. Each soft-eye mood drawn in the browser build and looked at.
+
+### Not proved
+
+- How it looks on the owner's screen next to their memory of 0.5.
+
 ## 2026-11-05: Waking only when the name is said
 
 The owner said the app starts listening without the wake word. See D71.

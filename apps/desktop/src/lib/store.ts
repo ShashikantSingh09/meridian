@@ -1502,16 +1502,7 @@ export function wakeTestHeard(word: string) {
 
 /** How far the eyes travel each way, in CSS pixels. island.rs uses the same numbers. */
 const GAZE_REACH = { x: 4, y: 3 };
-/** The eyes notice the pointer only near the island, about 300 px, as someone notices a hand
- *  coming toward them. Anywhere else they look ahead, so working with the mouse leaves them be. */
-const GAZE_NEAR = 0.33;
-/** Glances, not tracking: one at most every 0.6 s, and back to the middle once the pointer rests. */
-const GAZE_EVERY_MS = 600;
-const GAZE_HOME_MS = 2500;
-let gazeAt = 0;
 let gazed = "0,0";
-let gazeLater: ReturnType<typeof setTimeout> | undefined;
-let gazeHome: ReturnType<typeof setTimeout> | undefined;
 
 /** Points the eyes, on the faces themselves so only they restyle. A move smaller than one device
  *  pixel is invisible, so it is not worth a repaint of the window. */
@@ -1522,26 +1513,17 @@ function aim(gx: number, gy: number) {
   }
 }
 
+/** The eyes follow the pointer wherever it is, as they did in 0.5.1, which looked right: the core
+ *  sends where it is up to 15 times a second, and the styles glide the eyes there over 0.14 s, so
+ *  they move smoothly rather than in jumps. */
 function look(x: number, y: number) {
   if (document.documentElement.hasAttribute("data-reduced")) return;
-  const near = Math.abs(x) <= GAZE_NEAR && Math.abs(y) <= GAZE_NEAR;
-  // Whole CSS pixels: a smaller move is too slight to read as a look, and still costs a repaint.
-  const toward = (at: number, reach: number) => (near ? Math.round((at / GAZE_NEAR) * reach) : 0);
-  const gx = toward(x, GAZE_REACH.x);
-  const gy = toward(y, GAZE_REACH.y);
-  clearTimeout(gazeLater);
+  const dpr = devicePixelRatio || 1;
+  const gx = Math.round(x * GAZE_REACH.x * dpr) / dpr;
+  const gy = Math.round(y * GAZE_REACH.y * dpr) / dpr;
   if (`${gx},${gy}` === gazed) return;
-  const wait = gazeAt + GAZE_EVERY_MS - Date.now();
-  // The last move of a quick burst still lands, once the eyes may move again.
-  if (wait > 0) return void (gazeLater = setTimeout(() => look(x, y), wait));
-  gazeAt = Date.now();
   gazed = `${gx},${gy}`;
   aim(gx, gy);
-  clearTimeout(gazeHome);
-  gazeHome = setTimeout(() => {
-    gazed = "0,0";
-    aim(0, 0);
-  }, GAZE_HOME_MS);
 }
 
 let feelingTimer: ReturnType<typeof setTimeout> | undefined;

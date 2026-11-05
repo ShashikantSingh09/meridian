@@ -36,22 +36,23 @@ const COLORS: Record<Drawn, string> = {
 };
 
 type Range = [number, number];
-/** How often a mood blinks, in ms. Something sitting beside you all day should blink like someone
- *  relaxed, every 4 to 8 seconds; listening a little more, reading less. */
+/** How often a mood blinks, in ms: every 2.5 to 6 seconds, as in 0.5.1, which looked right.
+ *  Listening a little more, reading less. */
 const BLINKS: Partial<Record<Mood, Range>> = {
-  rest: [4000, 8500],
-  notice: [4000, 8500],
-  done: [4000, 8500],
-  speak: [3500, 7000],
-  curious: [4000, 8500],
-  music: [4000, 8500],
-  listen: [3000, 6000],
-  working: [8000, 14000],
+  rest: [2500, 6000],
+  notice: [2500, 6000],
+  done: [2500, 6000],
+  speak: [2500, 6000],
+  curious: [2500, 6000],
+  music: [2500, 6000],
+  listen: [1800, 3500],
+  working: [6000, 9000],
 };
-/** Now and then a blink comes twice, or the eyes drift aside for a moment instead. */
-const DOUBLE_BLINK = 0.08;
-const LOOK_AWAY = 0.1;
-const LOOK_AWAY_MS = 1400;
+/** Now and then a blink comes twice, or at rest the eyes glance aside instead. */
+const DOUBLE_BLINK = 0.16;
+const LOOK_AWAY = 0.18;
+const LOOK_AWAY_MS = 900;
+const BLINK_MS = 170;
 /** A one-shot that plays again now and then, so a long wait still looks alive without a loop. */
 const BEATS: Partial<Record<Mood, Range>> = { needs: [12000, 16000], working: [10000, 16000] };
 /** Each z redraws the window for 2.4 s, so asleep it makes two and then nothing moves at all. */
@@ -225,8 +226,8 @@ export function Face({ id, mood, scale = 1, reduced: asked }: { id: string; mood
     if (blinks) {
       every(blinks, () => {
         if (shown === "rest" && Math.random() < LOOK_AWAY) return flag("glance", Math.random() < 0.5 ? "l" : "r", LOOK_AWAY_MS);
-        flag("blink", "true", 220);
-        if (Math.random() < DOUBLE_BLINK) after(300, () => flag("blink", "true", 220));
+        flag("blink", "true", BLINK_MS);
+        if (Math.random() < DOUBLE_BLINK) after(260, () => flag("blink", "true", BLINK_MS));
       });
     }
     const beat = BEATS[shown];
