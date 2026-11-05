@@ -429,6 +429,14 @@ fn gaze(rect: &Rect, x: f64, y: f64) -> (f64, f64) {
     ((side).clamp(-1.0, 1.0), (y / reach).clamp(-1.0, 1.0))
 }
 
+/// Dragged, the face leans the way the island moves: a degree for every 125 CSS pixels a second, up to 6.
+const LEAN_PX_PER_DEGREE: f64 = 125.0;
+const LEAN_MOST: f64 = 6.0;
+
+fn lean_for(css_px_per_second: f64) -> i32 {
+    (css_px_per_second / LEAN_PX_PER_DEGREE).clamp(-LEAN_MOST, LEAN_MOST).round() as i32
+}
+
 /// Where the eyes would look, in whole device pixels. Only a change here is worth a repaint.
 fn gaze_target(rect: &Rect, x: f64, y: f64) -> (f64, f64) {
     let (gx, gy) = gaze(rect, x, y);
@@ -442,6 +450,8 @@ pub fn spawn_poll(app: AppHandle, gate: Arc<Gate>) {
         let mut displays = display_signature(&app);
         let mut gazed = (0.0, 0.0, Instant::now());
         let mut looked = (0.0, 0.0);
+        // While dragged: the last pointer x, when, the smoothed speed in CSS pixels a second, and the lean sent.
+        let mut swing: Option<(f64, Instant, f64, i32)> = None;
         loop {
             if tick % SLOW_EVERY == 0 {
                 gate.fullscreen.store(fullscreen_in_front(), Ordering::Relaxed);
@@ -467,6 +477,15 @@ pub fn spawn_poll(app: AppHandle, gate: Arc<Gate>) {
                     finish_drag(&app, &win, &gate);
                     continue;
                 }
+                let now = Instant::now();
+                let (last_x, at, speed, sent) = swing.unwrap_or((cx, now, 0.0, 0));
+                let dt = now.duration_since(at).as_secs_f64();
+                let speed = if dt > 0.0 { speed + ((cx - last_x) / dt / gate.rect.lock().unwrap().dpr - speed) * 0.35 } else { speed };
+                let lean = lean_for(speed);
+                if lean != sent {
+                    let _ = app.emit_to(LABEL, "island-lean", lean);
+                }
+                swing = Some((cx, now, speed, lean));
                 let to = (start.0 + cx - from.0, start.1 + cy - from.1);
                 if (to.0.round(), to.1.round()) != *gate.origin.lock().unwrap() {
                     move_to(&win, &gate, to);
@@ -474,6 +493,10 @@ pub fn spawn_poll(app: AppHandle, gate: Arc<Gate>) {
                 apply_click_through(&win, &gate, true);
                 std::thread::sleep(NEAR);
                 continue;
+            }
+            // Let go: upright again.
+            if swing.take().is_some_and(|(_, _, _, sent)| sent != 0) {
+                let _ = app.emit_to(LABEL, "island-lean", 0);
             }
             let origin = *gate.origin.lock().unwrap();
             let (x, y) = (cx - origin.0, cy - origin.1);
@@ -509,6 +532,16 @@ mod tests {
     fn hit_test_works_in_physical_pixels() {
         assert!(RECT.contains(200.0 * 1.5, 25.0 * 1.5, 0.0));
         assert!(!RECT.contains(500.0, 25.0 * 1.5, 0.0));
+    }
+
+    #[test]
+    fn a_drag_leans_with_its_speed_up_to_six_degrees() {
+        assert_eq!(lean_for(0.0), 0);
+        assert_eq!(lean_for(50.0), 0);
+        assert_eq!(lean_for(250.0), 2);
+        assert_eq!(lean_for(-250.0), -2);
+        assert_eq!(lean_for(10_000.0), 6);
+        assert_eq!(lean_for(-10_000.0), -6);
     }
 
     #[test]

@@ -508,6 +508,14 @@ motion is one switch on the page, which turns off movement but keeps colour and 
 Faces are drawn at the boards' real size, about 1.5 times what the island showed before. The widest faces with the clock and charge
 fill the notch almost exactly.
 
+Added after 0.6.0, at the owner's request, from the same boards. The smiley's mouth opens to one of four shapes with each step of the
+voice, nearly shut between syllables, and turns with the eyes. Speaking or listening with no voice to follow, as in Try a mood, the face
+follows a made-up one, because in 0.6.0 the mouth sat still there and looked broken. Dragged, the face lifts and leans the way the
+island moves, up to 6 degrees, from the speed the core measures, and squashes when let go. Listening, it blinks once when the user
+pauses. A card that closes by itself shows a line running out along its bottom for its last 5 s; a card held by the pointer gets a fresh
+5 s once the pointer leaves, so nothing vanishes without warning. Pin keeps it until closed by hand. The board names Pin but does not
+place it, so it joins the card's own buttons while the line runs, where it covers nothing.
+
 ## D69. A security review's fixes, built from its boards
 
 A source-only security audit on 2026-11-05 found ten leads, none confirmed because nothing could be run in a sandbox. The report is in

@@ -15,6 +15,7 @@ import {
   describeTime,
   dismissError,
   dismissNotice,
+  pinCard,
   dismissReminder,
   ignoreSuggestion,
   focusTerminal,
@@ -78,6 +79,22 @@ const iconButton = (label: string, icon: Parameters<typeof Icon>[0]["name"], onC
     <Icon name={icon} size={14} />
   </button>
 );
+
+/** Shown with the closing line, in the last seconds of a card that closes by itself. */
+function PinButton({ id }: { id: string }) {
+  const closing = useApp((s) => id in s.closing);
+  return closing ? iconButton("Pin, keep it open", "pin", () => pinCard(id)) : null;
+}
+
+/** A line that runs out along the bottom in the last 5 s of a card that closes by itself, so it
+ *  never goes without warning. It waits while the pointer holds the card. */
+export function ClosingLine({ view }: { view: string }) {
+  const id = useApp((s) => (view === "notification" ? s.notices[0]?.id : view === "error" ? s.errors[0]?.id : view === "contextual" ? s.suggestions[0]?.id : undefined));
+  const at = useApp((s) => (id ? s.closing[id] : undefined));
+  const hovered = useApp((s) => s.hovered);
+  if (!at) return null;
+  return <i key={at} className="closing-line" data-held={hovered || undefined} style={{ animationDuration: `${Math.max(0, at - Date.now())}ms` }} aria-hidden="true" />;
+}
 
 export function Clock({ className = "rest-time tabular" }: { className?: string }) {
   const [now, setNow] = useState(() => new Date());
@@ -548,6 +565,7 @@ function FinishedCard({ noticeId, title, session, reduced }: { noticeId: string;
       {message && <p className="stage-message">{message}</p>}
       {facts && <p className="meta truncate">{facts}</p>}
       <div className="row end stage-actions">
+        <PinButton id={noticeId} />
         <button className="stage-button" onClick={() => dismissNotice(noticeId)}>Dismiss</button>
         {session.pid ? <button className="stage-button" onClick={() => { dismissNotice(noticeId); void focusTerminal(session); }}>Terminal</button> : null}
         <button className="stage-button" data-main="true" onClick={() => { dismissNotice(noticeId); openSession(session.id, changed ? "changes" : "activity"); }}>
@@ -570,6 +588,7 @@ function StoppedCard({ errorId, body, session }: { errorId: string; body: string
       </div>
       <p className="stage-message">{body}</p>
       <div className="row end stage-actions">
+        <PinButton id={errorId} />
         <button className="stage-button" onClick={() => dismissError(errorId)}>Dismiss</button>
         <button className="stage-button" data-main="true" onClick={() => { dismissError(errorId); openSession(session.id); }}>Open</button>
       </div>
@@ -655,6 +674,7 @@ export function NotificationView({ reduced }: { reduced: boolean }) {
         <span className="label truncate">{notice.title}</span>
         <span className="meta truncate">{notice.body}</span>
       </button>
+      <PinButton id={notice.id} />
       {iconButton("Dismiss", "close", () => dismissNotice(notice.id))}
     </div>
   );
@@ -671,6 +691,7 @@ export function ContextualView({ reduced }: { reduced: boolean }) {
       </div>
       <p className="body">{suggestion.body}</p>
       <div className="row end">
+        <PinButton id={suggestion.id} />
         <button className="ghost" onClick={() => ignoreSuggestion(suggestion)}>Ignore</button>
         <button className="ghost" onClick={() => assist(suggestion, "Explain this issue in plain terms.")}>Explain</button>
         <button className="ghost" onClick={() => assist(suggestion, "Suggest a fix for this.")}>Suggest fix</button>
@@ -797,10 +818,12 @@ const WAVE_FRAME_MS = 33;
 /** The face follows the voice in steps: up to 2 while it listens, 3 while it speaks. Quieter than this is none. */
 const VOICE_STEPS = { listen: 2, speak: 3 };
 const VOICE_GATE = 0.12;
+/** Quiet for this long after speaking counts as a pause. */
+const PAUSE_BLINK_MS = 350;
 
 /** Bars that follow the real sound, so it is plain the app can hear you. The face beside them
  *  follows it too, rising in 25 ms and falling in 110 ms, and only redraws when its step changes. */
-function Wave({ tone, reduced, steps }: { tone: string; reduced: boolean; steps: number }) {
+function Wave({ tone, reduced, steps, listening }: { tone: string; reduced: boolean; steps: number; listening: boolean }) {
   const box = useRef<HTMLSpanElement>(null);
   useEffect(() => {
     if (reduced) return;
@@ -808,6 +831,9 @@ function Wave({ tone, reduced, steps }: { tone: string; reduced: boolean; steps:
     let frame = 0;
     let last = 0;
     let level = 0;
+    // Listening, it blinks once when you pause, the way someone does while waiting for the rest.
+    let spokeAt = 0;
+    let blinked = true;
     const voice = box.current?.closest(".voice");
     const draw = (now: number) => {
       frame = requestAnimationFrame(draw);
@@ -822,13 +848,19 @@ function Wave({ tone, reduced, steps }: { tone: string; reduced: boolean; steps:
       const face = voice?.querySelector<HTMLElement>(".face");
       const step = String(level < VOICE_GATE ? 0 : Math.min(steps, Math.round(level * steps)));
       if (face && face.dataset.lv !== step) face.dataset.lv = step;
+      if (level >= VOICE_GATE) [spokeAt, blinked] = [now, false];
+      else if (listening && face && !blinked && now - spokeAt > PAUSE_BLINK_MS) {
+        blinked = true;
+        face.dataset.blink = "true";
+        setTimeout(() => delete face.dataset.blink, 220);
+      }
     };
     frame = requestAnimationFrame(draw);
     return () => {
       cancelAnimationFrame(frame);
       voice?.querySelector(".face")?.setAttribute("data-lv", "0");
     };
-  }, [reduced, steps]);
+  }, [reduced, steps, listening]);
   return (
     <span ref={box} className="voice-wave" aria-hidden="true">
       {Array.from({ length: WAVE_BARS }, (_, i) => <i key={i} style={{ background: tone }} />)}
@@ -847,7 +879,7 @@ export function VoiceView({ reduced }: { reduced: boolean }) {
         {voice.phase === "thinking" ? (
           <span className="voice-dots grow" aria-hidden="true"><i /><i /><i /></span>
         ) : (
-          <Wave tone={hearing ? "#5ac8fa" : "#fff"} reduced={reduced} steps={hearing ? VOICE_STEPS.listen : VOICE_STEPS.speak} />
+          <Wave tone={hearing ? "#5ac8fa" : "#fff"} reduced={reduced} steps={hearing ? VOICE_STEPS.listen : VOICE_STEPS.speak} listening={hearing} />
         )}
         <span className="meta">{VOICE_WORDS[voice.phase]}</span>
         {iconButton("Stop talking", "close", endConversation)}
@@ -1005,6 +1037,7 @@ export function ErrorView({ reduced }: { reduced: boolean }) {
         <span className="label truncate">{error.title}</span>
         <span className="meta truncate" title={error.body}>{error.body}</span>
       </div>
+      <PinButton id={error.id} />
       {error.retry && iconButton("Retry", "retry", () => { const retry = error.retry; dismissError(error.id); retry?.(); })}
       {iconButton("Dismiss", "close", () => dismissError(error.id))}
     </div>

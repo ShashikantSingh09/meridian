@@ -1,5 +1,26 @@
 # Development ledger
 
+## 2026-11-05: The rest of the motion, and a smiley that talks
+
+After 0.6.0 the owner reported that the smiley's mouth does not move, and asked for the motion left over from the boards. See D70.
+
+- **Why the mouth looked dead.** In 0.6.0 the speaking mouth only stretched, from about 4 to 7 px, and only when a real voice played.
+  Try a mood, Speaking, had no voice at all, so it sat still. Now the mouth changes shape with each step and previews make up a voice.
+- **The lean comes from the core**, which already moves the window during a drag, because the page may get no pointer moves while
+  its window travels with the pointer.
+- **Not built, and not on the boards:** one face kept across views, the notch-to-pill morph, staggered rows, frame caps for the voice
+  line and mic level. The thinking orb, the voice thinking dots and the agent mark still loop while their state lasts.
+
+### Proved
+
+In the browser build: the mouth takes at least three shapes in a second of a speaking preview and follows the eyes; the face leans with
+the lean the core sends, stays lifted past the old 1.6 s, and squashes on release; the closing line appears in a card's last 5 s, Pin
+keeps the card, and a card held by the pointer gets a fresh 5 s when it leaves. Core: the lean for a given speed.
+
+### Not proved
+
+- A real drag on the owner's screen, and the listening blink at a real pause.
+
 ## 2026-11-05: The security review's fixes, and features from Coucou
 
 The owner asked for a security audit, a look at Coucou for new features, and better motion and faces, designs first. They approved the

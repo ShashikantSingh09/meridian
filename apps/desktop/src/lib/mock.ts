@@ -102,6 +102,7 @@ let pushLevel: (level: Level) => void = () => {};
 let charge: Charge | null = null;
 let islandPlaced: (place: IslandPlace) => void = () => {};
 const islandDrags: boolean[] = [];
+let leaning: ((degrees: number) => void) | null = null;
 let islandResets = 0;
 let watching = false;
 let lastAnswers: Record<string, string | string[]> | null = null;
@@ -218,6 +219,12 @@ export const mock = {
   setCharge: (next: Charge | null) => void (charge = next),
   islandDrag: async (start: boolean) => void islandDrags.push(start),
   islandDrags: () => [...islandDrags],
+  onLean: (handler: (degrees: number) => void) => {
+    leaning = handler;
+    return () => (leaning = null);
+  },
+  /** As the core does while the island is dragged. */
+  lean: (degrees: number) => leaning?.(degrees),
   islandReset: async () => {
     islandResets += 1;
     islandPlaced("top");

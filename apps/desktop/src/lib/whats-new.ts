@@ -6,6 +6,11 @@ export interface NewThing {
 }
 
 export const WHATS_NEW: Record<string, NewThing[]> = {
+  "0.6.1": [
+    { title: "The smiley talks", line: "Its mouth opens and closes with the voice, and turns with its eyes." },
+    { title: "Cards warn before they close", line: "A line runs out in the last 5 seconds. Pin keeps the card." },
+    { title: "It leans when you drag it", line: "The way you move it, then a small squash when you let go." },
+  ],
   "0.6.0": [
     { title: "Faces that blink and glance", line: "They move less, so the island uses less power." },
     { title: "Approvals show everything", line: "A long command says when it is cut, and a new agent names its folder." },

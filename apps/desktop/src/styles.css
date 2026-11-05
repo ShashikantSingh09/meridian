@@ -3614,6 +3614,34 @@ kbd {
   overflow-y: auto;
   text-overflow: clip;
 }
+/* A card's last 5 s: a thin line runs out along the bottom. It waits while the pointer holds the
+   card, and with reduced motion it just shows, without running. */
+@keyframes closing-run {
+  from { scale: 1 1; }
+  to { scale: 0 1; }
+}
+
+.closing-line {
+  position: absolute;
+  left: 22px;
+  right: 22px;
+  bottom: 3px;
+  height: 2px;
+  border-radius: 1px;
+  background: rgba(255, 255, 255, 0.5);
+  transform-origin: 0 50%;
+  pointer-events: none;
+  animation: closing-run linear both;
+}
+
+.closing-line[data-held] {
+  animation-play-state: paused;
+}
+
+html[data-reduced] .closing-line {
+  animation: none;
+}
+
 /* The approval header's count and fold, as on the board: small enough to keep the header one line. */
 .round.queue-fold {
   width: 22px;

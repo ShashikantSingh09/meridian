@@ -51,6 +51,10 @@ const BLINKS: Partial<Record<Mood, Range>> = {
 const BEATS: Partial<Record<Mood, Range>> = { needs: [8000, 8000], working: [7000, 11000] };
 /** Each z redraws the window for 2.4 s, so asleep it makes two and then nothing moves at all. */
 const SNORES_AT = [900, 3300];
+/** Speaking or listening with no voice to follow, as in a preview, the face follows a made-up one:
+ *  steps at about the rate of syllables, with a short breath now and then. Highest step per mood. */
+const PRACTICE_STEPS: Partial<Record<Mood, number>> = { speak: 3, listen: 2 };
+const SYLLABLE_MS: Range = [90, 170];
 
 // Dot patterns, 17 across and 7 down.
 type Grid = number[][];
@@ -221,9 +225,18 @@ export function Face({ id, mood, scale = 1, reduced: asked }: { id: string; mood
     if (beat) every(beat, () => play(el, "2"));
     if (shown === "think") every([2500, 4500], () => (el.dataset.side = el.dataset.side === "l" ? "r" : "l"));
     if (shown === "asleep") SNORES_AT.forEach((at) => after(at, () => flag("snore", "true", 2400)));
+    // In a conversation the voice view sets the step from the real sound. Anywhere else it is made up.
+    const most = PRACTICE_STEPS[shown];
+    if (most && !el.closest(".voice")) {
+      every(SYLLABLE_MS, () => {
+        const breath = Math.random() < 0.12;
+        el.dataset.lv = String(breath ? 0 : 1 + Math.floor(Math.random() * most));
+      });
+    }
     return () => {
       timers.forEach(clearTimeout);
       for (const name of ["blink", "glance", "snore", "side"]) delete el.dataset[name];
+      if (most) el.dataset.lv = "0";
     };
   }, [shown, face.id, reduced]);
 

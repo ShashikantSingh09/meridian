@@ -145,6 +145,8 @@ export interface AppState {
   settingsSection: SettingsSection;
   listening: boolean;
   hovered: boolean;
+  /** Cards that close by themselves, by id, and when they close. Set for the last 5 s, when a line shows it. */
+  closing: Record<string, number>;
   chatPending: boolean;
   sessions: SessionDetail[];
   /** What each agent last said about the user's plan, kept across restarts. */
@@ -250,6 +252,7 @@ let state: AppState = {
   settingsSection: "general",
   listening: false,
   hovered: false,
+  closing: {},
   chatPending: false,
   sessions: [],
   limits: {},
@@ -481,13 +484,48 @@ export function setListening(listening: boolean) {
 const keptNotices = (gone: Notice[]) => (state.preview ? state.pastNotices : [...gone.filter((n) => n.finished), ...state.pastNotices].slice(0, PAST_NOTICES));
 
 /** Takes something off the island after a while. Someone reading it with the pointer there keeps it for a bit longer. */
-function leaveAfter(ms: number, leave: () => void) {
+/** How long the line runs before a card closes by itself. */
+export const CLOSING_LINE_MS = 5000;
+/** Cards the user pinned. They stay until closed by hand. */
+const pinned = new Set<string>();
+
+function markClosing(id: string, at: number) {
+  if (!pinned.has(id)) set({ closing: { ...state.closing, [id]: at } });
+}
+
+function endClosing(id: string) {
+  if (!(id in state.closing)) return;
+  const { [id]: _gone, ...rest } = state.closing;
+  set({ closing: rest });
+}
+
+/** Closes a card after a while. With an id, the card shows a line in its last 5 s, and Pin keeps it. */
+function leaveAfter(ms: number, leave: () => void, id?: string) {
   const latest = Date.now() + ms + LONGEST_HOLD_MS;
+  let held = false;
   const expire = () => {
-    if (getState().hovered && Date.now() < latest) setTimeout(expire, 1500);
-    else leave();
+    if (id && pinned.has(id)) return;
+    if (getState().hovered && Date.now() < latest) {
+      held = true;
+      return void setTimeout(expire, 1500);
+    }
+    // Held past its time, it gets a last 5 s with the line, so it never vanishes as the pointer leaves.
+    if (held && id) {
+      held = false;
+      markClosing(id, Date.now() + CLOSING_LINE_MS);
+      return void setTimeout(expire, CLOSING_LINE_MS);
+    }
+    if (id) endClosing(id);
+    leave();
   };
+  if (id) setTimeout(() => markClosing(id, Date.now() + Math.min(ms, CLOSING_LINE_MS)), Math.max(0, ms - CLOSING_LINE_MS));
   setTimeout(expire, ms);
+}
+
+/** Keeps a card that would close by itself, until it is closed by hand. */
+export function pinCard(id: string) {
+  pinned.add(id);
+  endClosing(id);
 }
 
 /** The offer to stop a recording nobody speaks in. It counts down in place, and goes when someone speaks. */
@@ -509,7 +547,7 @@ export function pushNotice(notice: Omit<Notice, "id"> & { id?: string }, ms = NO
   const id = notice.id ?? newId();
   if (state.notices.some((n) => n.id === id)) return;
   set({ notices: [...state.notices, { ...notice, id }] });
-  leaveAfter(ms, () => dismissNotice(id));
+  leaveAfter(ms, () => dismissNotice(id), id);
 }
 
 export const dismissNotice = (id: string) => set({ notices: state.notices.filter((n) => n.id !== id), pastNotices: keptNotices(state.notices.filter((n) => n.id === id)) });
@@ -521,7 +559,7 @@ export function pushError(error: Omit<IslandError, "id">) {
   leaveAfter(error.sessionId ? URGENT_MS : ERROR_MS, () => {
     if (error.sessionId && state.errors.some((e) => e.id === id)) set({ pastNotices: keptNotices([{ id, tone: "urgent", title: error.title, body: error.body, sessionId: error.sessionId, finished: true }]) });
     dismissError(id);
-  });
+  }, id);
 }
 
 export const dismissError = (id: string) => set({ errors: state.errors.filter((e) => e.id !== id) });
@@ -1189,7 +1227,7 @@ function onReminders(reminders: Reminder[]) {
       sticky: urgent,
     };
     set({ notices: [...state.notices.filter((n) => n.id !== notice.id), notice] });
-    leaveAfter(notice.sticky ? URGENT_MS : NOTICE_MS, () => dismissNotice(notice.id));
+    leaveAfter(notice.sticky ? URGENT_MS : NOTICE_MS, () => dismissNotice(notice.id), notice.id);
   }
 }
 
@@ -1619,7 +1657,7 @@ function onScreenSuggestion(s: ScreenSuggestion) {
   if (state.suggestions.some((x) => x.key === s.key)) return;
   const suggestion = suggestionFrom(s);
   set({ suggestions: [...state.suggestions, suggestion] });
-  leaveAfter(SUGGESTION_MS, () => dismissSuggestion(suggestion.id));
+  leaveAfter(SUGGESTION_MS, () => dismissSuggestion(suggestion.id), suggestion.id);
 }
 
 export function ignoreSuggestion(suggestion: Suggestion) {

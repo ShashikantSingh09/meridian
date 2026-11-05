@@ -18,7 +18,8 @@
 @keyframes face-heard { 0% { scale: 1; translate: 0 0; } 12% { scale: 1.05 0.88; } 40% { scale: 1.15; translate: 0 -2px; } 70% { scale: 0.98; translate: 0 0; } 100% { scale: 1; } }
 @keyframes face-hop { 0%, 100% { translate: 0 0; } 40% { translate: 0 -3px; } }
 @keyframes face-shake { 0% { translate: 0 0; } 12% { translate: -2.6px 0; } 28% { translate: 2.2px 0; } 44% { translate: -1.6px 0; } 60% { translate: 1.1px 0; } 76% { translate: -0.5px 0; } 100% { translate: 0 0; } }
-@keyframes face-drag { 0% { scale: 1; rotate: 0deg; } 14% { scale: 1.035; rotate: -6deg; } 36% { scale: 1.035; rotate: 5deg; } 58% { scale: 1.035; rotate: -3deg; } 72% { scale: 1.04 0.94; rotate: 0deg; } 84% { scale: 0.99 1.02; } 100% { scale: 1; rotate: 0deg; } }
+/* Let go after a drag: a small squash, then back to its size. */
+@keyframes face-drop { 0% { scale: 1.035; } 30% { scale: 1.05 0.93; } 62% { scale: 0.99 1.02; } 100% { scale: 1; } }
 @keyframes face-nod { 0%, 40% { translate: 0 0; } 55% { translate: 0 1.5px; } 65% { translate: 0 0; } 80%, 100% { translate: 0 1px; } }
 @keyframes face-sag { 0% { scale: 1 1; } 18% { scale: 1 0.7; } 22% { scale: 1 0.1; } 30% { scale: 1 0.62; } 52% { scale: 1 0.45; } 72% { scale: 1 0.35; } 88% { scale: 1 0.12; } 100% { scale: 1 0.1; } }
 @keyframes face-notice { 0% { translate: 0 0; } 12%, 72% { translate: 3px -1px; } 100% { translate: 0 0; } }
@@ -78,7 +79,9 @@
 .face[data-play][data-mood="needs"] { animation: face-hop 0.7s ease-in-out 2; }
 .face[data-play][data-mood="done"] { animation: face-hop 0.6s ease-in-out 0.15s 1; }
 .face[data-play][data-mood="error"] { animation: face-shake 0.5s ease-out 1; }
-.face[data-play][data-mood="drag"] { animation: face-drag 1.6s cubic-bezier(0.3, 0.7, 0.4, 1) 1; }
+/* Held, it lifts and leans the way it is dragged, up to 6 degrees. The island sets --lean. */
+.face[data-mood="drag"] { scale: 1.035; rotate: calc(var(--lean, 0) * 1deg); transition: --c 0.24s ease, scale 0.28s cubic-bezier(0.3, 1.15, 0.5, 1), rotate 0.12s ease-out; }
+.face[data-dropped] { animation: face-drop 0.55s cubic-bezier(0.34, 1.56, 0.64, 1) 1; }
 .face[data-play][data-mood="sleepy"] { animation: face-nod 4s ease-in-out both; }
 .face[data-play][data-mood="sleepy"] .lid { animation: face-sag 4s ease-in-out both; }
 .face[data-play][data-mood="notice"] .eye { animation: face-notice 1s cubic-bezier(0.25, 0.8, 0.25, 1) 0.15s 1; }
@@ -157,13 +160,22 @@
 .face .sm { display: flex; flex-direction: column; align-items: center; gap: 3px; }
 .face .sm-eyes { display: flex; gap: 13px; }
 .face .d-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--c); }
-.face .sm-mouth { display: block; overflow: visible; transition: scale 0.08s ease-out; transform-origin: 50% 20%; }
+/* The mouth turns with the eyes, a little less far, so the whole face looks at you. */
+.face .sm-mouth { display: block; overflow: visible; translate: calc(var(--gx, 0px) * 0.6) calc(var(--gy, 0px) * 0.5); transition: translate 0.24s cubic-bezier(0.34, 1.36, 0.64, 1); }
+.face[data-face="smile"][data-glance="l"] .sm-mouth { translate: -2px 0; }
+.face[data-face="smile"][data-glance="r"] .sm-mouth { translate: 2px 0; }
+.face[data-face="smile"][data-mood="think"] .sm-mouth { translate: 2px -1px; }
+.face[data-face="smile"][data-mood="think"][data-side="l"] .sm-mouth { translate: -2px -1px; }
 .face .mouth { fill: transparent; stroke: var(--c); stroke-width: 2.4; stroke-linecap: round; d: path("M4 3 Q12 9 20 3"); transition: d 0.37s cubic-bezier(0.34, 1.36, 0.64, 1), stroke 0.24s ease, fill 0.24s ease; }
 .face[data-mood="listen"] .mouth { d: path("M7 4 Q12 6 17 4"); }
 .face[data-mood="think"] .mouth { d: path("M9 5 Q13 4 17 3"); }
-.face[data-mood="speak"] .mouth { d: path("M6 2 Q12 10 18 2"); fill: var(--c); }
+/* Speaking, the mouth opens with each step of the voice, as fast as syllables come: nearly shut
+   between them, and wide on the loudest. */
+.face[data-mood="speak"] .mouth { d: path("M7 3 Q12 4.5 17 3"); fill: var(--c); transition: d 0.07s ease-out, stroke 0.24s ease, fill 0.24s ease; }
+.face[data-mood="speak"][data-lv="1"] .mouth { d: path("M6 2.5 Q12 7 18 2.5"); }
+.face[data-mood="speak"][data-lv="2"] .mouth { d: path("M5.5 2 Q12 9.5 18.5 2"); }
+.face[data-mood="speak"][data-lv="3"] .mouth { d: path("M5 1.5 Q12 12 19 1.5"); }
 .face[data-face="smile"][data-mood="speak"] .eye { scale: 1; }
-.face[data-face="smile"][data-mood="speak"] .sm-mouth { scale: 1 calc(0.45 + var(--lv, 0) * 0.4); }
 .face[data-mood="heard"] .mouth { d: path("M9 3 Q12 9 15 3"); }
 .face[data-mood="working"] .mouth { d: path("M7 5 Q12 5 17 5"); }
 .face[data-mood="needs"] .mouth { d: path("M8 6 Q12 2 16 6"); }
@@ -248,6 +260,7 @@
 .face[data-reduced="true"],
 .face[data-reduced="true"] *,
 .face[data-reduced="true"]::after { animation: none !important; transition: none !important; }
+.face[data-reduced="true"] .sm-mouth { translate: none !important; }
 .face[data-reduced="true"] .eye,
 .face[data-reduced="true"] .g-pupil,
 .face[data-reduced="true"] .v-light,

@@ -244,6 +244,11 @@ export const bridge = {
     }
     return listen<[number, number]>("island-gaze", (e) => handler(e.payload[0], e.payload[1])).then((un) => un);
   },
+  /** While the island is dragged, how far to lean the face, in degrees. 0 once it is let go. */
+  onLean(handler: (degrees: number) => void) {
+    if (!native) return Promise.resolve(mock.onLean(handler));
+    return listen<number>("island-lean", (e) => handler(e.payload)).then((un) => un);
+  },
   onHover(handler: (hovered: boolean) => void) {
     if (!native) return Promise.resolve(() => {});
     return listen<boolean>("island-hover", (e) => handler(e.payload)).then((un) => un);

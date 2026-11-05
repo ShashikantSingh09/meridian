@@ -161,9 +161,14 @@ describe("what an agent is doing", () => {
     vi.advanceTimersByTime(30_000);
     expect(getState().notices).toHaveLength(1);
     setHovered(false);
+    // Once the pointer leaves it gets a last 5 s with the closing line, rather than vanishing.
     vi.advanceTimersByTime(2_000);
+    expect(getState().notices).toHaveLength(1);
+    expect(Object.keys(getState().closing)).toHaveLength(1);
+    vi.advanceTimersByTime(5_000);
     vi.useRealTimers();
     expect(getState().notices).toHaveLength(0);
+    expect(getState().closing).toEqual({});
   });
 
   it("keeps a finished card when opening the panel takes it off the island", async () => {

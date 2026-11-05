@@ -15,6 +15,7 @@ import { activeSessions, deriveView, geometryFor, stateToken, waitingApproval, t
 import { notchPath, pillPath, pillRadius } from "./notch";
 import {
   Bubble,
+  ClosingLine,
   ContextualView,
   ErrorView,
   IdleView,
@@ -45,8 +46,9 @@ const LAP_EVERY: Partial<Record<IslandView, number>> = { listening: 6000, thinki
 /** A request waiting for an answer taps more often. */
 const LAP_WAITING = 8000;
 const LAP_MS: Partial<Record<IslandView, number>> = { thinking: 1800, notification: 1600, error: 1600 };
-/** The face plays its pick-up, lean and landing once, which is about as long as a drag lasts. */
-const DRAG_FEEL_MS = 1600;
+/** Held, the face stays lifted for as long as the drag lasts. Let go, it squashes and settles. */
+const DRAG_HOLD_MS = 10 * 60_000;
+const DROP_MS = 550;
 
 function useSnapshot(): Snapshot {
   const panelOpen = useApp((s) => s.panelOpen);
@@ -140,6 +142,12 @@ export function Island() {
   // One switch for reduced motion, from the app's setting and Windows', for every style to follow.
   useEffect(() => void document.documentElement.toggleAttribute("data-reduced", reduced), [reduced]);
 
+  // The core says how far to lean while the island is dragged, from how fast it moves.
+  useEffect(() => {
+    const un = bridge.onLean((degrees) => el.current?.style.setProperty("--lean", String(reduced ? 0 : degrees)));
+    return () => void un.then((stop) => stop());
+  }, [reduced]);
+
   const target = geometryFor(view, {
     hovered: opened,
     rows: active.length,
@@ -225,7 +233,7 @@ export function Island() {
     // Only now: capturing on every press would take the click from a button inside the island.
     el.current?.setPointerCapture(e.pointerId);
     setDragging(true);
-    feel("drag", DRAG_FEEL_MS);
+    feel("drag", DRAG_HOLD_MS);
     void bridge.islandDrag(true);
   };
   const up = () => {
@@ -237,6 +245,13 @@ export function Island() {
     setTimeout(() => (justDragged.current = false), 400);
     setDragging(false);
     void bridge.islandDrag(false);
+    el.current?.style.setProperty("--lean", "0");
+    feel("drag", 0);
+    if (!reduced) {
+      const faces = el.current?.querySelectorAll<HTMLElement>(".face") ?? [];
+      faces.forEach((face) => (face.dataset.dropped = ""));
+      setTimeout(() => faces.forEach((face) => delete face.dataset.dropped), DROP_MS);
+    }
   };
   const lit = LIT.has(view);
   const lapMs = (LAP_MS[view] ?? 2400) / speed;
@@ -310,6 +325,7 @@ export function Island() {
             {expanded ? <Panel /> : <CompactContent view={view} reduced={reduced} hovered={opened} sliver={sliver} mediaOpen={playerOpen} />}
           </motion.div>
         </AnimatePresence>
+        {!expanded && <ClosingLine view={view} />}
         {wakeOn && !expanded && <span className="wake-dot" role="img" aria-label="Listening for a wake word" title="Listening for a wake word" />}
         {snapshot.recording && !expanded && view !== "note" && <span className="note-dot" role="img" aria-label="Recording" title="Recording" />}
       </motion.div>
