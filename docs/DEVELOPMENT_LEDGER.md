@@ -1,5 +1,25 @@
 # Development ledger
 
+## 2026-11-05: Waking only when the name is said
+
+The owner said the app starts listening without the wake word. See D71.
+
+- **Measured, not guessed.** An ignored test, `false_wakes_in_speech_without_the_name` in `crates/voice/src/wake.rs`, speaks 70
+  sentences without the name in every Windows voice on the PC, through the owner's real taught words, and prints each detector's score.
+  It plays nothing aloud and uses no downloaded speech engine. Run it with `MERIDIAN_WAKE_DIR` and `MERIDIAN_WAKE_WORDS` set.
+- **Other ways it starts listening** were checked: the Talk buttons, and Ctrl Alt V, which Office uses for Paste Special and JetBrains
+  IDEs for extracting a variable. Meridian takes that key everywhere, so pressing it in those apps starts listening. Not changed here.
+
+### Proved
+
+Unit tests for the decision: a close sentence in the user's voice alone is not a call, both together are, far apart or different
+words are not, one clearly sure is enough, a word Windows cannot spell goes by the recordings, and one word wakes it once. Each fails
+with the old rule. On the synthetic corpus Windows alone still wakes on "Hey Marian", which sounds the same.
+
+### Not proved
+
+- The owner's real voice: that their own wake word still wakes it, and that their everyday speech no longer does. `wake.log` will say.
+
 ## 2026-11-05: Calmer, more natural motion
 
 The owner said the motion felt cluttered and asked for it to be more lifelike. See D70, last paragraph.

@@ -25,6 +25,8 @@ const MOST_WORDS: usize = 8;
 /// A lesson gives up after this many, and keeps this many of them that are alike.
 const MOST_RECORDINGS: usize = 12;
 const RECORDINGS_NEEDED: usize = 4;
+/// The wake log is started again past this size, keeping the one before.
+const LOG_MOST: u64 = 256 * 1024;
 
 #[derive(Clone, PartialEq, Serialize)]
 pub struct Status {
@@ -157,6 +159,25 @@ fn build(app: &AppHandle, asked: &Asked) -> Result<Spotter, String> {
     Ok(spotter)
 }
 
+/// Writes down what each detector counted and whether it woke the app: the time, the word and the
+/// numbers, never the sound or anything else that was said. This is how a false wake is traced.
+fn note_votes(app: &AppHandle, votes: &[wake::Vote]) {
+    if votes.is_empty() {
+        return;
+    }
+    let Ok(folder) = app.path().app_local_data_dir().map(|dir| dir.join("logs")) else { return };
+    let _ = std::fs::create_dir_all(&folder);
+    let file = folder.join("wake.log");
+    if std::fs::metadata(&file).is_ok_and(|meta| meta.len() > LOG_MOST) {
+        let _ = std::fs::rename(&file, folder.join("wake.old.log"));
+    }
+    let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |t| t.as_secs());
+    let lines: String = votes.iter().map(|v| format!("{at} {} {:?} {:.3} {}\n", v.by, v.word, v.sure, if v.woke { "woke" } else { "waited" })).collect();
+    if let Ok(mut out) = std::fs::OpenOptions::new().create(true).append(true).open(file) {
+        let _ = std::io::Write::write_all(&mut out, lines.as_bytes());
+    }
+}
+
 /// Sound is checked here, in the order it came, so a slow moment never holds up the interface.
 fn listen(app: AppHandle, sound: mpsc::Receiver<Vec<u8>>) {
     let mut flowing = false;
@@ -177,7 +198,8 @@ fn listen(app: AppHandle, sound: mpsc::Receiver<Vec<u8>>) {
         };
         flowing = true;
         let wake = app.state::<Wake>();
-        let found = wake.spotter.lock().unwrap().as_mut().and_then(|spotter| spotter.hear(&pcm));
+        let (found, votes) = wake.spotter.lock().unwrap().as_mut().map_or((None, Vec::new()), |spotter| (spotter.hear(&pcm), spotter.votes()));
+        note_votes(&app, &votes);
         if let Some(heard) = found {
             let test = wake.testing_until.lock().unwrap().take().is_some();
             let _ = app.emit_to(island::LABEL, "wake-heard", WakeHeard { word: heard.word, test, after_ms: heard.after_ms });

@@ -78,6 +78,8 @@ fn grammar(words: &[String], tag: &str) -> String {
 pub struct Recognized {
     pub word: String,
     pub after_ms: u64,
+    /// How sure the detector was, from 0 to 1.
+    pub sure: f32,
 }
 
 #[derive(Default)]
@@ -353,7 +355,7 @@ fn run(words: Vec<String>, cutoff: f32, shared: Shared, tell: mpsc::Sender<Recog
                     }
                     let after_ms = waiting.written.saturating_sub(end) / BYTES_PER_MS;
                     drop(waiting);
-                    let _ = tell.send(Recognized { word: word.clone(), after_ms });
+                    let _ = tell.send(Recognized { word: word.clone(), after_ms, sure });
                 }
             }
             drop(session);

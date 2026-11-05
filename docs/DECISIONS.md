@@ -490,6 +490,24 @@ side by side in the real window before it counts as done.
 Apple-style glass, themes, limits and models, the assistant's name and personality, and wake words are on the canvas and held for review.
 Wake words would reverse the part of D51 that left them out, and only because the owner asked for them.
 
+## D71. A wake word needs a second opinion unless one detector is clearly sure
+
+The owner reported the app starting to listen when they had not said the wake word. Two detectors listen: the user's own recordings
+(rustpotter) and Windows' speech engine with a grammar of just the wake words, and until now either one alone was enough. Measured
+on 560 sentences without the name, spoken by the eight Windows voices on the owner's PC against their real taught words, Windows went
+over its bar only on "Hey Marian", and the recordings peaked at 0.47 against a bar of 0.5. But the recordings compare against the
+owner's own voice, so their own speech comes closer than any synthetic voice: a sentence that only sounded like the name had already
+scored 0.54 in their voice, enough to wake it. The owner had also just added "Meridian" on its own, a short single word that is
+easier to match by accident.
+
+So a detector now wakes the app alone only when clearly sure: the recordings 0.1 over their bar, Windows 0.2 over its. Otherwise both
+have to hear the same word within 2 s. A word Windows cannot spell, such as one in Hindi, has no second opinion and keeps the
+recordings alone at their usual bar. One word wakes it once, even when both detectors hear it.
+
+Each time a detector counts something, the app writes one line to `logs/wake.log` in its local data folder: the time, the detector,
+the word, how sure it was, and whether it woke. Never the sound or anything else said. That is how the next false wake gets traced,
+in the owner's real voice, which no test here can reproduce.
+
 ## D70. Faces glance and settle, and nothing loops for ever
 
 The owner approved the faces and motion boards on 2026-11-05. Each face is now layered: the face moves as a whole, the eyes follow the
