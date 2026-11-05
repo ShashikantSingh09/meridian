@@ -30,14 +30,15 @@ export const scaled = (s: (typeof spring)[SpringName], speed: number) => ({
 export const instant = { duration: 0 } as const;
 
 // The shape moves first, and the words wait until there is room for them: 0.3 of the shape's
-// spring, then they grow in with it from a little smaller. Old content leaves in 90 ms, before
+// spring, then they settle in from very slightly smaller, so the eye reads the words and not the
+// motion. Old content leaves in 90 ms, before
 // new content arrives, so two lines of text never overlap. Everything follows the Animation
 // speed setting. No filters here: a blur re-rasters the text on every frame of a morph.
 export const contentEnter = (shape: SpringName, speed: number, up = false) => {
   const delay = (0.3 * springDuration[shape]) / speed;
   const settle = { ...scaled(spring.snap, speed), delay };
   return {
-    initial: { opacity: 0, scale: 0.96, y: up ? 4 : -4 },
+    initial: { opacity: 0, scale: 0.985, y: up ? 2 : -2 },
     animate: { opacity: 1, scale: 1, y: 0, transition: { opacity: { duration: 0.24 / speed, delay, ease: [0.16, 1, 0.3, 1] }, scale: settle, y: settle } },
     exit: { opacity: 0, scale: 0.97, transition: { duration: 0.09 / speed, ease: [0.4, 0, 1, 1] } },
   } as const;

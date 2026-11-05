@@ -179,8 +179,13 @@ test.describe("Notes", () => {
 
 test("the dock is round, sits where the board puts it, and has Notes", async ({ page }) => {
   await page.getByRole("button", { name: "Notes", exact: true }).click();
-  const item = await page.getByRole("button", { name: "Notes", exact: true }).boundingBox();
-  expect([item?.width, item?.height]).toEqual([44, 44]);
+  // Measured once the panel has settled in, not while it is still arriving.
+  await expect
+    .poll(async () => {
+      const item = await page.getByRole("button", { name: "Notes", exact: true }).boundingBox();
+      return [item?.width, item?.height];
+    })
+    .toEqual([44, 44]);
   const dock = page.locator(".dock");
   await expect(dock).toHaveCSS("padding", "5px");
   await expect(dock).toHaveCSS("border-radius", "27px");

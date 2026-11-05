@@ -36,25 +36,33 @@ const COLORS: Record<Drawn, string> = {
 };
 
 type Range = [number, number];
-/** How often a mood blinks, in ms. Listening blinks more, reading less, and the rest keep still. */
+/** How often a mood blinks, in ms. Something sitting beside you all day should blink like someone
+ *  relaxed, every 4 to 8 seconds; listening a little more, reading less. */
 const BLINKS: Partial<Record<Mood, Range>> = {
-  rest: [2500, 6000],
-  notice: [2500, 6000],
-  done: [2500, 6000],
-  speak: [2500, 6000],
-  curious: [2500, 6000],
-  music: [2500, 6000],
-  listen: [1800, 3500],
-  working: [6000, 9000],
+  rest: [4000, 8500],
+  notice: [4000, 8500],
+  done: [4000, 8500],
+  speak: [3500, 7000],
+  curious: [4000, 8500],
+  music: [4000, 8500],
+  listen: [3000, 6000],
+  working: [8000, 14000],
 };
+/** Now and then a blink comes twice, or the eyes drift aside for a moment instead. */
+const DOUBLE_BLINK = 0.08;
+const LOOK_AWAY = 0.1;
+const LOOK_AWAY_MS = 1400;
 /** A one-shot that plays again now and then, so a long wait still looks alive without a loop. */
-const BEATS: Partial<Record<Mood, Range>> = { needs: [8000, 8000], working: [7000, 11000] };
+const BEATS: Partial<Record<Mood, Range>> = { needs: [12000, 16000], working: [10000, 16000] };
 /** Each z redraws the window for 2.4 s, so asleep it makes two and then nothing moves at all. */
 const SNORES_AT = [900, 3300];
-/** Speaking or listening with no voice to follow, as in a preview, the face follows a made-up one:
- *  steps at about the rate of syllables, with a short breath now and then. Highest step per mood. */
+/** Speaking or listening with no voice to follow, as in a preview, the face follows a made-up one
+ *  shaped like speech: syllables of about a fifth of a second, each opening and then closing, in
+ *  phrases of 4 to 9 with a breath between. Highest step per mood. */
 const PRACTICE_STEPS: Partial<Record<Mood, number>> = { speak: 3, listen: 2 };
-const SYLLABLE_MS: Range = [90, 170];
+const SYLLABLE_MS: Range = [170, 260];
+const PHRASE: Range = [4, 9];
+const BREATH_MS: Range = [350, 650];
 
 // Dot patterns, 17 across and 7 down.
 type Grid = number[][];
@@ -216,9 +224,9 @@ export function Face({ id, mood, scale = 1, reduced: asked }: { id: string; mood
     const blinks = face.id !== "googly" && BLINKS[shown];
     if (blinks) {
       every(blinks, () => {
-        if (shown === "rest" && Math.random() < 0.18) return flag("glance", Math.random() < 0.5 ? "l" : "r", 800);
+        if (shown === "rest" && Math.random() < LOOK_AWAY) return flag("glance", Math.random() < 0.5 ? "l" : "r", LOOK_AWAY_MS);
         flag("blink", "true", 220);
-        if (Math.random() < 0.2) after(300, () => flag("blink", "true", 220));
+        if (Math.random() < DOUBLE_BLINK) after(300, () => flag("blink", "true", 220));
       });
     }
     const beat = BEATS[shown];
@@ -228,10 +236,19 @@ export function Face({ id, mood, scale = 1, reduced: asked }: { id: string; mood
     // In a conversation the voice view sets the step from the real sound. Anywhere else it is made up.
     const most = PRACTICE_STEPS[shown];
     if (most && !el.closest(".voice")) {
-      every(SYLLABLE_MS, () => {
-        const breath = Math.random() < 0.12;
-        el.dataset.lv = String(breath ? 0 : 1 + Math.floor(Math.random() * most));
-      });
+      const span = ([least, longest]: Range) => least + Math.random() * (longest - least);
+      const phrase = (left: number) => {
+        if (left <= 0) {
+          el.dataset.lv = "0";
+          return after(span(BREATH_MS), () => phrase(Math.round(span(PHRASE))));
+        }
+        // Opens for most of the syllable, then nearly closes before the next.
+        const long = span(SYLLABLE_MS);
+        el.dataset.lv = String(Math.min(most, 1 + Math.floor(Math.random() * most)));
+        after(long * 0.6, () => (el.dataset.lv = Math.random() < 0.5 ? "0" : "1"));
+        after(long, () => phrase(left - 1));
+      };
+      phrase(Math.round(span(PHRASE)));
     }
     return () => {
       timers.forEach(clearTimeout);

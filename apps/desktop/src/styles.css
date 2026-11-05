@@ -357,9 +357,10 @@ textarea {
   padding: 0 var(--space-4);
 }
 
+/* A breath is a slight dimming, slow in and out, not a pulse. */
 @keyframes breathe {
   0%, 100% { opacity: 1; }
-  50% { opacity: 0.55; }
+  50% { opacity: 0.8; }
 }
 
 /* Two breaths on the face after the island comes to rest, then still for good. The clock
@@ -367,7 +368,7 @@ textarea {
    fade measured 13% of a core, and even a once-a-second update about 4%, against 0.1% when
    nothing moves. On the face's parts, because the face itself plays its moods. */
 html[data-ambient="true"] .ambient .face > * {
-  animation: breathe 3.6s ease-in-out 2;
+  animation: breathe 4.4s ease-in-out 2;
 }
 
 /* One switch for reduced motion, set from the app's own setting and Windows' (Island.tsx). The
@@ -1466,7 +1467,6 @@ html[data-reduced] .beam[data-on="true"]::after {
 @keyframes edge-spin { to { rotate: 360deg; } }
 @keyframes mark-spin { to { rotate: 360deg; } }
 @keyframes mark-pulse { 0%, 100% { scale: 1; } 50% { scale: 1.16; } }
-@keyframes spark-fly { to { translate: var(--dx) var(--dy); scale: 0.2; opacity: 0; } }
 @keyframes step-pulse { 0%, 100% { scale: 1; opacity: 1; } 50% { scale: 1.6; opacity: 0.5; } }
 @keyframes plane-drift { 0%, 100% { translate: -3px 0; } 50% { translate: 3px 0; } }
 @keyframes shimmer-run { to { translate: 300% 0; } }
@@ -1774,20 +1774,6 @@ html[data-reduced] .beam[data-on="true"]::after {
   flex: none;
   display: inline-grid;
   place-items: center;
-}
-
-.sparks {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-}
-
-.sparks i {
-  position: absolute;
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  animation: spark-fly 0.9s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 .allow {
@@ -3628,7 +3614,7 @@ kbd {
   bottom: 3px;
   height: 2px;
   border-radius: 1px;
-  background: rgba(255, 255, 255, 0.5);
+  background: rgba(255, 255, 255, 0.32);
   transform-origin: 0 50%;
   pointer-events: none;
   animation: closing-run linear both;

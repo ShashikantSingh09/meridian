@@ -1500,11 +1500,14 @@ export function wakeTestHeard(word: string) {
   set({ wakeTest: { phase: "heard", word } });
 }
 
-/** How far the eyes travel each way, in CSS pixels. island.rs counts device pixels with the same numbers. */
+/** How far the eyes travel each way, in CSS pixels. island.rs uses the same numbers. */
 const GAZE_REACH = { x: 4, y: 3 };
-/** Glances, not tracking: at most four a second, and back to the middle after the pointer rests. */
-const GAZE_EVERY_MS = 250;
-const GAZE_HOME_MS = 6000;
+/** The eyes notice the pointer only near the island, about 300 px, as someone notices a hand
+ *  coming toward them. Anywhere else they look ahead, so working with the mouse leaves them be. */
+const GAZE_NEAR = 0.33;
+/** Glances, not tracking: one at most every 0.6 s, and back to the middle once the pointer rests. */
+const GAZE_EVERY_MS = 600;
+const GAZE_HOME_MS = 2500;
 let gazeAt = 0;
 let gazed = "0,0";
 let gazeLater: ReturnType<typeof setTimeout> | undefined;
@@ -1521,9 +1524,11 @@ function aim(gx: number, gy: number) {
 
 function look(x: number, y: number) {
   if (document.documentElement.hasAttribute("data-reduced")) return;
-  const dpr = devicePixelRatio || 1;
-  const gx = Math.round(x * GAZE_REACH.x * dpr) / dpr;
-  const gy = Math.round(y * GAZE_REACH.y * dpr) / dpr;
+  const near = Math.abs(x) <= GAZE_NEAR && Math.abs(y) <= GAZE_NEAR;
+  // Whole CSS pixels: a smaller move is too slight to read as a look, and still costs a repaint.
+  const toward = (at: number, reach: number) => (near ? Math.round((at / GAZE_NEAR) * reach) : 0);
+  const gx = toward(x, GAZE_REACH.x);
+  const gy = toward(y, GAZE_REACH.y);
   clearTimeout(gazeLater);
   if (`${gx},${gy}` === gazed) return;
   const wait = gazeAt + GAZE_EVERY_MS - Date.now();

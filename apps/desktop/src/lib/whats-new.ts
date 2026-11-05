@@ -6,6 +6,11 @@ export interface NewThing {
 }
 
 export const WHATS_NEW: Record<string, NewThing[]> = {
+  "0.6.2": [
+    { title: "Calmer, more natural motion", line: "The face eases into each look and stops, with no wobble." },
+    { title: "Eyes that leave you be", line: "They notice your pointer only when it comes near the island." },
+    { title: "Less going on at once", line: "Fewer blinks and hops, and no sparks when something finishes." },
+  ],
   "0.6.1": [
     { title: "The smiley talks", line: "Its mouth opens and closes with the voice, and turns with its eyes." },
     { title: "Cards warn before they close", line: "A line runs out in the last 5 seconds. Pin keeps the card." },

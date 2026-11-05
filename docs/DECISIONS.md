@@ -516,6 +516,16 @@ pauses. A card that closes by itself shows a line running out along its bottom f
 5 s once the pointer leaves, so nothing vanishes without warning. Pin keeps it until closed by hand. The board names Pin but does not
 place it, so it joins the card's own buttons while the line runs, where it covers nothing.
 
+After 0.6.1 the owner said the motion felt cluttered and asked for it to be more lifelike. Counting every animation the island
+started showed why: the eyes followed the pointer anywhere within 900 px, up to four times a second, so ordinary mouse work kept the face
+darting; nearly every change overshot like jelly; and a finished card started 46 animations in 10 s, a dozen of them sparks. So the
+eyes now notice only a pointer near the island, about 300 px, at most every 0.6 s, and look ahead otherwise. Shapes ease in and stop,
+with a spring kept only for being heard and being dropped. Blinks come every 4 to 8 s, with fewer doubles and glances; a hop, a
+reading sweep and the comet's first lap play once; the comet comes round less often; the sparks are gone; a breath is a slight dim, not
+a pulse; content settles in from 98.5% instead of 96%. Speech moves the mouth by syllable and the eyes only by the voice's overall
+level, and a step changes only once the voice is clearly past it. Pointer wandering went from 138 animation starts in 17 s to 48 in
+the browser build, and the finished card from 46 to 32.
+
 ## D69. A security review's fixes, built from its boards
 
 A source-only security audit on 2026-11-05 found ten leads, none confirmed because nothing could be run in a sandbox. The report is in

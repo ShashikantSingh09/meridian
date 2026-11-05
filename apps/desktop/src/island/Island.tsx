@@ -41,10 +41,10 @@ const BIRTH = { w: 18, h: 4 };
 const VOICE_LINE = 52;
 /** Views with a light running round the edge, because something is under way. */
 const LIT: ReadonlySet<IslandView> = new Set(["listening", "thinking", "working", "multitask", "error", "notification"]);
-/** The light runs two laps as something starts, then one this often while it lasts. The rim stays lit. */
-const LAP_EVERY: Partial<Record<IslandView, number>> = { listening: 6000, thinking: 6000, working: 12_000, multitask: 12_000 };
-/** A request waiting for an answer taps more often. */
-const LAP_WAITING = 8000;
+/** The light runs one lap as something starts, then one this often while it lasts. The rim stays lit. */
+const LAP_EVERY: Partial<Record<IslandView, number>> = { listening: 8000, thinking: 8000, working: 15_000, multitask: 15_000 };
+/** A request waiting for an answer taps a little more often. */
+const LAP_WAITING = 12_000;
 const LAP_MS: Partial<Record<IslandView, number>> = { thinking: 1800, notification: 1600, error: 1600 };
 /** Held, the face stays lifted for as long as the drag lasts. Let go, it squashes and settles. */
 const DRAG_HOLD_MS = 10 * 60_000;
@@ -263,7 +263,7 @@ export function Island() {
     const path = comet.current;
     if (!path || !lit || reduced) return;
     const lap = (laps: number) => path.animate([{ strokeDashoffset: 0.22 }, { strokeDashoffset: -1 }], { duration: lapMs, iterations: laps });
-    lap(2);
+    lap(1);
     const timer = lapEvery ? setInterval(() => lap(1), lapEvery) : undefined;
     return () => {
       clearInterval(timer);

@@ -3,9 +3,10 @@
    and scale; an .eye follows the gaze with transform and swells with scale; a .lid blinks with
    scale; and a .shape changes with the mood. --gx and --gy are set on the face by the store,
    data-lv by the voice view. A mood's one-shot plays when data-play is set: "1" as it arrives,
-   "2" for a heartbeat now and then. Nothing here loops for ever. The curves are motion.ts's
-   springs: face 0.37s cubic-bezier(0.34, 1.36, 0.64, 1), pop 0.55s cubic-bezier(0.34, 1.56,
-   0.64, 1), drift 0.9s cubic-bezier(0.33, 0, 0.2, 1). */
+   "2" for a heartbeat now and then. Nothing here loops for ever.
+   Living things ease into a new pose and stop there; only a toy wobbles past it. So shapes change
+   on a curve with no overshoot, 0.4s cubic-bezier(0.22, 1, 0.36, 1); a look aside drifts on 0.45s
+   cubic-bezier(0.4, 0, 0.2, 1); only being heard and being dropped keep a small spring. */
 
 /* Registered, so a change of colour fades instead of snapping. */
 @property --c {
@@ -15,11 +16,11 @@
 }
 
 @keyframes face-blink { 0% { scale: 1 1; animation-timing-function: ease-in; } 32%, 45% { scale: 1 0.08; animation-timing-function: ease-out; } 100% { scale: 1 1; } }
-@keyframes face-heard { 0% { scale: 1; translate: 0 0; } 12% { scale: 1.05 0.88; } 40% { scale: 1.15; translate: 0 -2px; } 70% { scale: 0.98; translate: 0 0; } 100% { scale: 1; } }
-@keyframes face-hop { 0%, 100% { translate: 0 0; } 40% { translate: 0 -3px; } }
+@keyframes face-heard { 0% { scale: 1; translate: 0 0; } 12% { scale: 1.05 0.88; } 40% { scale: 1.08; translate: 0 -1.5px; } 70% { scale: 0.98; translate: 0 0; } 100% { scale: 1; } }
+@keyframes face-hop { 0%, 100% { translate: 0 0; } 40% { translate: 0 -2px; } }
 @keyframes face-shake { 0% { translate: 0 0; } 12% { translate: -2.6px 0; } 28% { translate: 2.2px 0; } 44% { translate: -1.6px 0; } 60% { translate: 1.1px 0; } 76% { translate: -0.5px 0; } 100% { translate: 0 0; } }
 /* Let go after a drag: a small squash, then back to its size. */
-@keyframes face-drop { 0% { scale: 1.035; } 30% { scale: 1.05 0.93; } 62% { scale: 0.99 1.02; } 100% { scale: 1; } }
+@keyframes face-drop { 0% { scale: 1.035; } 35% { scale: 1.03 0.96; } 70% { scale: 0.995 1.01; } 100% { scale: 1; } }
 @keyframes face-nod { 0%, 40% { translate: 0 0; } 55% { translate: 0 1.5px; } 65% { translate: 0 0; } 80%, 100% { translate: 0 1px; } }
 @keyframes face-sag { 0% { scale: 1 1; } 18% { scale: 1 0.7; } 22% { scale: 1 0.1; } 30% { scale: 1 0.62; } 52% { scale: 1 0.45; } 72% { scale: 1 0.35; } 88% { scale: 1 0.12; } 100% { scale: 1 0.1; } }
 @keyframes face-notice { 0% { translate: 0 0; } 12%, 72% { translate: 3px -1px; } 100% { translate: 0 0; } }
@@ -49,12 +50,12 @@
   display: grid;
   place-items: center;
   transform: translate(var(--gx, 0px), var(--gy, 0px));
-  transition: transform 0.08s cubic-bezier(0.25, 0.8, 0.25, 1), translate 0.24s cubic-bezier(0.34, 1.36, 0.64, 1), scale 0.08s ease-out;
+  transition: transform 0.16s cubic-bezier(0.2, 0.7, 0.2, 1), translate 0.45s cubic-bezier(0.4, 0, 0.2, 1), scale 0.16s ease-out;
 }
 
 /* Closes from a little above the middle, so it reads as a lid coming down, not a squeeze. */
 .face .lid { display: grid; place-items: center; transform-origin: 50% 40%; }
-.face .shape { transition: width 0.37s cubic-bezier(0.34, 1.36, 0.64, 1), height 0.37s cubic-bezier(0.34, 1.36, 0.64, 1), border-radius 0.37s ease, background-color 0.24s ease, box-shadow 0.24s ease, translate 0.37s cubic-bezier(0.34, 1.36, 0.64, 1); }
+.face .shape { transition: width 0.4s cubic-bezier(0.22, 1, 0.36, 1), height 0.4s cubic-bezier(0.22, 1, 0.36, 1), border-radius 0.37s ease, background-color 0.24s ease, box-shadow 0.24s ease, translate 0.4s cubic-bezier(0.22, 1, 0.36, 1); }
 
 /* A blink: closes in 70 ms, holds 30, opens in 120. Plastic eyes have no lids. */
 .face[data-blink] .lid { animation: face-blink 0.22s both; }
@@ -70,22 +71,23 @@
 .face[data-lv="1"] { --lv: 1; }
 .face[data-lv="2"] { --lv: 2; }
 .face[data-lv="3"] { --lv: 3; }
-.face[data-mood="listen"] .eye { scale: calc(1.04 + var(--lv, 0) * 0.04); }
-.face[data-mood="speak"] .eye { scale: 1 calc(1 + var(--lv, 0) * 0.08); }
+.face[data-mood="listen"] .eye { scale: calc(1.03 + var(--lv, 0) * 0.025); }
+/* Eyes swell slowly with the voice, not with each syllable: only a mouth moves that fast. */
+.face[data-mood="speak"] .eye { scale: 1 calc(1 + var(--lv, 0) * 0.04); transition: transform 0.16s cubic-bezier(0.2, 0.7, 0.2, 1), translate 0.45s cubic-bezier(0.4, 0, 0.2, 1), scale 0.5s ease-in-out; }
 
 /* One-shot moments: each plays once, then the face holds still. A heartbeat plays one round. */
 .face[data-play][data-mood="heard"] { animation: face-heard 0.7s cubic-bezier(0.3, 0.7, 0.4, 1) both; }
 .face[data-play][data-mood="heard"] .lid { animation: face-blink 0.22s 0.3s both; }
-.face[data-play][data-mood="needs"] { animation: face-hop 0.7s ease-in-out 2; }
+.face[data-play][data-mood="needs"] { animation: face-hop 0.8s ease-in-out 1; }
 .face[data-play][data-mood="done"] { animation: face-hop 0.6s ease-in-out 0.15s 1; }
 .face[data-play][data-mood="error"] { animation: face-shake 0.5s ease-out 1; }
 /* Held, it lifts and leans the way it is dragged, up to 6 degrees. The island sets --lean. */
-.face[data-mood="drag"] { scale: 1.035; rotate: calc(var(--lean, 0) * 1deg); transition: --c 0.24s ease, scale 0.28s cubic-bezier(0.3, 1.15, 0.5, 1), rotate 0.12s ease-out; }
-.face[data-dropped] { animation: face-drop 0.55s cubic-bezier(0.34, 1.56, 0.64, 1) 1; }
+.face[data-mood="drag"] { scale: 1.035; rotate: calc(var(--lean, 0) * 1deg); transition: --c 0.24s ease, scale 0.28s cubic-bezier(0.3, 1.15, 0.5, 1), rotate 0.2s ease-out; }
+.face[data-dropped] { animation: face-drop 0.55s cubic-bezier(0.3, 0.7, 0.4, 1) 1; }
 .face[data-play][data-mood="sleepy"] { animation: face-nod 4s ease-in-out both; }
 .face[data-play][data-mood="sleepy"] .lid { animation: face-sag 4s ease-in-out both; }
 .face[data-play][data-mood="notice"] .eye { animation: face-notice 1s cubic-bezier(0.25, 0.8, 0.25, 1) 0.15s 1; }
-.face[data-play][data-mood="working"] .eye { animation: face-read 1.4s ease-in-out 2; }
+.face[data-play][data-mood="working"] .eye { animation: face-read 1.8s ease-in-out 1; }
 .face[data-play="2"],
 .face[data-play="2"] * { animation-iteration-count: 1 !important; }
 
@@ -120,7 +122,7 @@
 
 /* Googly eyes: plastic, so no lids. The pupils jiggle when they move. */
 .face .g-ball { position: relative; width: 17px; height: 17px; border-radius: 50%; background: #fff; overflow: hidden; }
-.face .g-pupil { position: absolute; left: 50%; top: 50%; width: 8px; height: 8px; margin: -4px 0 0 -4px; border-radius: 50%; background: #0a0a0c; transform: translate(calc(var(--gx, 0px) * 1.1), calc(var(--gy, 0px) * 1.1)); transition: transform 0.45s cubic-bezier(0.3, 1.6, 0.5, 1), width 0.3s ease, height 0.3s ease, margin 0.3s ease, background-color 0.24s ease, translate 0.45s cubic-bezier(0.3, 1.6, 0.5, 1); }
+.face .g-pupil { position: absolute; left: 50%; top: 50%; width: 8px; height: 8px; margin: -4px 0 0 -4px; border-radius: 50%; background: #0a0a0c; transform: translate(calc(var(--gx, 0px) * 1.1), calc(var(--gy, 0px) * 1.1)); transition: transform 0.5s cubic-bezier(0.3, 1.3, 0.5, 1), width 0.3s ease, height 0.3s ease, margin 0.3s ease, background-color 0.24s ease, translate 0.5s cubic-bezier(0.3, 1.3, 0.5, 1); }
 .face[data-face="googly"] .eye { transform: none; }
 .face[data-face="googly"][data-mood="listen"] .g-pupil { width: 9px; height: 9px; margin: -4.5px 0 0 -4.5px; }
 .face[data-face="googly"][data-mood="heard"] .g-pupil { width: 5px; height: 5px; margin: -2.5px 0 0 -2.5px; }
@@ -150,8 +152,8 @@
 .face[data-face="visor"][data-mood="needs"] .v-light,
 .face[data-face="visor"][data-mood="done"] .v-light,
 .face[data-face="visor"][data-mood="error"] .v-light { left: 4%; width: 92%; transform: none; }
-.face[data-play][data-face="visor"][data-mood="working"] .v-light { animation: v-sweep 1.4s steps(10) 2; }
-.face[data-play][data-face="visor"][data-mood="needs"] .v-light { animation: v-flash 0.7s ease-in-out 2; }
+.face[data-play][data-face="visor"][data-mood="working"] .v-light { animation: v-sweep 1.8s steps(10) 1; }
+.face[data-play][data-face="visor"][data-mood="needs"] .v-light { animation: v-flash 0.8s ease-in-out 1; }
 .face[data-play][data-face="visor"][data-mood="error"] .v-light { animation: v-flash 0.5s ease-out 1; }
 .face[data-face="visor"][data-mood="sleepy"] .v-light { left: 42%; width: 16%; opacity: 0.6; }
 .face[data-face="visor"][data-mood="asleep"] .v-light { left: 46%; width: 8%; opacity: 0.45; box-shadow: none; transform: none; }
@@ -161,17 +163,17 @@
 .face .sm-eyes { display: flex; gap: 13px; }
 .face .d-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--c); }
 /* The mouth turns with the eyes, a little less far, so the whole face looks at you. */
-.face .sm-mouth { display: block; overflow: visible; translate: calc(var(--gx, 0px) * 0.6) calc(var(--gy, 0px) * 0.5); transition: translate 0.24s cubic-bezier(0.34, 1.36, 0.64, 1); }
-.face[data-face="smile"][data-glance="l"] .sm-mouth { translate: -2px 0; }
-.face[data-face="smile"][data-glance="r"] .sm-mouth { translate: 2px 0; }
+.face .sm-mouth { display: block; overflow: visible; translate: calc(var(--gx, 0px) * 0.4) calc(var(--gy, 0px) * 0.3); transition: translate 0.45s cubic-bezier(0.4, 0, 0.2, 1); }
+.face[data-face="smile"][data-glance="l"] .sm-mouth { translate: -1.5px 0; }
+.face[data-face="smile"][data-glance="r"] .sm-mouth { translate: 1.5px 0; }
 .face[data-face="smile"][data-mood="think"] .sm-mouth { translate: 2px -1px; }
 .face[data-face="smile"][data-mood="think"][data-side="l"] .sm-mouth { translate: -2px -1px; }
-.face .mouth { fill: transparent; stroke: var(--c); stroke-width: 2.4; stroke-linecap: round; d: path("M4 3 Q12 9 20 3"); transition: d 0.37s cubic-bezier(0.34, 1.36, 0.64, 1), stroke 0.24s ease, fill 0.24s ease; }
+.face .mouth { fill: transparent; stroke: var(--c); stroke-width: 2.4; stroke-linecap: round; d: path("M4 3 Q12 9 20 3"); transition: d 0.4s cubic-bezier(0.22, 1, 0.36, 1), stroke 0.24s ease, fill 0.24s ease; }
 .face[data-mood="listen"] .mouth { d: path("M7 4 Q12 6 17 4"); }
 .face[data-mood="think"] .mouth { d: path("M9 5 Q13 4 17 3"); }
-/* Speaking, the mouth opens with each step of the voice, as fast as syllables come: nearly shut
-   between them, and wide on the loudest. */
-.face[data-mood="speak"] .mouth { d: path("M7 3 Q12 4.5 17 3"); fill: var(--c); transition: d 0.07s ease-out, stroke 0.24s ease, fill 0.24s ease; }
+/* Speaking, the mouth opens with each step of the voice, softly, the way lips move: nearly shut
+   between syllables, and wide on the loudest. */
+.face[data-mood="speak"] .mouth { d: path("M7 3 Q12 4.5 17 3"); fill: var(--c); transition: d 0.12s cubic-bezier(0.3, 0, 0.2, 1), stroke 0.24s ease, fill 0.24s ease; }
 .face[data-mood="speak"][data-lv="1"] .mouth { d: path("M6 2.5 Q12 7 18 2.5"); }
 .face[data-mood="speak"][data-lv="2"] .mouth { d: path("M5.5 2 Q12 9.5 18.5 2"); }
 .face[data-mood="speak"][data-lv="3"] .mouth { d: path("M5 1.5 Q12 12 19 1.5"); }
@@ -200,12 +202,12 @@
 @keyframes ear-flick { 0%, 100% { rotate: 14deg; } 30% { rotate: 34deg; } 55% { rotate: 6deg; } }
 .face .cat { position: relative; display: flex; flex-direction: column; align-items: center; gap: 2px; padding-top: 4px; }
 .face .ears { position: absolute; top: -4px; left: 50%; width: 50px; margin-left: -25px; display: flex; justify-content: space-between; }
-.face .ear { width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-bottom: 7px solid var(--c); transform-origin: 50% 100%; transition: rotate 0.3s cubic-bezier(0.34, 1.36, 0.64, 1), border-bottom-color 0.24s ease; }
+.face .ear { width: 0; height: 0; border-left: 5px solid transparent; border-right: 5px solid transparent; border-bottom: 7px solid var(--c); transform-origin: 50% 100%; transition: rotate 0.35s cubic-bezier(0.22, 1, 0.36, 1), border-bottom-color 0.24s ease; }
 .face .ear.l { rotate: -14deg; }
 .face .ear.r { rotate: 14deg; }
 .face .c-eyes { display: flex; gap: 11px; }
 .face .c-eye { position: relative; width: 18px; height: 12px; border-radius: 60% 60% 60% 60% / 80% 80% 60% 60%; background: var(--c); box-shadow: 0 0 6px var(--c); overflow: hidden; }
-.face .slit { position: absolute; left: 50%; top: 1px; bottom: 1px; width: 4px; margin-left: -2px; border-radius: 50%; background: #000; transition: width 0.37s cubic-bezier(0.34, 1.36, 0.64, 1), margin 0.37s cubic-bezier(0.34, 1.36, 0.64, 1); }
+.face .slit { position: absolute; left: 50%; top: 1px; bottom: 1px; width: 4px; margin-left: -2px; border-radius: 50%; background: #000; transition: width 0.4s cubic-bezier(0.22, 1, 0.36, 1), margin 0.4s cubic-bezier(0.22, 1, 0.36, 1); }
 .face .nose { width: 5px; height: 4px; border-radius: 40% 40% 60% 60%; background: var(--c); }
 .face[data-play][data-face="cat"][data-mood="notice"] .ear.r { animation: ear-flick 0.5s ease-out 0.1s 1; }
 .face[data-face="cat"][data-mood="listen"] .slit { width: 6px; margin-left: -3px; }
@@ -222,7 +224,7 @@
 
 /* Horizon: the Meridian line, with two eyes sitting in it. */
 .face .hz { display: flex; align-items: center; }
-.face .seg { height: 2px; border-radius: 1px; background: var(--c); box-shadow: 0 0 6px var(--c); transform-origin: 50% 50%; transition: translate 0.37s cubic-bezier(0.34, 1.36, 0.64, 1), rotate 0.37s cubic-bezier(0.34, 1.36, 0.64, 1), scale 0.08s ease-out, background-color 0.24s ease; }
+.face .seg { height: 2px; border-radius: 1px; background: var(--c); box-shadow: 0 0 6px var(--c); transform-origin: 50% 50%; transition: translate 0.4s cubic-bezier(0.22, 1, 0.36, 1), rotate 0.4s cubic-bezier(0.22, 1, 0.36, 1), scale 0.12s cubic-bezier(0.3, 0, 0.2, 1), background-color 0.24s ease; }
 .face .seg.a,
 .face .seg.c { width: 18px; }
 .face .seg.b { width: 12px; }
@@ -254,7 +256,7 @@
 .face[data-face="moons"][data-mood="error"] .lit { translate: 7px 0; }
 .face[data-face="moons"][data-mood="sleepy"] .lit { translate: 11px 0; }
 .face[data-face="moons"][data-mood="asleep"] .lit { translate: 13px 0; }
-.face[data-play][data-face="moons"][data-mood="working"] .lit { animation: moon-wax 1.8s ease-in-out 2; }
+.face[data-play][data-face="moons"][data-mood="working"] .lit { animation: moon-wax 2.2s ease-in-out 1; }
 
 /* Reduced motion: nothing moves, only colour and shape change. */
 .face[data-reduced="true"],

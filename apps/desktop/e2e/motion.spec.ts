@@ -30,7 +30,8 @@ test("the smiley's mouth turns with its eyes", async ({ page }) => {
   await hooks(page, (w) => w.__meridian.updateSettings({ face: "smile" }));
   const mouth = island(page).locator('.face[data-face="smile"] .sm-mouth');
   await island(page).locator(".face").evaluate((f) => (f as HTMLElement).style.setProperty("--gx", "4px"));
-  await expect.poll(() => mouth.evaluate((m) => getComputedStyle(m).translate)).toMatch(/^2\.\d+px/);
+  // A little less far than the eyes: 40% of their 4 px.
+  await expect.poll(() => mouth.evaluate((m) => getComputedStyle(m).translate)).toMatch(/^1\.6px/);
 });
 
 test("dragged, the face leans the way it moves and squashes when let go", async ({ page }) => {

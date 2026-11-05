@@ -39,7 +39,7 @@ import { Face, type Mood } from "./faces";
 import type { LineSegment } from "./line";
 import { focusActivity } from "./live";
 import { activeSessions, MULTITASK_MAX_ROWS, TODO_MAX_ROWS, waitingApproval, waitingCount } from "./machine";
-import { AgentMark, Bars, Sparks, Transport } from "./marks";
+import { AgentMark, Bars, Transport } from "./marks";
 import { MeridianLine } from "./MeridianLine";
 import { Progress } from "./Progress";
 import { story, type LevelStory } from "../lib/levels";
@@ -557,7 +557,6 @@ function FinishedCard({ noticeId, title, session, reduced }: { noticeId: string;
       <div className="row">
         <span className="notice-face">
           <Mine mood="done" reduced={reduced} />
-          {!reduced && <Sparks />}
         </span>
         <span className="grow label truncate">{title}</span>
         <span className="meta tabular">{spent((session.endedAt ?? Date.now()) - turnStart(session))}</span>
@@ -668,7 +667,6 @@ export function NotificationView({ reduced }: { reduced: boolean }) {
     <div className="row pad-pill">
       <span className="notice-face">
         <Mine mood={mood} reduced={reduced} />
-        {notice.tone === "success" && !reduced && <Sparks />}
       </span>
       <button className="grow text-button stacked" onClick={() => { dismissNotice(notice.id); if (notice.update) openSettings("updates"); openPanel(notice.sessionId ? (sessions.find((s) => s.id === notice.sessionId)?.surface === "chat" ? "chat" : "agents") : undefined); }}>
         <span className="label truncate">{notice.title}</span>
@@ -820,6 +818,9 @@ const VOICE_STEPS = { listen: 2, speak: 3 };
 const VOICE_GATE = 0.12;
 /** Quiet for this long after speaking counts as a pause. */
 const PAUSE_BLINK_MS = 350;
+/** How far past a step the voice must be to change it, and how long a step holds at least. */
+const STEP_MARGIN = 0.75;
+const STEP_HOLD_MS = 90;
 
 /** Bars that follow the real sound, so it is plain the app can hear you. The face beside them
  *  follows it too, rising in 25 ms and falling in 110 ms, and only redraws when its step changes. */
@@ -834,6 +835,8 @@ function Wave({ tone, reduced, steps, listening }: { tone: string; reduced: bool
     // Listening, it blinks once when you pause, the way someone does while waiting for the rest.
     let spokeAt = 0;
     let blinked = true;
+    let shownStep = 0;
+    let changedAt = 0;
     const voice = box.current?.closest(".voice");
     const draw = (now: number) => {
       frame = requestAnimationFrame(draw);
@@ -846,7 +849,12 @@ function Wave({ tone, reduced, steps, listening }: { tone: string; reduced: bool
       heights.shift();
       box.current?.childNodes.forEach((bar, i) => ((bar as HTMLElement).style.scale = `1 ${heights[i]}`));
       const face = voice?.querySelector<HTMLElement>(".face");
-      const step = String(level < VOICE_GATE ? 0 : Math.min(steps, Math.round(level * steps)));
+      // A step changes only once the voice is clearly past it, and holds a moment, so the face does
+      // not flicker on a sound that hovers at an edge.
+      const raw = level < VOICE_GATE ? 0 : Math.min(steps, level * steps);
+      const next = Math.abs(raw - shownStep) >= STEP_MARGIN ? Math.round(raw) : shownStep;
+      if (next !== shownStep && now - changedAt >= STEP_HOLD_MS) [shownStep, changedAt] = [next, now];
+      const step = String(shownStep);
       if (face && face.dataset.lv !== step) face.dataset.lv = step;
       if (level >= VOICE_GATE) [spokeAt, blinked] = [now, false];
       else if (listening && face && !blinked && now - spokeAt > PAUSE_BLINK_MS) {

@@ -1,5 +1,23 @@
 # Development ledger
 
+## 2026-11-05: Calmer, more natural motion
+
+The owner said the motion felt cluttered and asked for it to be more lifelike. See D70, last paragraph.
+
+- **Measured first.** A probe counted every animation and transition the island started in each common state, through the browser's
+  animation events. The eyes chasing the pointer were most of it, then overshooting shape changes and the burst of sparks.
+- **The eyes and the core changed together**: the core sends gaze only for a pointer near the island, in whole CSS pixels, so the
+  page is not even woken for one far away.
+
+### Proved
+
+The same probe before and after: at rest 10 starts in 15 s to 4, pointer wandering 138 to 48, an approval waiting 4 to 2, a finished
+card 46 to 32. Core: the eyes look only at a pointer near the island.
+
+### Not proved
+
+- How it feels on the owner's screen, which only the owner can judge.
+
 ## 2026-11-05: The rest of the motion, and a smiley that talks
 
 After 0.6.0 the owner reported that the smiley's mouth does not move, and asked for the motion left over from the boards. See D70.

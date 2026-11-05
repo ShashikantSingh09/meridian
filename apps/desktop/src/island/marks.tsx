@@ -118,24 +118,3 @@ export function Transport({ track, size = 24 }: { track: Track; size?: number })
   );
 }
 
-const SPARK_COLORS = ["var(--state-success)", "var(--state-notice)", "var(--state-listening)", "#ff8fd0"];
-
-/** A one-shot burst when something finishes. */
-export function Sparks() {
-  const bits = useMemo(
-    () =>
-      Array.from({ length: 12 }, (_, i) => {
-        const angle = (i / 12) * Math.PI * 2;
-        const reach = 22 + (i % 3) * 12;
-        return { dx: Math.round(Math.cos(angle) * reach), dy: Math.round(Math.sin(angle) * reach * 0.8), delay: (i % 4) * 0.02, color: SPARK_COLORS[i % 4] };
-      }),
-    [],
-  );
-  return (
-    <span className="sparks" aria-hidden="true">
-      {bits.map((b, i) => (
-        <i key={i} style={{ "--dx": `${b.dx}px`, "--dy": `${b.dy}px`, background: b.color, animationDelay: `${b.delay}s` } as React.CSSProperties} />
-      ))}
-    </span>
-  );
-}
