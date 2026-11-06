@@ -15,11 +15,17 @@
 //! [`Reader`] and [`Writer`] traits: Windows has [`Uia`], and a Mac reader and
 //! writer can implement the same two traits.
 
+// The reader's pure rules (kinds, labels, split codes, the form's scope) have only the Windows
+// reader to use them until a Mac one is written.
+#![cfg_attr(not(windows), allow(dead_code))]
+
+mod choices;
 mod finish;
 mod form;
 mod mapping;
 mod model;
 mod policy;
+mod scope;
 mod undo;
 #[cfg(windows)]
 mod win;
@@ -33,7 +39,7 @@ pub mod steps {
     //! Finish this for me's rules for each step, by name: `steps::press`, `steps::fill`, `steps::go`, `steps::landed`.
     pub use crate::finish::{fill, go, landed, press};
 }
-pub use form::{Form, Given, Lookup, Origin, Row, State};
+pub use form::{Choice, Form, Given, Lookup, Origin, Row, State};
 pub use mapping::{check, id_kind, is_id_key, Answer, Checked, Fill, Mapping, Problem, Source, ID_KEYS, MAX_TEXT};
 pub use model::{site_from_address, Bounds, Field, FieldKind, Target, MAX_VALUE, MIN_SIDE};
 pub use policy::{access, is_browser, refusal, Access, Refusal};
@@ -81,8 +87,9 @@ pub trait Reader {
     fn target(&mut self) -> Result<Target, FillError>;
     /// The box with the keyboard cursor, for Write here.
     fn focused(&mut self) -> Result<Field, FillError>;
-    /// Every box you can see in the window, in page order, for Fill this form.
-    /// Hidden, off-screen and tiny boxes are left out.
+    /// The boxes you can see of the form in front, in page order, for Fill this form: the form
+    /// around the cursor, or with no cursor in a box the biggest one, never the page's search,
+    /// newsletter, cookie or chat boxes (see `scope`). Hidden, off-screen and tiny boxes are left out.
     fn fields(&mut self) -> Result<Vec<Field>, FillError>;
     /// Up to `limit` characters of the window's text, for context. After
     /// [`Reader::focused`], the text leading up to that box: the conversation above a reply.

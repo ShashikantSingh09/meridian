@@ -100,6 +100,33 @@ const sampleForm = (): FormSummary => ({
   stopped: null,
   note: null,
 });
+/** Naukri's sign-up form, as the owner tried it: name and mobile from Your details, the email not added
+ *  yet, the password the user's, and one Work status question with its two choice cards. */
+const sampleSignUp = (): FormSummary => ({
+  site: "naukri.com",
+  filled: 2,
+  total: 5,
+  need: 3,
+  rows: [
+    { ...formRow(0, "Full name", "filled", "Ravi Sharma", "details"), kind: "plain-text" },
+    { ...formRow(1, "Email ID", "needs-you", "", undefined, "", "Not in Your details"), kind: "email", key: "email" },
+    { ...formRow(2, "Password", "yours", "", undefined, "", "Password boxes are yours to fill."), kind: "password" },
+    { ...formRow(3, "Mobile number", "filled", "+91 98201 44317", "details"), kind: "phone" },
+    {
+      ...formRow(4, "Work status", "needs-you", "", undefined, "", "Not in Your details"),
+      kind: "radio",
+      choices: [
+        { field: 4, label: "I'm experienced" },
+        { field: 5, label: "I'm a fresher" },
+      ],
+    },
+  ],
+  ids: [],
+  details: null,
+  canUndo: true,
+  stopped: null,
+  note: null,
+});
 const formOutcomes: HereOutcome[] = [];
 const formUndos: FormUndone[] = [];
 let formOffered = false;
@@ -107,9 +134,22 @@ let formPicked = false;
 let formAsked: ((start: { instruction: string }) => void) | null = null;
 let formProgressed: ((progress: FormProgress) => void) | null = null;
 let formEnded: (() => void) | null = null;
+let formChanged: ((form: FormSummary) => void) | null = null;
+/** The form as the stand-in core last left it, for answers from the island. */
+let formShown: FormSummary = sampleForm();
+let keepRefusal: string | null = null;
 const nextForm = async () => {
   if (hereHeld) await hereHeld;
-  return formOutcomes.shift() ?? ({ outcome: "filled", form: sampleForm() } as HereOutcome);
+  const outcome = formOutcomes.shift() ?? ({ outcome: "filled", form: sampleForm() } as HereOutcome);
+  if (outcome.outcome === "filled") formShown = structuredClone(outcome.form);
+  return outcome;
+};
+/** The form with one row changed, counted again as the core counts it. */
+const changeRow = (field: number, change: (row: FormRow) => FormRow) => {
+  const rows = formShown.rows.map((row) => (row.field === field || row.choices?.some((choice) => choice.field === field) ? change(row) : row));
+  const count = (states: FormRow["state"][]) => rows.filter((row) => states.includes(row.state)).length;
+  formShown = { ...formShown, rows, filled: count(["filled"]), need: count(["yours", "needs-you", "ask-first"]) };
+  return structuredClone(formShown);
 };
 const answerWith = async (send: (event: AgentEvent) => void) => {
   const answer = nextAnswer!;
@@ -461,6 +501,24 @@ export const mock = {
     return formUndos.shift() ?? { putBack: field === null ? 8 : 1, kept: [], form };
   },
   formGo: async (field: number) => void hereCalls.push(`form go ${field}`),
+  async formAnswer(field: number, text: string) {
+    hereCalls.push(`form answer ${field} ${text}`);
+    return changeRow(field, (row) => {
+      const choice = row.choices?.find((c) => c.field === field);
+      return { ...row, field, state: "filled", origin: "typed", value: choice?.label ?? text, why: "" };
+    });
+  },
+  async formKeep(field: number) {
+    hereCalls.push(`form keep ${field}`);
+    if (keepRefusal) throw new Error(keepRefusal);
+    return changeRow(field, (row) => ({ ...row, key: undefined }));
+  },
+  onFormChanged: (handler: (form: FormSummary) => void) => void (formChanged = handler),
+  /** The user fills a box that needed them, on the page itself, as the core sees it. */
+  fillOnThePage: (field: number) => formChanged?.(changeRow(field, (row) => ({ ...row, state: "by-you", why: "" }))),
+  /** Add to Your details says why it cannot keep that. */
+  refuseKeep: (why: string | null) => void (keepRefusal = why),
+  sampleSignUp,
   formDone: async () => void hereCalls.push("form done"),
   formPick: async () => formPicked,
   onFormStart: (handler: (start: { instruction: string }) => void) => void (formAsked = handler),

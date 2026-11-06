@@ -54,8 +54,10 @@ impl Bounds {
 pub struct Field {
     /// Stable for one read: the box's place in page order. A new read starts again.
     pub id: u32,
-    /// What the box is called: its name, else the label pointing at it, else its placeholder.
+    /// What the box is called: its name, else the label pointing at it, else its placeholder, else
+    /// the words just before it on the page (see `label_of`). "One-time code" for a cell of a split code.
     pub label: String,
+    /// Its placeholder, else the hint the page ties to it (aria-describedby).
     pub placeholder: String,
     /// The author's id for the box (the HTML id on the web), which often names its purpose.
     pub automation_id: String,
@@ -142,6 +144,186 @@ const UPLOAD: &[&str] = &[
     "upload", "attach", "attachment", "choose file", "choose files", "browse", "select file", "file", "अपलोड",
     "संलग्न", "फ़ाइल", "फाइल",
 ];
+
+/// The platform's own name for a control, as far as telling a box's kind needs. Windows maps UI
+/// Automation's control types onto these; a Mac reader would map AX roles.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum Control {
+    Edit,
+    Document,
+    /// A group, pane or custom control: a container, or a bare editable area.
+    Group,
+    ComboBox,
+    List,
+    CheckBox,
+    RadioButton,
+    Spinner,
+    Button,
+    Hyperlink,
+    TabItem,
+    MenuItem,
+    ListItem,
+    TreeItem,
+    #[default]
+    Other,
+}
+
+/// What the platform says about one control.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct Props {
+    pub control: Control,
+    /// The page's role for it, lowercase: "textbox", "searchbox", "combobox", "switch", "list". Chrome,
+    /// Edge and Firefox give it in every language. Empty outside a web page.
+    pub role: String,
+    /// The page's ARIA states as the browser lists them, such as "haspopup=listbox;expanded=false".
+    pub aria: String,
+    /// The control type in the user's language, lowercase. Only Chrome's "date picker" is read from it.
+    pub localized: String,
+    pub class: String,
+    pub automation_id: String,
+    pub password: bool,
+    pub value_pattern: bool,
+    pub read_only: bool,
+    /// Text boxes and documents have the text pattern; drop-downs, lists and buttons never do.
+    pub text_pattern: bool,
+    pub multiline: bool,
+    pub selectable: bool,
+    pub focusable: bool,
+    pub focused: bool,
+}
+
+/// Pickers that look like a text box but keep only a choice from their list: what is typed and not
+/// picked is gone once the box loses the cursor, so typing would look filled and then empty. Known by
+/// the class or id their library gives them (MUI Autocomplete, Ant Design, Select2, Chosen, vue-select,
+/// React-Select, Choices.js).
+const PICKERS: &[&str] = &["muiautocomplete", "ant-select", "select2", "chosen-search", "vs__search", "react-select", "choices__input"];
+
+fn picker(p: &Props) -> bool {
+    let named = format!("{} {}", p.class, p.automation_id).to_lowercase();
+    PICKERS.iter().any(|marker| named.contains(marker))
+}
+
+/// A box's kind from what the platform says about it, or None when it is not a box. `children` is
+/// asked only for a many-line text box, since it costs a round trip.
+pub(crate) fn kind_of(p: &Props, children: impl FnOnce() -> bool) -> Option<FieldKind> {
+    let role = p.role.as_str();
+    let kind = match p.control {
+        // A switch is a tick box that slides. Chrome and Edge call it a button with a toggle.
+        _ if role == "switch" => FieldKind::Checkbox,
+        Control::Edit if p.password => FieldKind::Password,
+        // A contenteditable editor has its paragraphs as children; a textarea has none.
+        Control::Edit if p.class.contains("RichEdit") || (p.multiline && children()) => FieldKind::RichText,
+        Control::Edit if p.multiline => FieldKind::MultiLine,
+        Control::Edit if p.localized.contains("date") || p.localized.contains("time") => FieldKind::Date,
+        Control::Edit if role == "spinbutton" => FieldKind::Number,
+        Control::Edit => FieldKind::PlainText,
+        // Word's body, or a page's own editable area. A whole web page is not a box.
+        Control::Document if p.focused && p.automation_id != "RootWebArea" => FieldKind::RichText,
+        // A bare contenteditable shows as a group that holds text.
+        Control::Group if p.focused && p.text_pattern => FieldKind::RichText,
+        // An input with suggestions, such as an email box offering domains, reports as a combo box. It
+        // takes typing, so it has the text pattern; a drop-down of fixed choices never does. On a page
+        // the value pattern cannot tell them apart: Chrome gives a plain <select> one that is not read-only.
+        Control::ComboBox if p.text_pattern && !picker(p) => FieldKind::PlainText,
+        // A desktop app's drop-down you can type in says so in its value.
+        Control::ComboBox if role.is_empty() && p.value_pattern && !p.read_only => FieldKind::PlainText,
+        Control::ComboBox => FieldKind::List,
+        // A page's bulleted list, and the open list under a <select>, are words, not boxes.
+        Control::List if role == "list" => return None,
+        // A list you can pick from can be selected in or focused.
+        Control::List if p.selectable || p.focusable => FieldKind::List,
+        Control::List => return None,
+        Control::CheckBox => FieldKind::Checkbox,
+        Control::RadioButton => FieldKind::Radio,
+        Control::Spinner => FieldKind::Number,
+        // A button that opens a list of choices is a drop-down the page built itself (Headless UI, MUI).
+        // A button with aria-pressed stays a button: "Like" and "Follow" are toggles too.
+        Control::Button if p.aria.split(';').any(|state| state.trim() == "haspopup=listbox") => FieldKind::List,
+        Control::Button => FieldKind::Button,
+        // Only Finish this for me asks for these.
+        Control::Hyperlink => FieldKind::Link,
+        Control::TabItem => FieldKind::Tab,
+        Control::MenuItem => FieldKind::MenuItem,
+        Control::ListItem | Control::TreeItem => FieldKind::Item,
+        Control::Group | Control::Document | Control::Other => return None,
+    };
+    // A link's address is read-only, and is what tells where it goes.
+    if p.read_only && !matches!(kind, FieldKind::List | FieldKind::Link | FieldKind::Tab | FieldKind::MenuItem | FieldKind::Item) {
+        return None;
+    }
+    Some(kind)
+}
+
+/// Text that says something: a lone "*" or ":" is not a label.
+pub(crate) fn says(text: &str) -> bool {
+    text.chars().any(char::is_alphanumeric)
+}
+
+/// What a box is called: its accessible name, else the element that labels it, else its placeholder,
+/// else the text just before it on the page. The later two cost round trips, so each is asked only
+/// when everything before it said nothing. `hint` is what an unnamed drop-down shows ("Month"),
+/// added to the text before it, so a three-part date reads "Date of birth: Month".
+pub(crate) fn label_of(name: &str, placeholder: &str, hint: Option<&str>, labelled_by: impl FnOnce() -> String, nearby: impl FnOnce() -> String) -> String {
+    if says(name) {
+        return name.trim().to_string();
+    }
+    let by = labelled_by();
+    if says(&by) {
+        return by.trim().to_string();
+    }
+    if says(placeholder) {
+        return placeholder.trim().to_string();
+    }
+    let near = nearby();
+    match (says(&near), hint) {
+        (true, Some(hint)) => format!("{}: {hint}", near.trim()),
+        (true, None) => near.trim().to_string(),
+        (false, Some(hint)) => hint.to_string(),
+        (false, None) => String::new(),
+    }
+}
+
+const PROMPTS: &[&str] = &[
+    "day", "month", "year", "dd", "mm", "yyyy", "yy", "select", "choose", "pick", "दिन", "माह", "महीना", "वर्ष",
+    "साल", "चुनें",
+];
+
+/// What an unnamed drop-down shows that says what it asks: its first choice when that is a prompt
+/// ("Month", "Select city"), or "Country code" for the "+91" beside a phone box. A real choice is no hint.
+pub(crate) fn list_hint(value: &str) -> Option<String> {
+    let value = value.trim();
+    let digits = value.chars().filter(char::is_ascii_digit).count();
+    let dial = value.split('+').nth(1).is_some_and(|rest| rest.starts_with(|c: char| c.is_ascii_digit()));
+    if dial && (1..=4).contains(&digits) && value.chars().count() <= 24 {
+        return Some("Country code".into());
+    }
+    has_any(&words(value), PROMPTS).then(|| value.to_string())
+}
+
+/// A label that marks its box as needed: "Email *", "* Full name", "Phone (required)", "अनिवार्य".
+pub(crate) fn marked_required(label: &str) -> bool {
+    let label = label.trim();
+    label.starts_with('*') || label.ends_with('*') || label.contains(" *") || has_any(&words(label), &["required", "mandatory", "अनिवार्य", "आवश्यक"])
+}
+
+/// Where a styled tick box really is. Pages shrink the real input to one pixel and draw a card, a
+/// chip or a switch around it, so a tiny named tick counts when its parent is on screen and holds
+/// it. A tiny tick in a hidden or off-screen part stays out, as a trap would.
+// ponytail: a parent taller than this is the whole group, not the card, so the outline goes on the
+// tick's own spot, grown to a size you can see. Measure on real choice cards if outlines look wrong.
+const CARD_HEIGHT: i32 = 240;
+
+pub(crate) fn tick_bounds(own: Bounds, parent: Option<Bounds>) -> Option<Bounds> {
+    if own.big_enough() {
+        return Some(own);
+    }
+    let parent = parent.filter(|parent| {
+        parent.big_enough()
+            && (parent.x - 2..=parent.x + parent.width + 2).contains(&own.x)
+            && (parent.y - 2..=parent.y + parent.height + 2).contains(&own.y)
+    })?;
+    Some(if parent.height <= CARD_HEIGHT { parent } else { Bounds { width: own.width.max(16), height: own.height.max(16), ..own } })
+}
 
 /// Web pages do not tell UI Automation an input's type, so email, phone and date
 /// boxes are known by their words. A file input shows up as a button.
@@ -241,6 +423,139 @@ mod tests {
         let mut draft = field(0, "Message", FieldKind::RichText);
         draft.value = "a".repeat(MAX_VALUE + 10);
         assert_eq!(draft.finish().value.len(), MAX_VALUE);
+    }
+
+    fn web(control: Control, role: &str) -> Props {
+        Props { control, role: role.into(), ..Props::default() }
+    }
+
+    fn kind(p: Props) -> Option<FieldKind> {
+        kind_of(&p, || false)
+    }
+
+    #[test]
+    fn a_select_is_a_list_even_with_a_value_chrome_says_is_not_read_only() {
+        let select = Props { value_pattern: true, ..web(Control::ComboBox, "combobox") };
+        assert_eq!(kind(select), Some(FieldKind::List));
+        let select_only = Props { value_pattern: true, aria: "expanded=false;haspopup=listbox".into(), ..web(Control::ComboBox, "combobox") };
+        assert_eq!(kind(select_only), Some(FieldKind::List), "a div with role=combobox and no input");
+    }
+
+    #[test]
+    fn an_input_with_suggestions_is_a_text_box() {
+        let email = Props { value_pattern: true, text_pattern: true, ..web(Control::ComboBox, "combobox") };
+        assert_eq!(kind(email), Some(FieldKind::PlainText));
+        // A desktop app's drop-down you can type in has no web role.
+        let desktop = Props { value_pattern: true, ..web(Control::ComboBox, "") };
+        assert_eq!(kind(desktop), Some(FieldKind::PlainText));
+        let desktop_fixed = Props { value_pattern: true, read_only: true, ..web(Control::ComboBox, "") };
+        assert_eq!(kind(desktop_fixed), Some(FieldKind::List));
+        // A read-only input that only opens a list, as Ant Design builds its Select.
+        let ant = Props { value_pattern: true, read_only: true, ..web(Control::ComboBox, "combobox") };
+        assert_eq!(kind(ant), Some(FieldKind::List));
+    }
+
+    #[test]
+    fn a_picker_that_keeps_only_its_choices_is_a_list_though_it_takes_typing() {
+        let typed = |class: &str, id: &str| Props { value_pattern: true, text_pattern: true, class: class.into(), automation_id: id.into(), ..web(Control::ComboBox, "combobox") };
+        assert_eq!(kind(typed("MuiAutocomplete-input MuiInputBase-input", "skills")), Some(FieldKind::List));
+        assert_eq!(kind(typed("", "react-select-2-input")), Some(FieldKind::List));
+        assert_eq!(kind(typed("select2-search__field", "")), Some(FieldKind::List));
+        assert_eq!(kind(typed("form-control", "work-email")), Some(FieldKind::PlainText));
+    }
+
+    #[test]
+    fn a_pages_bulleted_list_is_words_and_a_listbox_is_a_box() {
+        assert_eq!(kind(Props { focusable: true, ..web(Control::List, "list") }), None, "even a focusable <ul>");
+        assert_eq!(kind(Props { selectable: true, ..web(Control::List, "listbox") }), Some(FieldKind::List));
+        assert_eq!(kind(web(Control::List, "")), None);
+        assert_eq!(kind(Props { selectable: true, ..web(Control::List, "") }), Some(FieldKind::List));
+    }
+
+    #[test]
+    fn a_switch_is_a_tick_box_and_a_pressed_button_stays_a_button() {
+        assert_eq!(kind(web(Control::Button, "switch")), Some(FieldKind::Checkbox));
+        assert_eq!(kind(web(Control::CheckBox, "switch")), Some(FieldKind::Checkbox), "Firefox");
+        let like = Props { aria: "pressed=false".into(), ..web(Control::Button, "button") };
+        assert_eq!(kind(like), Some(FieldKind::Button));
+    }
+
+    #[test]
+    fn a_button_that_opens_a_list_of_choices_is_a_drop_down() {
+        let listbox = Props { aria: "expanded=false;haspopup=listbox".into(), ..web(Control::Button, "button") };
+        assert_eq!(kind(listbox), Some(FieldKind::List));
+        let menu = Props { aria: "haspopup=menu".into(), ..web(Control::Button, "button") };
+        assert_eq!(kind(menu), Some(FieldKind::Button), "a menu button is not a list");
+    }
+
+    #[test]
+    fn text_boxes_are_told_apart() {
+        assert_eq!(kind(web(Control::Edit, "searchbox")), Some(FieldKind::PlainText));
+        assert_eq!(kind(Props { password: true, ..web(Control::Edit, "textbox") }), Some(FieldKind::Password));
+        assert_eq!(kind(Props { multiline: true, ..web(Control::Edit, "textbox") }), Some(FieldKind::MultiLine));
+        assert_eq!(kind_of(&Props { multiline: true, ..web(Control::Edit, "textbox") }, || true), Some(FieldKind::RichText));
+        assert_eq!(kind(Props { localized: "date picker".into(), ..web(Control::Edit, "textbox") }), Some(FieldKind::Date));
+        assert_eq!(kind(web(Control::Edit, "spinbutton")), Some(FieldKind::Number));
+        assert_eq!(kind(Props { read_only: true, ..web(Control::Edit, "textbox") }), None, "a read-only box is not filled");
+        assert_eq!(kind(web(Control::Group, "group")), None);
+        assert_eq!(kind(Props { focused: true, text_pattern: true, ..web(Control::Group, "group") }), Some(FieldKind::RichText));
+        assert_eq!(kind(Props { focused: true, automation_id: "RootWebArea".into(), ..web(Control::Document, "document") }), None);
+    }
+
+    #[test]
+    fn a_many_line_box_asks_for_its_children_only_when_it_matters() {
+        let asked = std::cell::Cell::new(false);
+        kind_of(&web(Control::Edit, "textbox"), || {
+            asked.set(true);
+            true
+        });
+        assert!(!asked.get());
+    }
+
+    #[test]
+    fn the_label_is_the_name_then_labelled_by_then_placeholder_then_the_text_before() {
+        let never = || -> String { panic!("not asked") };
+        assert_eq!(label_of("Full name", "Ravi", None, never, never), "Full name");
+        assert_eq!(label_of("", "you@example.com", None, || "Email".into(), never), "Email");
+        assert_eq!(label_of(" * ", "you@example.com", None, String::new, never), "you@example.com", "a lone star is not a label");
+        assert_eq!(label_of("", "", None, String::new, || "Enter the code we sent".into()), "Enter the code we sent");
+        assert_eq!(label_of("", "", Some("Month"), String::new, || "Date of birth".into()), "Date of birth: Month");
+        assert_eq!(label_of("", "", Some("Year"), String::new, String::new), "Year");
+        assert_eq!(label_of("", "", None, String::new, String::new), "");
+    }
+
+    #[test]
+    fn an_unnamed_drop_down_says_what_it_asks_only_by_a_prompt() {
+        assert_eq!(list_hint("Month").as_deref(), Some("Month"));
+        assert_eq!(list_hint("Select city").as_deref(), Some("Select city"));
+        assert_eq!(list_hint("दिन").as_deref(), Some("दिन"));
+        assert_eq!(list_hint("+91").as_deref(), Some("Country code"));
+        assert_eq!(list_hint("IN +91").as_deref(), Some("Country code"));
+        assert_eq!(list_hint("March"), None, "a real choice");
+        assert_eq!(list_hint("+91 98201 44317"), None, "a phone number is not a code");
+        assert_eq!(list_hint(""), None);
+    }
+
+    #[test]
+    fn a_star_or_a_word_marks_a_box_as_needed() {
+        for label in ["Email *", "* Full name", "Phone (required)", "मोबाइल नंबर (अनिवार्य)", "Name*"] {
+            assert!(marked_required(label), "{label}");
+        }
+        for label in ["Email", "LinkedIn (optional)", "Requirements met"] {
+            assert!(!marked_required(label), "{label}");
+        }
+    }
+
+    #[test]
+    fn a_one_pixel_tick_inside_a_card_on_screen_counts_and_one_alone_does_not() {
+        let tiny = Bounds { x: 510, y: 470, width: 1, height: 1 };
+        let card = Bounds { x: 500, y: 460, width: 200, height: 60 };
+        assert_eq!(tick_bounds(tiny, Some(card)), Some(card));
+        let group = Bounds { x: 480, y: 400, width: 800, height: 400 };
+        assert_eq!(tick_bounds(tiny, Some(group)), Some(Bounds { x: 510, y: 470, width: 16, height: 16 }));
+        assert_eq!(tick_bounds(tiny, None), None, "its parent is off screen");
+        assert_eq!(tick_bounds(tiny, Some(Bounds { x: -10000, y: 0, width: 200, height: 60 })), None, "its parent is elsewhere");
+        assert_eq!(tick_bounds(card, None), Some(card), "a tick you can see is where it is");
     }
 
     #[test]

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { geometryFor } from "../island/machine";
-import { both, filledLine, keptLine, listedRows, listRows, LIST_ROWS, sayIt, sourceOf } from "./form";
+import { answerWith, both, detailName, filledLine, keptLine, listedRows, listRows, LIST_ROWS, pillLine, sayIt, sourceOf, typedHere } from "./form";
 import { stepFor } from "./here";
 import type { FormRow, FormSummary } from "./types";
 
@@ -71,7 +71,7 @@ describe("Fill this form on the island", () => {
     const list = geometryFor("here", { ...ctx, here: "list", formRows: 11 });
     expect(list.w).toBe(560);
     expect(list.h).toBeGreaterThan(geometryFor("here", { ...ctx, here: "list", formRows: 5 }).h);
-    expect(geometryFor("here", { ...ctx, here: "filled" })).toMatchObject({ w: 420, h: 46 });
+    expect(geometryFor("here", { ...ctx, hovered: true, here: "filled" })).toMatchObject({ w: 420, h: 46 });
     expect(geometryFor("here", { ...ctx, here: "filling" }).h).toBe(46);
     for (const card of ["ids", "details"]) expect(geometryFor("here", { ...ctx, here: card }).w).toBe(430);
   });
@@ -94,5 +94,53 @@ describe("Fill this form on the island", () => {
     expect(sayIt("Notice period")).toBe("notice period");
     expect(sayIt("Expected salary (₹ a year)")).toBe("expected salary");
     expect(sayIt("Full name *")).toBe("full name");
+  });
+});
+
+/** Naukri's sign-up form: the email not in Your details, the password, and Work status as one question. */
+const signUp = (): FormSummary => ({
+  ...application(),
+  site: "naukri.com",
+  filled: 2,
+  total: 5,
+  need: 3,
+  rows: [
+    row(0, "Full name", "filled", "details"),
+    { ...row(1, "Email ID", "needs-you", undefined, "", "Not in Your details"), kind: "email", key: "email" },
+    { ...row(2, "Password", "yours"), kind: "password" },
+    row(3, "Mobile number", "filled", "details"),
+    { ...row(4, "Work status", "needs-you"), kind: "radio", choices: [{ field: 4, label: "I'm experienced" }, { field: 5, label: "I'm a fresher" }] },
+  ],
+});
+
+describe("Fill this form out of the way, and answered on the island", () => {
+  it("waits as a small pill saying how many need you, and opens to the line under the pointer", () => {
+    expect(pillLine(signUp())).toBe("3 need you");
+    expect(pillLine({ ...signUp(), need: 1 })).toBe("1 needs you");
+    expect(pillLine({ ...signUp(), need: 0 })).toBe("Filled");
+    const pill = geometryFor("here", { ...ctx, here: "filled" });
+    expect(pill).toMatchObject({ h: 46 });
+    expect(pill.w).toBeLessThan(geometryFor("here", { ...ctx, hovered: true, here: "filled" }).w);
+  });
+
+  it("answers a box with a box for words, a question with a button a choice, and a box of yours not at all", () => {
+    const [name, email, password, , status] = signUp().rows;
+    expect([name, email, password, status].map((r) => answerWith(r!))).toEqual([null, "words", null, "choices"]);
+    expect(answerWith({ ...row(6, "Country", "needs-you"), kind: "list" })).toBeNull();
+    expect(answerWith({ ...row(7, "PAN", "ask-first") })).toBeNull();
+    expect(answerWith({ ...row(8, "Notice period", "needs-you"), kind: "plain-text" })).toBe("words");
+  });
+
+  it("keeps a box answered on the island in the short list, for Add to Your details", () => {
+    const form = signUp();
+    form.rows[1] = { ...form.rows[1]!, state: "filled", origin: "typed", value: "ravi@example.com" };
+    expect(listedRows(form, false).rows.map((r) => r.label)).toEqual(["Email ID", "Password", "Work status"]);
+    expect(typedHere(form.rows[1]!)).toBe(true);
+    expect(sourceOf(form.rows[1]!)).toBe("You typed");
+    expect(detailName("address.city")).toBe("city");
+  });
+
+  it("counts the choices of one question as one row", () => {
+    expect(listRows(signUp(), false)).toBe(3 + 2);
   });
 });

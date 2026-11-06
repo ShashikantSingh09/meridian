@@ -1,18 +1,25 @@
 // Fill this form on the island, from the Fill this form board (figures 2 and 3, Show, When it does not
 // have a value, Undo) and the Your details board (Add your details once?): a line while the boxes light
-// up one by one, a line with Undo and Show once they are in, the list of every box and where its value
-// came from, and the cards for an ID number and for starting Your details.
+// up one by one, a small pill once they are in that opens to the line with Undo and Show under the
+// pointer, the list of every box and where its value came from, and the cards for an ID number and for
+// starting Your details. A box that needs the user takes its answer right on the list: a box to type in,
+// or a button for each choice of a question, and what was typed can be added to Your details.
 
-import { addDetails, allowIds, both, closeList, filledLine, goToBox, keptLine, listedRows, notNowDetails, sayIt, showAllRows, showList, skipIds, sourceOf, undoBox, undoForm } from "../lib/form";
+import { useEffect, useRef, useState } from "react";
+import { addDetails, allowIds, answerBox, answerWith, both, closeList, detailName, filledLine, goToBox, keepBox, keptLine, listedRows, notNowDetails, pillLine, sayIt, showAllRows, showList, skipIds, sourceOf, typedHere, undoBox, undoForm } from "../lib/form";
 import type { HereState, HereStep } from "../lib/here";
+import { islandTyping } from "../lib/store";
 import type { FormRow } from "../lib/types";
 import { Button, Card, Eyes, Working } from "./here";
 import "./form.css";
 
 export const FORM_STEPS: ReadonlySet<HereStep> = new Set(["filling", "filled", "list", "undone", "ids", "details"]);
 
-const Small = ({ label, onClick, undo }: { label: string; onClick: () => void; undo?: boolean }) => (
-  <button className={undo ? "here-b form-sm form-undo" : "here-b form-sm"} onClick={(e) => { e.stopPropagation(); onClick(); }}>
+/** The longest answer one box takes from the island, as from the AI. */
+const TYPED_MOST = 5000;
+
+const Small = ({ label, onClick, undo, title }: { label: string; onClick: () => void; undo?: boolean; title?: string }) => (
+  <button className={undo ? "here-b form-sm form-undo" : "here-b form-sm"} title={title} onClick={(e) => { e.stopPropagation(); onClick(); }}>
     {label}
   </button>
 );
@@ -36,14 +43,65 @@ function Filling({ here, reduced }: { here: HereState; reduced: boolean }) {
   );
 }
 
-/** What a row says on the right: where its value came from, or Go to it for a box left for the user. */
+/** A box on the row for the user's own answer. Enter gives the keyboard back to the page, then the core
+ *  puts the words in that box. The island takes the keyboard only while this box is in use. */
+function Words({ row }: { row: FormRow }) {
+  const [text, setText] = useState("");
+  const took = useRef(false);
+  const keys = useRef((on: boolean) => {
+    if (took.current === on) return;
+    took.current = on;
+    void islandTyping(on);
+  }).current;
+  useEffect(() => () => keys(false), [keys]);
+  const send = () => {
+    // The answer gives the keyboard back itself, before the words go in.
+    took.current = false;
+    void answerBox(row.field, text);
+  };
+  return (
+    <form className="form-v form-answer" onSubmit={(e) => { e.preventDefault(); if (text.trim()) send(); }}>
+      <input
+        aria-label={`Answer for ${row.label}`}
+        placeholder={row.why || "Type it here"}
+        title={row.why || undefined}
+        value={text}
+        maxLength={TYPED_MOST}
+        onChange={(e) => setText(e.target.value)}
+        // Pressing in the box is typing, not the start of a drag.
+        onPointerDown={(e) => { e.stopPropagation(); keys(true); }}
+        onBlur={() => keys(false)}
+        onKeyDown={(e) => e.key === "Escape" && e.currentTarget.blur()}
+      />
+    </form>
+  );
+}
+
+/** A button for each choice of a question. One click is one answer, put in by the core. */
+const Choices = ({ row }: { row: FormRow }) => (
+  <span className="form-v form-choices" role="group" aria-label={row.label}>
+    {row.choices!.map((choice) => (
+      <Small key={choice.field} label={choice.label} onClick={() => void answerBox(choice.field, "yes")} />
+    ))}
+  </span>
+);
+
+/** What a row says on the right: where its value came from, or Go to it for a box left for the user. A
+ *  box answered on the island offers to keep what was typed in Your details, when it has nothing for it. */
 function RowEnd({ row, missing }: { row: FormRow; missing: boolean }) {
+  const [added, setAdded] = useState(false);
   if (row.state === "filled") {
     const ai = row.origin === "written-by-ai";
+    // A choice Your details answered says which detail, never its value.
+    const why = row.origin === "details" && row.from ? `Picked because Your details has your ${row.from}` : undefined;
     return (
       <>
+        {typedHere(row) && row.key && !added && (
+          <Small label="Add to Your details" title={`Keep it in Your details as your ${detailName(row.key)}`} onClick={() => void keepBox(row.field).then(setAdded)} />
+        )}
+        {typedHere(row) && added && <span className="form-added">Added to Your details</span>}
         <Small label="Undo" undo onClick={() => void undoBox(row.field)} />
-        <span className="form-src" data-ai={ai || undefined}>
+        <span className="form-src" data-ai={ai || undefined} title={why}>
           {!ai && <span className="form-dot" aria-hidden="true" />}
           {sourceOf(row)}
         </span>
@@ -64,11 +122,25 @@ function rowText(row: FormRow) {
     case "ask-first":
       return "Asks first";
     case "kept":
-      return "Kept what was there";
+      return row.value || "Kept what was there";
     case "put-back":
       return "Put back";
+    case "by-you":
+      return "Done by you";
     default:
       return row.why || "Not filled";
+  }
+}
+
+/** The row's middle: a box to answer in, a button a choice, or what it holds and why. */
+function RowValue({ row }: { row: FormRow }) {
+  switch (answerWith(row)) {
+    case "words":
+      return <Words row={row} />;
+    case "choices":
+      return <Choices row={row} />;
+    default:
+      return <span className="form-v truncate" title={rowText(row)}>{rowText(row)}</span>;
   }
 }
 
@@ -88,7 +160,7 @@ function List({ here, reduced }: { here: HereState; reduced: boolean }) {
         {rows.map((row) => (
           <div key={row.field} className="row form-row" data-state={row.state} data-quiet={(missing && row.state === "yours") || undefined}>
             <span className="form-k truncate" title={row.label}>{row.label}</span>
-            <span className="form-v truncate" title={rowText(row)}>{rowText(row)}</span>
+            <RowValue row={row} />
             <RowEnd row={row} missing={missing} />
           </div>
         ))}
@@ -104,7 +176,7 @@ function List({ here, reduced }: { here: HereState; reduced: boolean }) {
           <>
             <span className="grow" />
             <Button label={`Show all ${form.total}`} onClick={showAllRows} />
-            <Button label="Add to Your details" main onClick={addDetails} />
+            <Button label="Open Your details" main onClick={addDetails} />
           </>
         ) : (
           <>
@@ -118,11 +190,20 @@ function List({ here, reduced }: { here: HereState; reduced: boolean }) {
   );
 }
 
-export function FormView({ here, reduced }: { here: HereState; reduced: boolean }) {
+export function FormView({ here, reduced, hovered = false }: { here: HereState; reduced: boolean; hovered?: boolean }) {
   const form = here.form;
   if (here.step === "filling" || !form) return <Filling here={here} reduced={reduced} />;
   switch (here.step) {
     case "filled":
+      // Out of the way until the pointer is on it: then the line, with Undo.
+      if (!hovered) {
+        return (
+          <div className="row pad-pill here-pill form-pill" role="status" aria-label={filledLine(form)}>
+            <Eyes mood={form.need > 0 ? "needs" : "done"} reduced={reduced} />
+            <span className="grow label truncate">{pillLine(form)}</span>
+          </div>
+        );
+      }
       return (
         <div className="row pad-pill here-pill" role="status">
           <Eyes mood="rest" reduced={reduced} />

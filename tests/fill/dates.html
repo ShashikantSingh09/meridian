@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Meridian test: dates in parts</title>
+<style>
+  :root { color-scheme: light dark; --line: #8886; }
+  body { font: 15px/1.4 system-ui, sans-serif; max-width: 640px; margin: 24px auto; padding: 0 16px; }
+  form { display: grid; gap: 14px; }
+  .parts { display: flex; gap: 8px; align-items: center; }
+  input, select { font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; }
+  fieldset { border: 1px solid var(--line); border-radius: 6px; }
+</style>
+</head>
+<body>
+<h1>Education and dates</h1>
+<p>For <code>crates/fill/tests/live_forms.rs</code>. Nothing here goes online.</p>
+
+<form id="dates">
+  <!-- Three unnamed drop-downs after plain words, as many Indian sites ask for a birthday. -->
+  <div>
+    <span>Date of birth *</span>
+    <div class="parts">
+      <select><option value="">Day</option><option>1</option><option>2</option><option>15</option></select>
+      <select><option value="">Month</option><option>January</option><option>February</option><option>March</option></select>
+      <select><option value="">Year</option><option>1990</option><option>1991</option><option>1992</option></select>
+    </div>
+  </div>
+
+  <!-- Three text boxes known only by their placeholders. Three is a date, not a code. -->
+  <fieldset><legend>Date of joining</legend>
+    <div class="parts">
+      <input placeholder="DD" size="2"> / <input placeholder="MM" size="2"> / <input placeholder="YYYY" size="4">
+    </div>
+  </fieldset>
+
+  <label>Start date <input id="start" type="date"></label>
+  <label>Year of passing <select id="passing"><option></option><option>2023</option><option>2024</option></select></label>
+</form>
+</body>
+</html>

@@ -142,6 +142,52 @@ impl Profile {
     }
 }
 
+/// Where a key's value is kept, for a key that is one whole value. Not the parts of a name or the
+/// whole address, which are made from others, and never an ID number: those have their own way in.
+fn slot<'a>(profile: &'a mut Profile, key: &str) -> Option<&'a mut String> {
+    Some(match key {
+        "name" | "name.en" => &mut profile.name.en,
+        "name.hi" => &mut profile.name.hi,
+        "birth" => &mut profile.birth,
+        "email" => &mut profile.email,
+        "phone" => &mut profile.phone,
+        "phone.other" => &mut profile.other_phone,
+        "address.lines" => &mut profile.address.lines,
+        "address.city" => &mut profile.address.city,
+        "address.pin" => &mut profile.address.pin,
+        "address.state" => &mut profile.address.state,
+        "address.hi" => &mut profile.address.hi,
+        "work.company" => &mut profile.work.company,
+        "work.title" => &mut profile.work.title,
+        "work.department" => &mut profile.work.department,
+        "work.id" => &mut profile.work.employee_id,
+        "work.email" => &mut profile.work.email,
+        "work.linkedin" => &mut profile.work.linkedin,
+        _ => return None,
+    })
+}
+
+/// Whether what the user types for a box can be added to Your details under this key.
+pub fn can_add(key: &str) -> bool {
+    slot(&mut Profile::default(), key).is_some()
+}
+
+/// Adds one detail the user typed on the island, through the same checks as Settings › Your details.
+/// Only one that is empty: what is kept is never changed from here.
+pub fn add(app: &AppHandle, key: &str, value: &str) -> Result<Profile, String> {
+    add_in(&path(app)?, key, value)
+}
+
+fn add_in(path: &Path, key: &str, value: &str) -> Result<Profile, String> {
+    let mut profile = load(path);
+    let kept = slot(&mut profile, key).ok_or("That cannot be added to Your details from here.")?;
+    if !kept.trim().is_empty() {
+        return Err("Your details has that already.".into());
+    }
+    *kept = value.to_string();
+    save_to(path, profile, clear_ids)
+}
+
 /// An ID number as the Show list may show it: only its end.
 pub fn masked(key: &str, number: &str) -> String {
     mask(key.strip_prefix("id.").unwrap_or(key), number)
@@ -542,6 +588,31 @@ mod tests {
         delete_at(&path).unwrap();
         delete_at(&path).unwrap();
         assert_eq!(load(&path), Profile::default());
+    }
+
+    #[test]
+    fn a_detail_typed_on_the_island_is_added_through_the_same_checks() {
+        let path = scratch("add");
+        let _ = delete_at(&path);
+        let kept = add_in(&path, "email", " ravi.sharma84@gmail.com ").unwrap();
+        assert_eq!(kept.email, "ravi.sharma84@gmail.com", "trimmed as the page trims it");
+        assert_eq!(add_in(&path, "address.city", "Bengaluru").unwrap().address.city, "Bengaluru");
+        assert_eq!(load(&path).email, "ravi.sharma84@gmail.com", "kept on this PC");
+        assert_eq!(add_in(&path, "phone", "98201"), Err("A phone number has 10 to 15 digits.".into()));
+        assert_eq!(add_in(&path, "email", "other@example.com"), Err("Your details has that already.".into()));
+        assert_eq!(load(&path).phone, "", "nothing kept from a wrong one");
+    }
+
+    #[test]
+    fn id_numbers_and_parts_of_other_details_are_never_added_from_a_form() {
+        for key in ["id.pan", "id.aadhaar", "id.passport", "pan", "name.first", "name.last", "address", "password"] {
+            assert!(!can_add(key), "{key}");
+        }
+        for key in KEYS.iter().filter(|key| !key.starts_with("id.") && !["name.first", "name.last", "address"].contains(key)) {
+            assert!(can_add(key), "{key}");
+        }
+        let path = scratch("add-id");
+        assert_eq!(add_in(&path, "id.pan", "ABCDE1234K"), Err("That cannot be added to Your details from here.".into()));
     }
 
     #[test]

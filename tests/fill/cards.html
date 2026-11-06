@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Meridian test: choice cards</title>
+<style>
+  :root { color-scheme: light dark; --line: #8886; }
+  body { font: 15px/1.4 system-ui, sans-serif; max-width: 720px; margin: 24px auto; padding: 0 16px; }
+  form { display: grid; gap: 18px; }
+  .cards { display: flex; gap: 10px; flex-wrap: wrap; border: 0; padding: 0; margin: 0; }
+  .card, [role=radio], [aria-pressed], .chip { border: 1px solid var(--line); border-radius: 8px; padding: 8px 14px; background: Canvas; font: inherit; position: relative; cursor: pointer; }
+  [aria-checked=true], [aria-pressed=true], .card:has(input:checked) { outline: 2px solid Highlight; }
+  .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); border: 0; padding: 0; }
+  .tick { display: flex; gap: 8px; align-items: center; }
+  .away { position: absolute; left: -10000px; top: 0; }
+</style>
+</head>
+<body>
+<h1>Choice cards, switches and styled ticks</h1>
+<p>For <code>crates/fill/tests/live_forms.rs</code>. Nothing here goes online.</p>
+
+<form id="cards">
+  <!-- Cards that say they are radio buttons. -->
+  <div role="radiogroup" aria-labelledby="gender-label" class="cards">
+    <span id="gender-label">Gender</span>
+    <div role="radio" aria-checked="false" tabindex="0">Male</div>
+    <div role="radio" aria-checked="false" tabindex="-1">Female</div>
+    <div role="radio" aria-checked="false" tabindex="-1">Other</div>
+  </div>
+
+  <!-- Labels wrapping radios shrunk to one pixel, as Tailwind's sr-only does. -->
+  <fieldset class="cards"><legend>Work status</legend>
+    <label class="card"><input class="sr-only" type="radio" name="status"> I'm experienced</label>
+    <label class="card"><input class="sr-only" type="radio" name="status"> I'm a fresher</label>
+  </fieldset>
+
+  <!-- Toggle buttons: buttons, never boxes, since "Like" and "Follow" are built the same way. -->
+  <div class="cards" role="group" aria-label="Preferred shift">
+    <button type="button" aria-pressed="false">Day shift</button>
+    <button type="button" aria-pressed="false">Night shift</button>
+  </div>
+
+  <!-- Chips that are only divs with a click handler: there is nothing to read. -->
+  <div class="cards"><span>Job type</span><div class="chip">Full time</div><div class="chip">Part time</div></div>
+
+  <label class="tick"><input type="checkbox" role="switch" id="visible"> Show my profile to recruiters</label>
+  <label class="tick"><input class="sr-only" type="checkbox" id="relocate"> Open to relocation</label>
+
+  <!-- A trap: a one-pixel tick in a part of the page moved off screen. -->
+  <div class="away"><label><input class="sr-only" type="checkbox" name="trap_fax"> Contact me by fax only</label></div>
+</form>
+
+<script>
+  for (const group of document.querySelectorAll('[role=radiogroup]')) {
+    for (const radio of group.querySelectorAll('[role=radio]')) {
+      radio.addEventListener('click', () => {
+        for (const other of group.querySelectorAll('[role=radio]')) other.setAttribute('aria-checked', String(other === radio));
+      });
+    }
+  }
+  for (const toggle of document.querySelectorAll('[aria-pressed]')) {
+    toggle.addEventListener('click', () => toggle.setAttribute('aria-pressed', String(toggle.getAttribute('aria-pressed') !== 'true')));
+  }
+</script>
+</body>
+</html>

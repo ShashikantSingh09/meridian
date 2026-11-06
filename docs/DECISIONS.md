@@ -523,8 +523,27 @@ number is read from Credential Manager only after the click. Outlines over the p
 click-through window that never takes focus or the app's commands. Nothing is ever submitted. Undo puts back the whole form or one box,
 keeping anything the user typed since. A form that asked for details nobody added offers Your details once a week at most.
 
+**Any form, not one site (added after 0.7.0).** Real sign-up pages build their forms many ways, so the reader decides by what a control
+does, not what it calls itself. A combo box that takes typing has the text pattern and is a text box; a drop-down never has it, and picker
+libraries that keep only their own choices are drop-downs. A list counts only when it can be selected in or focused, so a page's bulleted
+list is never a box. Choice cards with `role=radio` are radios, switches are tick boxes, and pressed buttons stay buttons. A run of four to
+eight one-character boxes is a one-time code and is refused, labelled or not. Labels come from the accessible name, then labelled-by,
+then the placeholder, then the words just before the box. Only the form in front is read: the one with the cursor, or an open dialog, or
+the biggest form or group of nearby boxes, leaving out search, newsletter, cookie, chat and header login boxes unless the cursor is in
+them. Outlines stay on their tab. After a run, each written one-line box is read again, and one the page emptied needs the user.
+
+**Seamless (added after 0.7.0).** After a fill the island is a small pill, "2 need you" or "Filled", until pointed at. Filled boxes show
+green for 4 s, then fade; boxes that need the user stay outlined until the user has dealt with them on the page. A box that is the user's
+own is never read, only whether the cursor has been in it. The choices of one question are one row, take one answer and one write, and
+have one outline. A box that needs the user can be answered on the island, typed or picked; Rust writes it with the same checks and Undo,
+marked "You typed", and it never goes to the AI. What was typed can be added to Your details, only into an empty detail, through Your
+details' own checks, and never as an ID number. A work status choice is picked as experienced when Your details has a company or job
+title: a Rust rule that checks only whether that detail is filled; the AI's answer and the user's own pick win.
+
 **Gave up.** A list's choices are not read, so a choice it lacks is left for the user. Files the user names are not read yet. Outlines lag
-scrolling by up to 0.7 s. Page text can still hold a number the browser shows on the page.
+scrolling by up to 0.7 s. Page text can still hold a number the browser shows on the page. A password box counts as done once the user has
+been in it, whether or not they typed. Time inputs, plain contenteditable without a role, editors inside frames and React-Select's own
+input are not read.
 
 ## D75. Cards you can act on, and a morning line
 

@@ -1180,9 +1180,10 @@ function flash(id: string, text: string) {
   setTimeout(() => patchSession(id, (s) => (s.flash === text ? { ...s, flash: undefined } : s)), FLASH_MS);
 }
 
-/** A box on the island needs the keyboard while it is in use, and gives it back after. The panel has its own. */
-export function islandTyping(on: boolean) {
-  if (!state.panelOpen) void bridge.setInteractive(on);
+/** A box on the island needs the keyboard while it is in use, and gives it back after. The panel has its own.
+ *  Done once the window it came from has the keyboard again, for words that go into that window next. */
+export async function islandTyping(on: boolean) {
+  if (!state.panelOpen) await bridge.setInteractive(on).catch(() => undefined);
 }
 
 export function answerApproval(sessionId: string, approvalId: string, allow: boolean, answers?: Record<string, string | string[]>) {

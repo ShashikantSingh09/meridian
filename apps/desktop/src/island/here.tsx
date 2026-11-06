@@ -109,9 +109,9 @@ function HereCard({ here, reduced }: { here: HereState; reduced: boolean }) {
 }
 
 /** Given what to show rather than reading it, so the content on its way out keeps showing what it was. */
-export function HereView({ here, reduced }: { here: HereState | null; reduced: boolean }) {
+export function HereView({ here, reduced, hovered = false }: { here: HereState | null; reduced: boolean; hovered?: boolean }) {
   if (!here) return null;
-  if (FORM_STEPS.has(here.step)) return <FormView here={here} reduced={reduced} />;
+  if (FORM_STEPS.has(here.step)) return <FormView here={here} reduced={reduced} hovered={hovered} />;
   if (here.step === "writing") {
     return (
       <div className="row pad-pill here-pill" role="status">

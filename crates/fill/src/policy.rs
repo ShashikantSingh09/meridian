@@ -4,7 +4,7 @@
 
 use serde::Serialize;
 
-use crate::model::{has_any, Field, FieldKind, Target};
+use crate::model::{has_any, Bounds, Field, FieldKind, Target};
 
 /// Why a box is the user's to fill.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -40,7 +40,9 @@ impl std::fmt::Display for Refusal {
 // Phrases are lowercase whole words, as `model::words` writes them.
 const ONE_TIME_CODE: &[&str] = &[
     "otp", "one time password", "one time code", "one time pin", "verification code", "auth code",
-    "authentication code", "2fa", "two factor", "2 step", "sms code", "ओटीपी", "वन टाइम पासवर्ड", "सत्यापन कोड",
+    "authentication code", "2fa", "two factor", "2 step", "sms code", "confirmation code", "activation code",
+    "digit code", "code we sent", "code sent", "sent a code", "enter the code", "ओटीपी",
+    "वन टाइम पासवर्ड", "सत्यापन कोड", "कोड भेजा",
 ];
 const PASSWORD: &[&str] = &[
     "password", "passwd", "pwd", "passcode", "mpin", "upi pin", "atm pin", "transaction pin", "tpin",
@@ -66,8 +68,9 @@ const CAPTCHA: &[&str] = &[
 pub(crate) const CONSENT: &[&str] = &[
     "agree", "agreement", "accept", "consent", "terms", "conditions", "privacy policy", "i have read",
     "i confirm", "declare", "declaration", "authorise", "authorize", "subscribe", "newsletter", "marketing",
-    "offers", "promotional", "opt in", "send me", "सहमत", "स्वीकार", "शर्तें", "शर्तों", "नियम", "घोषणा",
-    "अनुमति", "सदस्यता",
+    "offers", "promotional", "opt in", "send me", "cookie", "cookies", "tracking", "advertising",
+    "personalised ads", "personalized ads", "सहमत", "स्वीकार", "शर्तें", "शर्तों", "नियम", "घोषणा", "अनुमति",
+    "सदस्यता", "कुकी",
 ];
 
 /// Why Meridian never fills this box, if it never does.
@@ -104,6 +107,66 @@ pub(crate) fn secret(words: &str) -> Option<Refusal> {
     } else {
         None
     }
+}
+
+/// The fewest and most cells a split one-time code has. Nine or more small boxes in a row are a form
+/// that wants a name one letter per box, not a code.
+const CODE_CELLS: std::ops::RangeInclusive<usize> = 4..=8;
+
+/// The boxes that are cells of a split code: four to eight small boxes side by side in page order,
+/// the same size, each about as wide as it is tall. One-time codes are built this way, often with no
+/// label at all, so they are known by their shape. The answer is their places in `boxes`.
+pub(crate) fn code_cells(boxes: &[(FieldKind, Bounds)]) -> Vec<usize> {
+    let cell = |(kind, at): &(FieldKind, Bounds)| {
+        matches!(kind, FieldKind::PlainText | FieldKind::Number | FieldKind::Phone | FieldKind::Password)
+            && at.big_enough()
+            && at.width <= at.height * 2
+    };
+    // The next box carries the run on: same row, same size, just to the right.
+    let follows = |before: &Bounds, next: &Bounds| {
+        let near = |a: i32, b: i32, slack: i32| (a - b).abs() <= slack;
+        near(next.y, before.y, before.height / 2)
+            && near(next.height, before.height, before.height / 4)
+            && near(next.width, before.width, before.width / 4)
+            && next.x >= before.x + before.width - 2
+            && next.x - (before.x + before.width) <= before.width * 2
+    };
+    let mut cells = Vec::new();
+    let mut run: Vec<usize> = Vec::new();
+    for (at, seen) in boxes.iter().enumerate() {
+        let carries = cell(seen) && run.last().is_some_and(|&last| follows(&boxes[last].1, &seen.1));
+        if !carries {
+            if CODE_CELLS.contains(&run.len()) {
+                cells.append(&mut run);
+            }
+            run.clear();
+        }
+        if cell(seen) {
+            run.push(at);
+        }
+    }
+    if CODE_CELLS.contains(&run.len()) {
+        cells.append(&mut run);
+    }
+    cells
+}
+
+/// Marks a cell of a split code as one, so every later check refuses it by its words, and keeps
+/// none of what it holds. The island shows "One-time code".
+pub(crate) fn mark_code(field: &mut Field) {
+    if refusal(field).is_none() {
+        field.label = if field.label.is_empty() { "One-time code".into() } else { format!("One-time code: {}", field.label) };
+    }
+    field.value.clear();
+}
+
+/// Marks the cells of every split code among the boxes, and says which ones they were.
+pub(crate) fn mark_codes(fields: &mut [Field]) -> Vec<usize> {
+    let cells = code_cells(&fields.iter().map(|field| (field.kind, field.bounds)).collect::<Vec<_>>());
+    for &at in &cells {
+        mark_code(&mut fields[at]);
+    }
+    cells
 }
 
 /// Whether Meridian may fill in this window at all.
@@ -277,6 +340,67 @@ mod tests {
         assert_eq!(refusal(&marketing), Some(Refusal::Consent));
         assert_eq!(refused("Terms you prefer"), None);
         assert_eq!(refusal(&field(0, "I have a driving licence", FieldKind::Checkbox)), None);
+    }
+
+    fn row(n: usize, x: i32, y: i32, width: i32, height: i32, gap: i32) -> Vec<(FieldKind, Bounds)> {
+        (0..n as i32).map(|i| (FieldKind::PlainText, Bounds { x: x + i * (width + gap), y, width, height })).collect()
+    }
+
+    #[test]
+    fn a_split_code_is_known_by_its_shape_even_with_no_label() {
+        assert_eq!(code_cells(&row(6, 100, 300, 44, 48, 10)), (0..6).collect::<Vec<_>>(), "six boxes");
+        assert_eq!(code_cells(&row(4, 100, 300, 56, 56, 16)), (0..4).collect::<Vec<_>>(), "a four-digit PIN");
+        // Three and three with a dash between.
+        let mut split = row(3, 100, 300, 40, 40, 8);
+        split.extend(row(3, 100 + 3 * 48 + 40, 300, 40, 40, 8));
+        assert_eq!(code_cells(&split).len(), 6);
+    }
+
+    #[test]
+    fn boxes_that_only_look_a_little_like_a_code_are_not_one() {
+        assert!(code_cells(&row(3, 100, 300, 44, 48, 10)).is_empty(), "three boxes: a split date");
+        assert!(code_cells(&row(10, 100, 300, 30, 30, 4)).is_empty(), "ten boxes: a name one letter per box");
+        assert!(code_cells(&row(6, 100, 300, 300, 40, 16)).is_empty(), "wide boxes in a row are a form's columns");
+        let stacked: Vec<_> = (0..6).map(|i| (FieldKind::PlainText, Bounds { x: 100, y: 100 + i * 60, width: 44, height: 44 })).collect();
+        assert!(code_cells(&stacked).is_empty(), "small boxes one under the other");
+        let mut mixed = row(6, 100, 300, 44, 48, 10);
+        mixed[3].0 = FieldKind::List;
+        assert!(code_cells(&mixed).is_empty(), "a drop-down breaks the run");
+        let mut uneven = row(6, 100, 300, 44, 48, 10);
+        uneven[5].1.width = 120;
+        assert_eq!(code_cells(&uneven), [0, 1, 2, 3, 4], "a wider box ends the run");
+    }
+
+    #[test]
+    fn a_marked_cell_is_refused_as_a_code_and_keeps_nothing() {
+        let mut fields: Vec<Field> = row(6, 100, 300, 44, 48, 10)
+            .into_iter()
+            .enumerate()
+            .map(|(i, (kind, bounds))| Field { bounds, value: "7".into(), ..field(i as u32, if i == 0 { "" } else { "Digit" }, kind) })
+            .collect();
+        fields.push(field(6, "Full name", FieldKind::PlainText));
+        assert_eq!(mark_codes(&mut fields).len(), 6);
+        assert_eq!(fields[0].label, "One-time code");
+        assert_eq!(fields[1].label, "One-time code: Digit");
+        assert!(fields[..6].iter().all(|cell| refusal(cell) == Some(Refusal::OneTimeCode) && cell.value.is_empty()));
+        assert_eq!(refusal(&fields[6]), None);
+    }
+
+    #[test]
+    fn a_box_near_words_about_a_code_is_refused() {
+        for label in ["Enter the 6 digit code we sent to +91 98xxxx4317", "Confirmation code", "कोड भेजा गया है"] {
+            assert_eq!(refused(label), Some(Refusal::OneTimeCode), "{label}");
+        }
+        for label in ["PIN code", "Promo code", "IFSC code", "Country code", "Referral code"] {
+            assert_eq!(refused(label), None, "{label}");
+        }
+    }
+
+    #[test]
+    fn cookie_and_tracking_switches_are_consent() {
+        for label in ["Analytics cookies", "Allow tracking", "Personalised ads", "कुकी की अनुमति"] {
+            assert_eq!(refusal(&field(0, label, FieldKind::Checkbox)), Some(Refusal::Consent), "{label}");
+        }
     }
 
     #[test]

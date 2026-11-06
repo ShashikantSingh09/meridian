@@ -11,14 +11,15 @@ mod input;
 use std::time::{Duration, Instant};
 
 use windows::core::{Interface, BOOL, BSTR};
-use windows::Win32::Foundation::{HWND, RPC_E_CHANGED_MODE};
+use windows::Win32::Foundation::{HWND, RECT, RPC_E_CHANGED_MODE};
 use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED};
 use windows::Win32::System::Variant::VARIANT;
 use windows::Win32::UI::Accessibility::*;
 use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowLongW, ES_MULTILINE, GWL_STYLE};
 
-use crate::model::{site_from_address, Bounds, Field, FieldKind, Target};
-use crate::policy::is_browser;
+use crate::model::{kind_of, label_of, list_hint, marked_required, says, site_from_address, tick_bounds, Bounds, Control, Field, FieldKind, Props, Target};
+use crate::policy::{code_cells, is_browser, mark_code, mark_codes};
+use crate::scope::{holds, pick, Part, Region, Seen};
 use crate::write::{same, Need, Writer};
 use crate::{FillError, Reader};
 
@@ -51,8 +52,9 @@ pub struct Uia {
     /// The window [`Reader::target`] read. Everything after works only while it stays in front.
     window: Option<HWND>,
     browser: bool,
-    /// The boxes of the last read, by id.
-    boxes: Vec<(IUIAutomationElement, FieldKind)>,
+    /// The boxes of the last read, by id, with whether each is a cell of a split code, which a read
+    /// of the box alone cannot tell.
+    boxes: Vec<(IUIAutomationElement, FieldKind, bool)>,
     focused: Option<IUIAutomationElement>,
     _com: Com,
 }
@@ -64,6 +66,38 @@ fn text(read: windows::core::Result<BSTR>) -> String {
 fn flag(read: windows::core::Result<BOOL>) -> bool {
     read.is_ok_and(|value| value.as_bool())
 }
+
+fn bounds(rect: RECT) -> Bounds {
+    Bounds { x: rect.left, y: rect.top, width: rect.right - rect.left, height: rect.bottom - rect.top }
+}
+
+/// UI Automation's control types, as the pure rules in `model` name them.
+#[allow(non_upper_case_globals)]
+fn control(id: UIA_CONTROLTYPE_ID) -> Control {
+    match id {
+        UIA_EditControlTypeId => Control::Edit,
+        UIA_DocumentControlTypeId => Control::Document,
+        UIA_GroupControlTypeId | UIA_PaneControlTypeId | UIA_CustomControlTypeId => Control::Group,
+        UIA_ComboBoxControlTypeId => Control::ComboBox,
+        UIA_ListControlTypeId => Control::List,
+        UIA_CheckBoxControlTypeId => Control::CheckBox,
+        UIA_RadioButtonControlTypeId => Control::RadioButton,
+        UIA_SpinnerControlTypeId => Control::Spinner,
+        UIA_ButtonControlTypeId | UIA_SplitButtonControlTypeId => Control::Button,
+        UIA_HyperlinkControlTypeId => Control::Hyperlink,
+        UIA_TabItemControlTypeId => Control::TabItem,
+        UIA_MenuItemControlTypeId => Control::MenuItem,
+        UIA_ListItemControlTypeId => Control::ListItem,
+        UIA_TreeItemControlTypeId => Control::TreeItem,
+        _ => Control::Other,
+    }
+}
+
+/// The page's roles for the parts that tell which form a box belongs to, as `scope::Part` reads them.
+const PARTS: &[&str] = &["form", "dialog", "alertdialog", "search", "banner", "navigation", "contentinfo", "complementary", "region", "document"];
+
+/// The longest text before a box that still reads as its label. Longer is a paragraph.
+const MAX_LABEL: usize = 200;
 
 impl Uia {
     pub fn new() -> Result<Self, FillError> {
@@ -100,7 +134,7 @@ impl Uia {
     }
 
     fn entry(&self, id: u32) -> Result<(IUIAutomationElement, FieldKind), FillError> {
-        self.boxes.get(id as usize).cloned().ok_or(FillError::Gone)
+        self.boxes.get(id as usize).map(|(element, kind, _)| (element.clone(), *kind)).ok_or(FillError::Gone)
     }
 
     fn equals(&self, property: UIA_PROPERTY_ID, value: VARIANT) -> Result<IUIAutomationCondition, FillError> {
@@ -126,6 +160,8 @@ impl Uia {
         for property in [
             UIA_NamePropertyId,
             UIA_ControlTypePropertyId,
+            UIA_AriaRolePropertyId,
+            UIA_FullDescriptionPropertyId,
             UIA_LocalizedControlTypePropertyId,
             UIA_BoundingRectanglePropertyId,
             UIA_IsOffscreenPropertyId,
@@ -188,61 +224,33 @@ impl Uia {
         unsafe { root.FindFirst(TreeScope_Descendants, &document) }.ok()
     }
 
-    /// A box from its cached properties, or None when it is not a box.
-    // The control type constants keep Windows' own names.
-    #[allow(non_upper_case_globals)]
-    fn describe(&self, element: &IUIAutomationElement, id: u32, focused: bool) -> Result<Option<Field>, FillError> {
+    /// A box from its cached properties, or None when it is not a box. The rules are in `model`.
+    fn describe(&self, element: &IUIAutomationElement, id: u32, focused: bool) -> Result<Option<Seen>, FillError> {
         unsafe {
-            let control = element.CachedControlType()?;
-            let automation_id = text(element.CachedAutomationId());
-            let class = text(element.CachedClassName());
-            let localized = text(element.CachedLocalizedControlType()).to_lowercase();
-            let value_pattern = element.GetCachedPatternAs::<IUIAutomationValuePattern>(UIA_ValuePatternId).ok();
-            let read_only = value_pattern.as_ref().is_some_and(|pattern| flag(pattern.CachedIsReadOnly()));
-            let multiline = text(element.CachedAriaProperties()).contains("multiline=true") || native_multiline(element, &class);
             let cached = |property| element.GetCachedPropertyValue(property).ok().and_then(|value| bool::try_from(&value).ok()).unwrap_or(false);
-            let text_pattern = cached(UIA_IsTextPatternAvailablePropertyId);
-            // A list you can pick from can be selected in or focused. A page's bulleted list can be neither.
-            let pickable = cached(UIA_IsSelectionPatternAvailablePropertyId) || cached(UIA_IsKeyboardFocusablePropertyId);
-
-            let kind = match control {
-                UIA_EditControlTypeId if flag(element.CachedIsPassword()) => FieldKind::Password,
-                // A contenteditable editor has its paragraphs as children; a textarea has none.
-                UIA_EditControlTypeId if class.contains("RichEdit") || (multiline && self.has_children(element)) => {
-                    FieldKind::RichText
-                }
-                UIA_EditControlTypeId if multiline => FieldKind::MultiLine,
-                UIA_EditControlTypeId if localized.contains("date") || localized.contains("time") => FieldKind::Date,
-                UIA_EditControlTypeId => FieldKind::PlainText,
-                // Word's body, or a page's own editable area. A whole web page is not a box.
-                UIA_DocumentControlTypeId if focused && automation_id != "RootWebArea" => FieldKind::RichText,
-                // A bare contenteditable shows as a group that holds text.
-                UIA_GroupControlTypeId | UIA_PaneControlTypeId | UIA_CustomControlTypeId if focused && text_pattern => {
-                    FieldKind::RichText
-                }
-                // A combo box you can type in is a text box with suggestions.
-                // An input with suggestions, such as an email box offering domains, reports as a combo box.
-                // It takes typing, so it has the text pattern; a drop-down of fixed choices never does.
-                UIA_ComboBoxControlTypeId if (value_pattern.is_some() && !read_only) || text_pattern => FieldKind::PlainText,
-                UIA_ComboBoxControlTypeId => FieldKind::List,
-                UIA_ListControlTypeId if pickable => FieldKind::List,
-                // Every bulleted list on a page reports as a list. It is the page's words, not a box.
-                UIA_ListControlTypeId => return Ok(None),
-                UIA_CheckBoxControlTypeId => FieldKind::Checkbox,
-                UIA_RadioButtonControlTypeId => FieldKind::Radio,
-                UIA_SpinnerControlTypeId => FieldKind::Number,
-                UIA_ButtonControlTypeId | UIA_SplitButtonControlTypeId => FieldKind::Button,
-                // Only Finish this for me asks for these, through `elements`.
-                UIA_HyperlinkControlTypeId => FieldKind::Link,
-                UIA_TabItemControlTypeId => FieldKind::Tab,
-                UIA_MenuItemControlTypeId => FieldKind::MenuItem,
-                UIA_ListItemControlTypeId | UIA_TreeItemControlTypeId => FieldKind::Item,
-                _ => return Ok(None),
+            let class = text(element.CachedClassName());
+            let aria = text(element.CachedAriaProperties());
+            let value_pattern = element.GetCachedPatternAs::<IUIAutomationValuePattern>(UIA_ValuePatternId).ok();
+            let props = Props {
+                control: control(element.CachedControlType()?),
+                role: text(element.CachedAriaRole()).to_lowercase(),
+                multiline: aria.contains("multiline=true") || native_multiline(element, &class),
+                aria,
+                localized: text(element.CachedLocalizedControlType()).to_lowercase(),
+                automation_id: text(element.CachedAutomationId()),
+                class,
+                password: flag(element.CachedIsPassword()),
+                value_pattern: value_pattern.is_some(),
+                read_only: value_pattern.as_ref().is_some_and(|pattern| flag(pattern.CachedIsReadOnly())),
+                text_pattern: cached(UIA_IsTextPatternAvailablePropertyId),
+                selectable: cached(UIA_IsSelectionPatternAvailablePropertyId),
+                focusable: cached(UIA_IsKeyboardFocusablePropertyId),
+                focused,
             };
-            // A link's address is read-only, and is what tells where it goes.
-            if read_only && !matches!(kind, FieldKind::List | FieldKind::Link | FieldKind::Tab | FieldKind::MenuItem | FieldKind::Item) {
-                return Ok(None);
-            }
+            let Some(kind) = kind_of(&props, || self.has_children(element)) else { return Ok(None) };
+            let name = text(element.CachedName());
+            // A drop-down the page built from a button shows its choice as its name.
+            let button_list = kind == FieldKind::List && props.control == Control::Button;
 
             let value = match kind {
                 FieldKind::Checkbox => element
@@ -261,23 +269,27 @@ impl Uia {
                 {
                     "selected".to_string()
                 }
+                _ if button_list => name.clone(),
                 _ => value_pattern.map(|pattern| text(pattern.CachedValue())).unwrap_or_default(),
             };
 
-            let name = text(element.CachedName());
             let placeholder = text(element.CachedHelpText());
-            let mut label = if !name.trim().is_empty() {
-                name
-            } else {
+            // Only boxes look around them for words: a button with no name stays unknown, so Finish
+            // this for me never presses it on a guess.
+            let a_box = !matches!(kind, FieldKind::Button | FieldKind::Link | FieldKind::Tab | FieldKind::MenuItem | FieldKind::Item);
+            let hint = if kind == FieldKind::List { list_hint(&value) } else { None };
+            let mut label = label_of(
+                if button_list { "" } else { &name },
+                &placeholder,
+                hint.as_deref(),
                 // Asked only when there is no name: it costs a round trip, and in
                 // Chrome it turns on the heavier screen reader mode.
-                element
-                    .CurrentLabeledBy()
-                    .map(|label| text(label.CurrentName()))
-                    .ok()
-                    .filter(|label| !label.trim().is_empty())
-                    .unwrap_or_else(|| placeholder.clone())
-            };
+                || element.CurrentLabeledBy().map(|label| text(label.CurrentName())).unwrap_or_default(),
+                || if a_box { self.nearby(element) } else { String::new() },
+            );
+            if button_list && label.is_empty() {
+                label = name;
+            }
             // A choice's own name is only "Yes" or "30 days": its group holds the question.
             if kind == FieldKind::Radio {
                 let group = self.parent(element).map(|group| text(group.CurrentName())).unwrap_or_default();
@@ -285,23 +297,146 @@ impl Uia {
                     label = format!("{}: {label}", group.trim());
                 }
             }
+            // An unnamed list is the open popup of a drop-down, or the page's words.
+            if props.control == Control::List && label.is_empty() {
+                return Ok(None);
+            }
 
-            let rect = element.CachedBoundingRectangle().unwrap_or_default();
-            let bounds = Bounds { x: rect.left, y: rect.top, width: rect.right - rect.left, height: rect.bottom - rect.top };
-            let visible = !flag(element.CachedIsOffscreen()) && bounds.big_enough();
+            let own = bounds(element.CachedBoundingRectangle().unwrap_or_default());
+            let on_screen = !flag(element.CachedIsOffscreen());
+            let tiny_tick = on_screen && !own.big_enough() && matches!(kind, FieldKind::Checkbox | FieldKind::Radio) && says(&label);
+            let (at, visible) = match tiny_tick {
+                true => match tick_bounds(own, self.parent(element).and_then(|parent| parent.CurrentBoundingRectangle().ok()).map(bounds)) {
+                    Some(card) => (card, true),
+                    None => (own, false),
+                },
+                false => (own, on_screen && own.big_enough()),
+            };
+            // The hint under or inside the box: its placeholder, else what aria-describedby says.
+            let hint_text = if says(&placeholder) {
+                placeholder
+            } else {
+                let described = element.cast::<IUIAutomationElement6>().map(|element| text(element.CachedFullDescription()));
+                described.map(|value| value.chars().take(MAX_LABEL).collect()).unwrap_or_default()
+            };
             let field = Field {
                 id,
+                required: flag(element.CachedIsRequiredForForm()) || marked_required(&label),
                 label,
-                placeholder,
-                automation_id,
+                placeholder: hint_text,
+                automation_id: props.automation_id.clone(),
                 kind,
-                required: flag(element.CachedIsRequiredForForm()),
                 visible,
                 value,
-                bounds,
+                bounds: at,
             };
-            Ok(Some(field.finish()))
+            Ok(Some(Seen { field: field.finish(), searchbox: props.role == "searchbox" }))
         }
+    }
+
+    /// The words just before a box with no name, as a person reads its label: an earlier sibling, else
+    /// its group's legend. Unnamed boxes of the same type are passed over, so the parts of a date share
+    /// the words before the first. Another box in between ends the search, since those words are its own.
+    #[allow(non_upper_case_globals)]
+    fn nearby(&self, element: &IUIAutomationElement) -> String {
+        let Ok(walker) = (unsafe { self.automation.ControlViewWalker() }) else { return String::new() };
+        let own = unsafe { element.CachedControlType() }.unwrap_or_default();
+        let label = |name: String| if name.chars().count() <= MAX_LABEL { name.trim().to_string() } else { String::new() };
+        let a_box = |kind: UIA_CONTROLTYPE_ID| {
+            matches!(
+                kind,
+                UIA_EditControlTypeId
+                    | UIA_ComboBoxControlTypeId
+                    | UIA_ListControlTypeId
+                    | UIA_CheckBoxControlTypeId
+                    | UIA_RadioButtonControlTypeId
+                    | UIA_SpinnerControlTypeId
+                    | UIA_ButtonControlTypeId
+                    | UIA_HyperlinkControlTypeId
+            )
+        };
+        let mut node = element.clone();
+        // ponytail: two levels and six siblings each, so a page cannot make this walk long. Widen if
+        // real labels sit further away.
+        for _ in 0..2 {
+            let mut passed = 0;
+            let mut at = unsafe { walker.GetPreviousSiblingElement(&node) }.ok();
+            for _ in 0..6 {
+                let Some(sibling) = at else { break };
+                let kind = unsafe { sibling.CurrentControlType() }.unwrap_or_default();
+                let name = text(unsafe { sibling.CurrentName() });
+                match kind {
+                    UIA_TextControlTypeId | UIA_GroupControlTypeId | UIA_CustomControlTypeId if says(&name) => return label(name),
+                    // A paragraph has no name of its own: its words are its last child.
+                    UIA_GroupControlTypeId | UIA_CustomControlTypeId => {
+                        if let Ok(last) = unsafe { walker.GetLastChildElement(&sibling) } {
+                            let inner = unsafe { last.CurrentControlType() }.unwrap_or_default();
+                            let words = text(unsafe { last.CurrentName() });
+                            if inner == UIA_TextControlTypeId && says(&words) {
+                                return label(words);
+                            }
+                            if a_box(inner) {
+                                return String::new();
+                            }
+                        }
+                    }
+                    _ if kind == own && !says(&name) && passed < 2 => passed += 1,
+                    _ if a_box(kind) => return String::new(),
+                    _ => {}
+                }
+                at = unsafe { walker.GetPreviousSiblingElement(&sibling) }.ok();
+            }
+            let Ok(parent) = (unsafe { walker.GetParentElement(&node) }) else { break };
+            if unsafe { parent.CurrentControlType() }.is_ok_and(|kind| kind == UIA_DocumentControlTypeId) {
+                break;
+            }
+            // A fieldset's legend names its boxes; a form's or a section's name does not name one box.
+            let role = text(unsafe { parent.CurrentAriaRole() });
+            let name = text(unsafe { parent.CurrentName() });
+            if matches!(role.as_str(), "group" | "radiogroup" | "") && says(&name) {
+                return label(name);
+            }
+            node = parent;
+        }
+        String::new()
+    }
+
+    /// Where the keyboard cursor is on the page, box or not. None when it is on the page itself, or
+    /// outside it, as in the address bar.
+    fn focus_in(&self, page: &IUIAutomationElement) -> Option<Bounds> {
+        let cache = unsafe { self.automation.CreateCacheRequest() }.ok()?;
+        unsafe { cache.AddProperty(UIA_BoundingRectanglePropertyId) }.ok()?;
+        let focused = unsafe { self.automation.GetFocusedElementBuildCache(&cache) }.ok()?;
+        let at = bounds(unsafe { focused.CachedBoundingRectangle() }.ok()?);
+        let page = bounds(unsafe { page.CurrentBoundingRectangle() }.ok()?);
+        (at != page && at.width > 0 && at.height > 0 && holds(&page, &at)).then_some(at)
+    }
+
+    /// Whether the box with the cursor is a cell of a split code, from the boxes around it.
+    fn in_code(&self, element: &IUIAutomationElement, at: Bounds) -> bool {
+        if !(at.big_enough() && at.width <= at.height * 2) {
+            return false;
+        }
+        let Ok(edits) = self.control_is(&[UIA_EditControlTypeId, UIA_SpinnerControlTypeId]) else { return false };
+        let Ok(cache) = (unsafe { self.automation.CreateCacheRequest() }) else { return false };
+        if unsafe { cache.AddProperty(UIA_BoundingRectanglePropertyId) }.is_err() {
+            return false;
+        }
+        let mut node = element.clone();
+        // The cells are each in their own wrapper, so look up to three parents out for four or more.
+        for _ in 0..3 {
+            let Some(parent) = self.parent(&node) else { return false };
+            let Ok(found) = (unsafe { parent.FindAllBuildCache(TreeScope_Descendants, &edits, &cache) }) else { return false };
+            let read: Vec<(FieldKind, Bounds)> = (0..unsafe { found.Length() }.unwrap_or(0))
+                .filter_map(|index| unsafe { found.GetElement(index) }.ok())
+                .map(|edit| (FieldKind::PlainText, bounds(unsafe { edit.CachedBoundingRectangle() }.unwrap_or_default())))
+                .collect();
+            if read.len() >= 4 {
+                return code_cells(&read).iter().any(|&cell| read[cell].1 == at);
+            }
+            node = parent;
+        }
+        false
     }
 
     fn item(&self, list: &IUIAutomationElement, wanted: &str) -> Result<Option<IUIAutomationElement>, FillError> {
@@ -316,6 +451,15 @@ impl Uia {
             }
         }
         Ok(None)
+    }
+
+    /// The choice in the list a drop-down controls (aria-controls, or the popup it has open).
+    fn popup_item(&self, list: &IUIAutomationElement, wanted: &str) -> Option<IUIAutomationElement> {
+        let popups = unsafe { list.CurrentControllerFor() }.ok()?;
+        (0..unsafe { popups.Length() }.ok()?).find_map(|index| {
+            let popup = unsafe { popups.GetElement(index) }.ok()?;
+            self.item(&popup, wanted).ok().flatten()
+        })
     }
 
     /// The names of the window's text, when it offers no text pattern.
@@ -406,18 +550,48 @@ impl Reader for Uia {
         let on_screen = self.equals(UIA_IsOffscreenPropertyId, false.into())?;
         let shown = unsafe { self.automation.CreateAndCondition(&enabled, &on_screen) }?;
         let wanted = unsafe { self.automation.CreateAndCondition(&controls, &shown) }?;
-        let found = unsafe { scope.FindAllBuildCache(TreeScope_Descendants, &wanted, &self.cache(true)?) }?;
+        // The page's forms, dialogs, frames, header and footer come in the same walk of the page, so
+        // telling which boxes are the form costs no second one.
+        let mut parts = self.control_is(&[UIA_DocumentControlTypeId])?;
+        for role in PARTS {
+            let next = self.equals(UIA_AriaRolePropertyId, (*role).into())?;
+            parts = unsafe { self.automation.CreateOrCondition(&parts, &next) }?;
+        }
+        let either = unsafe { self.automation.CreateOrCondition(&wanted, &parts) }?;
+        let found = unsafe { scope.FindAllBuildCache(TreeScope_Descendants, &either, &self.cache(true)?) }?;
 
-        let mut fields = Vec::new();
+        let mut seen = Vec::new();
+        let mut elements = Vec::new();
+        let mut regions = Vec::new();
         for index in 0..unsafe { found.Length() }? {
             let Ok(element) = (unsafe { found.GetElement(index) }) else { continue };
-            let Ok(Some(field)) = self.describe(&element, self.boxes.len() as u32, false) else { continue };
-            // Plain buttons are not boxes. A file input shows as a button and stays, as yours to fill.
-            if !field.visible || field.kind == FieldKind::Button {
+            // Only containers are parts: a box the page calls a "document" is still a box.
+            let part = match control(unsafe { element.CachedControlType() }.unwrap_or_default()) {
+                Control::Document => Some(Part::Frame),
+                Control::Group | Control::Other => Part::from_role(&text(unsafe { element.CachedAriaRole() }).to_lowercase()),
+                _ => None,
+            };
+            if let Some(part) = part {
+                let at = bounds(unsafe { element.CachedBoundingRectangle() }.unwrap_or_default());
+                regions.push(Region { part, name: text(unsafe { element.CachedName() }), bounds: at });
                 continue;
             }
-            self.boxes.push((element, field.kind));
-            fields.push(field);
+            let Ok(Some(box_seen)) = self.describe(&element, 0, false) else { continue };
+            // Plain buttons are not boxes. A file input shows as a button and stays, as yours to fill.
+            if !box_seen.field.visible || box_seen.field.kind == FieldKind::Button {
+                continue;
+            }
+            elements.push(element);
+            seen.push(box_seen);
+        }
+
+        // A desktop app's window is its form. With no web parts to go by, nearness alone could split a dialog.
+        let keep = if self.browser || !regions.is_empty() { pick(&seen, &regions, self.focus_in(&scope)) } else { (0..seen.len()).collect() };
+        let mut fields: Vec<Field> = keep.iter().map(|&at| seen[at].field.clone()).collect();
+        let cells = mark_codes(&mut fields);
+        for (id, (field, &at)) in fields.iter_mut().zip(&keep).enumerate() {
+            field.id = id as u32;
+            self.boxes.push((elements[at].clone(), field.kind, cells.contains(&id)));
         }
         Ok(fields)
     }
@@ -447,13 +621,16 @@ impl Uia {
     /// once it has scrolled off, gone, or its window is no longer in front.
     pub fn place(&mut self, id: u32) -> Option<Bounds> {
         self.window().ok()?;
-        let (element, _) = self.entry(id).ok()?;
+        let (element, kind) = self.entry(id).ok()?;
         if flag(unsafe { element.CurrentIsOffscreen() }) {
             return None;
         }
-        let rect = unsafe { element.CurrentBoundingRectangle() }.ok()?;
-        let bounds = Bounds { x: rect.left, y: rect.top, width: rect.right - rect.left, height: rect.bottom - rect.top };
-        bounds.big_enough().then_some(bounds)
+        let own = bounds(unsafe { element.CurrentBoundingRectangle() }.ok()?);
+        if own.big_enough() || !matches!(kind, FieldKind::Checkbox | FieldKind::Radio) {
+            return own.big_enough().then_some(own);
+        }
+        // A styled tick is a one-pixel input inside the card you see.
+        tick_bounds(own, self.parent(&element).and_then(|parent| unsafe { parent.CurrentBoundingRectangle() }.ok()).map(bounds))
     }
 
     fn focused_with(&mut self, values: bool) -> Result<Field, FillError> {
@@ -464,14 +641,19 @@ impl Uia {
         let element = unsafe { self.automation.GetFocusedElementBuildCache(&cache) }.map_err(|_| FillError::NoBox)?;
         // The focus lives in the window in front, so it is still ours if that has not changed.
         self.window()?;
-        let field = self.describe(&element, 0, true)?.ok_or(FillError::NoBox)?;
+        let mut field = self.describe(&element, 0, true)?.ok_or(FillError::NoBox)?.field;
         if matches!(
             field.kind,
             FieldKind::Button | FieldKind::File | FieldKind::List | FieldKind::Checkbox | FieldKind::Radio | FieldKind::Link | FieldKind::Tab | FieldKind::MenuItem | FieldKind::Item
         ) {
             return Err(FillError::NoBox);
         }
-        self.boxes.push((element.clone(), field.kind));
+        // One cell of a split code has no label to say so; its neighbours do, by their shape.
+        let code = matches!(field.kind, FieldKind::PlainText | FieldKind::Number | FieldKind::Phone) && self.in_code(&element, field.bounds);
+        if code {
+            mark_code(&mut field);
+        }
+        self.boxes.push((element.clone(), field.kind, code));
         self.focused = Some(element);
         Ok(field)
     }
@@ -522,16 +704,20 @@ impl Uia {
             // The same control read again keeps the id it had.
             // ponytail: one comparison per control already known, so a read costs n × known. Fine for a
             // form of a few hundred controls; cache runtime ids and compare them here if a big page drags.
-            let known = self.boxes.iter().position(|(seen, _)| unsafe { self.automation.CompareElements(seen, &element) }.is_ok_and(|same| same.as_bool()));
+            let known = self.boxes.iter().position(|(seen, _, _)| unsafe { self.automation.CompareElements(seen, &element) }.is_ok_and(|same| same.as_bool()));
             let id = known.unwrap_or(self.boxes.len()) as u32;
-            let Ok(Some(field)) = self.describe(&element, id, false) else { continue };
+            let Ok(Some(Seen { field, .. })) = self.describe(&element, id, false) else { continue };
             if !field.visible {
                 continue;
             }
             if known.is_none() {
-                self.boxes.push((element, field.kind));
+                self.boxes.push((element, field.kind, false));
             }
             elements.push(field);
+        }
+        // A split code's cells are refused here too, and stay refused when one is read again alone.
+        for cell in mark_codes(&mut elements) {
+            self.boxes[elements[cell].id as usize].2 = true;
         }
         Ok(elements)
     }
@@ -542,7 +728,10 @@ impl Uia {
         self.window()?;
         let (element, _) = self.entry(id)?;
         let now = unsafe { element.BuildUpdatedCache(&self.cache(true)?) }?;
-        let field = self.describe(&now, id, false)?.ok_or(FillError::Gone)?;
+        let mut field = self.describe(&now, id, false)?.ok_or(FillError::Gone)?.field;
+        if self.boxes[id as usize].2 {
+            mark_code(&mut field);
+        }
         self.boxes[id as usize].1 = field.kind;
         Ok(field)
     }
@@ -559,8 +748,7 @@ impl Uia {
     pub fn bounds(&self, id: u32) -> Result<Bounds, FillError> {
         self.window()?;
         let (element, _) = self.entry(id)?;
-        let rect = unsafe { element.CurrentBoundingRectangle() }?;
-        Ok(Bounds { x: rect.left, y: rect.top, width: rect.right - rect.left, height: rect.bottom - rect.top })
+        Ok(bounds(unsafe { element.CurrentBoundingRectangle() }?))
     }
 
     /// Presses a button or link, picks a tab, row or choice, or opens a list, the way a screen reader
@@ -579,7 +767,12 @@ impl Uia {
                 return Ok(toggle.Toggle()?);
             }
             if let Ok(expand) = element.GetCurrentPatternAs::<IUIAutomationExpandCollapsePattern>(UIA_ExpandCollapsePatternId) {
-                return Ok(if expand.CurrentExpandCollapseState()? == ExpandCollapseState_Collapsed { expand.Expand()? } else { expand.Collapse()? });
+                if expand.CurrentExpandCollapseState()? == ExpandCollapseState_Collapsed {
+                    expand.Expand()?;
+                } else {
+                    expand.Collapse()?;
+                }
+                return Ok(());
             }
         }
         Err(FillError::NeedsYou("It cannot be pressed without the mouse, so it is yours to press.".into()))
@@ -695,6 +888,10 @@ impl Writer for Uia {
                     unsafe { expand.Expand() }?;
                     std::thread::sleep(Duration::from_millis(150));
                     found = self.item(&element, wanted)?;
+                    // A drop-down the page built shows its choices elsewhere on the page, and points at them.
+                    if found.is_none() {
+                        found = self.popup_item(&element, wanted);
+                    }
                 }
                 expand
             }
@@ -705,8 +902,11 @@ impl Writer for Uia {
                 .map_err(FillError::from),
             None => Err(FillError::NeedsYou("That choice is not in the list.".into())),
         };
+        // Picking closes most lists by itself, and closing one that is shut can open it again.
         if let Some(expand) = opened {
-            let _ = unsafe { expand.Collapse() };
+            if unsafe { expand.CurrentExpandCollapseState() }.is_ok_and(|state| state == ExpandCollapseState_Expanded) {
+                let _ = unsafe { expand.Collapse() };
+            }
         }
         picked
     }

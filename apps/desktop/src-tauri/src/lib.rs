@@ -394,6 +394,8 @@ pub fn run() {
             form::form_ids,
             form::form_undo,
             form::form_go,
+            form::form_answer,
+            form::form_keep,
             form::form_done,
             form::form_pick,
         ])

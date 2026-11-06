@@ -31,6 +31,9 @@ const MAIL_WITHIN: Duration = Duration::from_secs(60);
 const SOURCE_CHARS: usize = 4_000;
 /// Not now on "Add your details once?" waits a week.
 const OFFER_EVERY_MS: i64 = 7 * 24 * 60 * 60 * 1000;
+/// A box Meridian filled shows green this long once the run is over, fading at the end, then goes.
+/// Only boxes that still need the user stay outlined.
+const FADE: Duration = Duration::from_secs(4);
 const GONE: &str = "Fill this form stopped working. Restart Meridian.";
 
 const INSTRUCTIONS: &str = "You decide what goes in each box of a form on the user's screen. What the user asked is the task. \
@@ -70,6 +73,8 @@ pub struct Live {
     /// The page's text as it was before Meridian wrote anything, so what went in never goes to the AI
     /// when the user says more.
     page: String,
+    /// When each box was filled, once its run was over, so its outline fades.
+    filled_at: Vec<(u32, Instant)>,
 }
 
 /// The page's text without what its boxes hold, since the AI hears of a box only by its label.
@@ -255,7 +260,11 @@ fn tip_for(row: &Row) -> Option<(String, String)> {
     let from = |what: &str| if row.from.is_empty() { what.to_string() } else { format!("{what} · {}", row.from) };
     Some(match row.state {
         State::Filled => match row.origin? {
+            // A choice Your details answered names the detail, and never its value.
+            Origin::Details if !row.from.is_empty() => (format!("From Your details · {label}"), format!("Picked because Your details has your {}. Only that it has one was looked at, on this PC.", row.from)),
             Origin::Details => (format!("From Your details · {label}"), "Put in by Meridian from this PC. The AI only chose the box; it never saw what went in.".into()),
+            Origin::Typed if !row.choices.is_empty() => ("What you picked".into(), "Picked on the island and put in by Meridian. It did not go to the AI.".into()),
+            Origin::Typed => ("What you typed".into(), "Typed on the island and put in by Meridian. It did not go to the AI.".into()),
             Origin::Knowledge => (from("From Knowledge"), "A line on your Knowledge page.".into()),
             Origin::Mail => (from("From your mail"), "Read from Gmail or Calendar because you asked.".into()),
             Origin::Notes => (from("From your call notes"), "From the notes of a call you named.".into()),
@@ -271,12 +280,27 @@ fn tip_for(row: &Row) -> Option<(String, String)> {
     })
 }
 
-/// How each box looks over the page. `now` is the box being filled.
-fn outline_rows(rows: &[Row], mut place: impl FnMut(u32) -> Option<fill::Bounds>, now: Option<u32>) -> Vec<Outline> {
+/// The box round a question's choices.
+fn around(boxes: impl Iterator<Item = fill::Bounds>) -> Option<fill::Bounds> {
+    boxes.reduce(|a, b| {
+        let (x, y) = (a.x.min(b.x), a.y.min(b.y));
+        fill::Bounds { x, y, width: (a.x + a.width).max(b.x + b.width) - x, height: (a.y + a.height).max(b.y + b.height) - y }
+    })
+}
+
+/// How each question looks over the page. `now` is the box being filled, and `age` how long ago a box
+/// was filled once its run was over: green for [`FADE`], then gone. A box that needs the user stays
+/// until they have been in it. A question of choices has one outline round them all until one is picked.
+fn outline_rows(rows: &[Row], mut place: impl FnMut(u32) -> Option<fill::Bounds>, now: Option<u32>, age: impl Fn(u32) -> Option<Duration>) -> Vec<Outline> {
     rows.iter()
         .filter_map(|row| {
+            let lit = now.filter(|now| *now == row.field || row.choices.iter().any(|choice| choice.field == *now));
+            let since = (row.state == State::Filled).then(|| age(row.field)).flatten();
+            if lit.is_none() && since.is_some_and(|since| since >= FADE) {
+                return None;
+            }
             let (look, tag) = match row.state {
-                _ if now == Some(row.field) => ("now", None),
+                _ if lit.is_some() => ("now", None),
                 State::Filled => match row.origin {
                     Some(Origin::WrittenByAi) => ("ok", Some(("ai", "Written by AI".to_string()))),
                     Some(Origin::Mail) => ("ok", Some(("mail", "from mail".to_string()))),
@@ -286,18 +310,24 @@ fn outline_rows(rows: &[Row], mut place: impl FnMut(u32) -> Option<fill::Bounds>
                 State::AskFirst => ("need", Some(("lock", "Asks first".to_string()))),
                 State::NeedsYou if row.why == "Date boxes need you." => ("need", Some(("need", "Date boxes need you".to_string()))),
                 State::NeedsYou => ("need", Some(("need", "Needs you".to_string()))),
-                State::Waiting | State::Kept | State::PutBack => return None,
+                State::Waiting | State::Kept | State::PutBack | State::ByYou => return None,
             };
-            let at = place(row.field)?;
-            Some(Outline { x: at.x, y: at.y, w: at.width, h: at.height, look, tag, tip: tip_for(row) })
+            let at = match lit {
+                Some(now) => place(now)?,
+                None if row.state != State::Filled && !row.choices.is_empty() => around(row.choices.iter().filter_map(|choice| place(choice.field)))?,
+                None => place(row.field)?,
+            };
+            let age = since.map(|since| since.as_millis() as u64);
+            Some(Outline { x: at.x, y: at.y, w: at.width, h: at.height, look, tag, tip: tip_for(row), age })
         })
         .collect()
 }
 
 /// The outlines as the boxes are now, scrolled or not.
 fn redraw(live: &mut Live, app: &AppHandle) {
-    let Live { uia, form, hwnd, .. } = live;
-    let outlines = outline_rows(&form.rows, |field| uia.place(field), None);
+    let Live { uia, form, hwnd, filled_at, .. } = live;
+    let age = |field: u32| filled_at.iter().find(|(known, _)| *known == field).map(|(_, at)| at.elapsed());
+    let outlines = outline_rows(&form.questions(), |field| uia.place(field), None, age);
     outlines::draw(app, *hwnd, outlines);
 }
 
@@ -344,7 +374,7 @@ fn begin(seat: &mut Seat, app: &AppHandle, exclusions: &[String], places: &[Plac
     let page = without_values(&uia.text(here::PAGE_CHARS).unwrap_or_default(), &form.fields);
     let site = here::place_of(&target).2;
     let read = read_of(&form, site.clone(), page.clone());
-    seat.form = Some(Live { uia, target, hwnd: front.hwnd, form, site, at: Instant::now(), watching: false, note: None, page });
+    seat.form = Some(Live { uia, target, hwnd: front.hwnd, form, site, at: Instant::now(), watching: false, note: None, page, filled_at: Vec::new() });
     Ok(read)
 }
 
@@ -353,9 +383,9 @@ fn summary(live: &Live) -> Summary {
     Summary {
         site: live.site.clone(),
         filled: form.filled(),
-        total: form.rows.len(),
+        total: form.total(),
         need: form.need_you(),
-        rows: form.rows.clone(),
+        rows: form.questions(),
         ids: form.asks().iter().map(|(_, key)| id_name(key)).collect(),
         details: None,
         can_undo: form.can_undo(),
@@ -364,12 +394,32 @@ fn summary(live: &Live) -> Summary {
     }
 }
 
-/// The run is over: the outlines go up and the page is watched until Undo is over.
+/// The run is over: the outlines go up and the page is watched until Undo is over. Each box filled
+/// in it starts to fade from now.
 fn finish(live: &mut Live, app: &AppHandle) -> Summary {
-    live.at = Instant::now();
+    let now = Instant::now();
+    live.at = now;
     live.watching = true;
+    let filled: Vec<u32> = live.form.questions().iter().filter(|row| row.state == State::Filled).map(|row| row.field).collect();
+    live.filled_at.retain(|(field, _)| filled.contains(field));
+    for field in filled {
+        if !live.filled_at.iter().any(|(known, _)| *known == field) {
+            live.filled_at.push((field, now));
+        }
+    }
     redraw(live, app);
     summary(live)
+}
+
+/// The Your details key what the user types in a box could be kept under: the one the AI named, else
+/// the one its kind makes plain. Only a key that holds one whole value, so never an ID number.
+fn offer_key(row: &Row) -> Option<String> {
+    let key = row.key.clone().or_else(|| match row.kind {
+        FieldKind::Email => Some("email".into()),
+        FieldKind::Phone => Some("phone".into()),
+        _ => None,
+    })?;
+    details::can_add(&key).then_some(key)
 }
 
 /// What one box looks up in Your details: by key, read on this PC.
@@ -401,6 +451,10 @@ fn put(seat: &mut Seat, app: &AppHandle, mapping: Mapping, given: Given, setting
         })
         .collect();
     live.form.plan(checked, |key| lookup(app, on, key), &given);
+    // A box with nothing in Your details for it: what the user types for it there can be kept, once.
+    for row in live.form.rows.iter_mut() {
+        row.key = if on && row.state == State::NeedsYou { offer_key(row).filter(|key| details::resolve(app, key).is_none()) } else { None };
+    }
 
     let bounds: Vec<(u32, fill::Bounds)> = live.form.fields.iter().map(|field| (field.id, field.bounds)).collect();
     let place = |field: u32| bounds.iter().find(|(id, _)| *id == field).map(|(_, at)| *at);
@@ -410,7 +464,7 @@ fn put(seat: &mut Seat, app: &AppHandle, mapping: Mapping, given: Given, setting
         uia,
         |rows, done, total, field| {
             let _ = app.emit_to(island::LABEL, "form-progress", Progress { done, total, reading: None });
-            outlines::draw(app, hwnd, outline_rows(rows, place, Some(field)));
+            outlines::draw(app, hwnd, outline_rows(rows, place, Some(field), |_| None));
         },
         || stop.is_cancelled(),
     );
@@ -458,6 +512,10 @@ pub fn watch(seat: &mut Seat, app: &AppHandle) {
         end(seat, app);
         let _ = app.emit_to(island::LABEL, "form-ended", ());
         return;
+    }
+    // Boxes the user has been in on the page need them no more: the island hears, and their outlines go.
+    if form.noticed(uia) {
+        let _ = app.emit_to(island::LABEL, "form-changed", summary(live));
     }
     redraw(live, app);
 }
@@ -623,23 +681,31 @@ pub struct Undid {
     form: Summary,
 }
 
+/// The form is still on show, in time, and its page is in front, or it is let go with why. `tab`
+/// asks for the same tab too, as a write does: a background tab's boxes still answer.
+fn still_here(seat: &mut Seat, app: &AppHandle, gone: &str, tab: bool) -> Result<(), String> {
+    let Some(live) = seat.form.as_ref() else { return Err(gone.to_string()) };
+    if live.at.elapsed() > here::UNDO_FOR {
+        end(seat, app);
+        return Err("Undo lasts 5 minutes, and that has passed.".into());
+    }
+    let (hwnd, was) = (live.hwnd, live.target.clone());
+    let now = here::look(&mut seat.look).and_then(|uia| uia.target().ok());
+    let moved = now.is_none_or(|now| now.process != was.process || now.site != was.site || (tab && now.title != was.title));
+    if screen::foreground().map(|front| front.hwnd) != Some(hwnd) || moved {
+        end(seat, app);
+        return Err("You left the page, so it was left as it is.".into());
+    }
+    Ok(())
+}
+
 /// Puts the whole form back, or one box. A box the user changed since keeps what they typed.
 #[tauri::command]
 pub async fn form_undo(app: AppHandle, field: Option<u32>) -> Result<Undid, String> {
     let handle = app.clone();
     app.state::<Here>()
         .on_seat(move |seat| {
-            let Some(live) = seat.form.as_ref() else { return Err("There is nothing to undo.".to_string()) };
-            if live.at.elapsed() > here::UNDO_FOR {
-                end(seat, &handle);
-                return Err("Undo lasts 5 minutes, and that has passed.".into());
-            }
-            let (hwnd, process, site) = (live.hwnd, live.target.process.clone(), live.target.site.clone());
-            let now = here::look(&mut seat.look).and_then(|uia| uia.target().ok());
-            if screen::foreground().map(|front| front.hwnd) != Some(hwnd) || now.is_none_or(|now| now.process != process || now.site != site) {
-                end(seat, &handle);
-                return Err("You left the page, so it was left as it is.".into());
-            }
+            still_here(seat, &handle, "There is nothing to undo.", false)?;
             let live = seat.form.as_mut().expect("checked above");
             let Live { uia, form, .. } = live;
             let results = match field {
@@ -651,6 +717,41 @@ pub async fn form_undo(app: AppHandle, field: Option<u32>) -> Result<Undid, Stri
             let kept = results.iter().filter(|(_, undone)| *undone == fill::Undone::Kept).map(|(field, _)| label(*field)).collect();
             let summary = finish(live, &handle);
             Ok(Undid { put_back, kept, form: summary })
+        })
+        .await?
+}
+
+/// An answer typed or picked on the island for a box that needs the user: Rust writes it with the same
+/// engine, checks and Undo as the fill, and it never goes to the AI. A choice takes "yes". Only Enter or
+/// a click on the island comes here, after the island has given the keyboard back to the page.
+#[tauri::command]
+pub async fn form_answer(app: AppHandle, field: u32, text: String) -> Result<Summary, String> {
+    let handle = app.clone();
+    app.state::<Here>()
+        .on_seat(move |seat| {
+            still_here(seat, &handle, "That form has gone.", true)?;
+            let live = seat.form.as_mut().expect("checked above");
+            let Live { uia, form, .. } = live;
+            form.answer(uia, field, &text)?;
+            Ok(finish(live, &handle))
+        })
+        .await?
+}
+
+/// Add to Your details, on a box the user typed on the island: what they typed is kept under the key
+/// the box matched, through Your details' own checks. Only a click comes here.
+#[tauri::command]
+pub async fn form_keep(app: AppHandle, field: u32) -> Result<Summary, String> {
+    let handle = app.clone();
+    app.state::<Here>()
+        .on_seat(move |seat| {
+            let live = seat.form.as_mut().ok_or("That form has gone.")?;
+            let row = live.form.rows.iter_mut().find(|row| row.field == field).ok_or("That box is no longer there.")?;
+            let typed = row.state == State::Filled && row.origin == Some(Origin::Typed);
+            let key = row.key.clone().filter(|_| typed).ok_or("Only what you typed here can be added.")?;
+            details::add(&handle, &key, &row.value)?;
+            row.key = None;
+            Ok(summary(live))
         })
         .await?
 }
@@ -799,7 +900,58 @@ mod tests {
     }
 
     fn row(field: u32, state: State, origin: Option<Origin>, why: &str) -> Row {
-        Row { field, label: "Phone".into(), kind: FieldKind::Phone, state, origin, from: String::new(), value: String::new(), why: why.into() }
+        Row { field, label: "Phone".into(), kind: FieldKind::Phone, state, origin, from: String::new(), value: String::new(), why: why.into(), choices: Vec::new(), key: None }
+    }
+
+    #[test]
+    fn a_filled_box_fades_after_four_seconds_and_a_box_that_needs_you_stays() {
+        let rows = [row(0, State::Filled, Some(Origin::Details), ""), row(1, State::Filled, Some(Origin::WrittenByAi), ""), row(2, State::NeedsYou, None, "Not in Your details"), row(3, State::ByYou, None, "")];
+        let at = |field: u32| Some(Bounds { x: 10, y: 10 + field as i32 * 30, width: 200, height: 26 });
+        let age = |field: u32| Some(Duration::from_millis(if field == 0 { 1500 } else { 4000 }));
+        let drawn = outline_rows(&rows, at, None, age);
+        let looks: Vec<(&str, Option<u64>)> = drawn.iter().map(|o| (o.look, o.age)).collect();
+        assert_eq!(looks, [("ok", Some(1500)), ("need", None)], "one filled 4 s ago has gone, and one the user has been in has none");
+        let running = outline_rows(&rows, at, Some(1), |_| None);
+        assert_eq!(running.iter().map(|o| (o.look, o.age)).collect::<Vec<_>>(), [("ok", None), ("now", None), ("need", None)], "while the run goes on, each stays green");
+    }
+
+    #[test]
+    fn a_question_of_choices_has_one_outline_round_them_until_one_is_picked() {
+        let choices = vec![fill::Choice { field: 4, label: "I'm experienced".into() }, fill::Choice { field: 5, label: "I'm a fresher".into() }];
+        let status = Row { label: "Work status".into(), kind: FieldKind::Radio, choices, ..row(4, State::NeedsYou, None, "Not in Your details") };
+        let at = |field: u32| Some(Bounds { x: if field == 4 { 20 } else { 240 }, y: 300, width: 200, height: 60 });
+        let drawn = outline_rows(std::slice::from_ref(&status), at, None, |_| None);
+        assert_eq!((drawn[0].x, drawn[0].y, drawn[0].w, drawn[0].h, drawn[0].look), (20, 300, 420, 60, "need"));
+        let lit = outline_rows(std::slice::from_ref(&status), at, Some(5), |_| None);
+        assert_eq!((lit[0].x, lit[0].w, lit[0].look), (240, 200, "now"), "the choice being picked glows");
+        let picked = Row { field: 5, state: State::Filled, origin: Some(Origin::Details), from: "company".into(), value: "I'm a fresher".into(), ..status };
+        let drawn = outline_rows(std::slice::from_ref(&picked), at, None, |_| Some(Duration::ZERO));
+        assert_eq!((drawn[0].x, drawn[0].w, drawn[0].look), (240, 200, "ok"), "then only the one picked");
+        let tip = drawn[0].tip.clone().unwrap();
+        assert_eq!(tip.0, "From Your details · Work status");
+        assert!(tip.1.contains("Your details has your company") && !tip.1.contains("Northwind"), "names the detail, never its value: {}", tip.1);
+    }
+
+    #[test]
+    fn what_was_typed_on_the_island_says_so_and_never_went_to_the_ai() {
+        let typed = row(1, State::Filled, Some(Origin::Typed), "");
+        let tip = tip_for(&typed).unwrap();
+        assert_eq!(tip.0, "What you typed");
+        assert!(tip.1.contains("did not go to the AI"));
+    }
+
+    #[test]
+    fn what_you_type_can_be_kept_under_the_key_the_ai_named_or_the_one_the_box_makes_plain() {
+        let named = Row { key: Some("address.city".into()), kind: FieldKind::PlainText, ..row(0, State::NeedsYou, None, "") };
+        assert_eq!(offer_key(&named).as_deref(), Some("address.city"));
+        let email = Row { kind: FieldKind::Email, ..row(1, State::NeedsYou, None, "") };
+        assert_eq!(offer_key(&email).as_deref(), Some("email"));
+        assert_eq!(offer_key(&row(2, State::NeedsYou, None, "")).as_deref(), Some("phone"));
+        let pan = Row { key: Some("id.pan".into()), kind: FieldKind::PlainText, ..row(3, State::NeedsYou, None, "") };
+        assert_eq!(offer_key(&pan), None, "never an ID number");
+        let first = Row { key: Some("name.first".into()), kind: FieldKind::PlainText, ..row(4, State::NeedsYou, None, "") };
+        assert_eq!(offer_key(&first), None, "a part of the name is made from the whole");
+        assert_eq!(offer_key(&Row { kind: FieldKind::PlainText, ..row(5, State::NeedsYou, None, "") }), None);
     }
 
     #[test]
@@ -814,7 +966,7 @@ mod tests {
             row(6, State::Kept, None, ""),
         ];
         let at = |field: u32| (field != 5).then_some(Bounds { x: 10, y: 10 + field as i32 * 30, width: 200, height: 26 });
-        let drawn = outline_rows(&rows, at, Some(3));
+        let drawn = outline_rows(&rows, at, Some(3), |_| None);
         let looks: Vec<(&str, Option<&str>)> = drawn.iter().map(|o| (o.look, o.tag.as_ref().map(|(_, text)| text.as_str()))).collect();
         assert_eq!(looks, [("ok", None), ("need", Some("Yours to fill")), ("ok", Some("Written by AI")), ("now", None), ("need", Some("Date boxes need you"))], "a box scrolled off is not drawn, and a kept one has no outline");
         let tip = drawn[0].tip.clone().unwrap();

@@ -214,12 +214,14 @@ const SIZES: Record<IslandView, Geometry> = {
 const HERE_WRITTEN: Geometry = { w: 450, ...BAR };
 const HERE_LINE: Geometry = { w: 380, ...BAR };
 const HERE_CARD: Geometry = { w: 430, h: 128, r: 24 };
-/** Fill this form: the line once it is in, the card after Undo, and the Show list with a row a box. */
+/** Fill this form: the small pill once it is in, the line under the pointer, the card after Undo, and the
+ *  Show list with a row a box. */
+const FORM_PILL: Geometry = { w: 176, ...BAR };
 const FORM_FILLED: Geometry = { w: 420, ...BAR };
 const FORM_UNDONE: Geometry = { w: 440, h: 96, r: 24 };
 const FORM_LIST = (rows: number): Geometry => ({ w: 560, h: 102 + rows * 25, r: 26 });
 
-function hereGeometry(step: string | undefined, rows: number): Geometry {
+function hereGeometry(step: string | undefined, rows: number, hovered: boolean): Geometry {
   switch (step) {
     case "writing":
     case "filling":
@@ -229,7 +231,7 @@ function hereGeometry(step: string | undefined, rows: number): Geometry {
     case "line":
       return HERE_LINE;
     case "filled":
-      return FORM_FILLED;
+      return hovered ? FORM_FILLED : FORM_PILL;
     case "list":
       return FORM_LIST(rows);
     case "undone":
@@ -371,7 +373,7 @@ export function geometryFor(view: IslandView, ctx: GeometryContext): Geometry {
   if (view === "working" && ctx.hovered) return { ...STAGES, h: STAGES.h + logBox(Math.min(ctx.steps ?? 0, STAGE_ROWS)) };
   if (view === "note") return ctx.noteWriting ? NOTE_WRITING : ctx.hovered ? NOTE_STOP : SIZES.note;
   if (view === "notification" && ctx.cards) return ctx.hovered ? { ...MORNING_OPEN, h: MORNING_OPEN.h + ctx.cards * MORNING_ROW } : MORNING;
-  if (view === "here") return hereGeometry(ctx.here, ctx.formRows ?? 0);
+  if (view === "here") return hereGeometry(ctx.here, ctx.formRows ?? 0, ctx.hovered);
   if (view === "ask") {
     if (ctx.ask?.phase === "thinking") return ASK_THINKING;
     if (ctx.ask?.phase === "answer") return ASK_ANSWER(ctx.ask.lines);

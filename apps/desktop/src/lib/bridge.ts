@@ -24,6 +24,7 @@ import type {
   EventTime,
   FillPlace,
   FormProgress,
+  FormSummary,
   FormUndone,
   HereOffer,
   HereOutcome,
@@ -556,6 +557,16 @@ export const bridge = {
   formUndo: (field: number | null) => (native ? invoke<FormUndone>("form_undo", { field }) : mock.formUndo(field)),
   /** The cursor into that box, which brings it into view. */
   formGo: (field: number) => (native ? invoke<void>("form_go", { field }) : mock.formGo(field)),
+  /** What the user typed or picked on the island for a box that needs them. The core writes it, as it
+   *  writes every value; a choice takes "yes". It never goes to the AI. */
+  formAnswer: (field: number, text: string) => (native ? invoke<FormSummary>("form_answer", { field, text }) : mock.formAnswer(field, text)),
+  /** Add to Your details: what the user typed in that box is kept under the key it matched. */
+  formKeep: (field: number) => (native ? invoke<FormSummary>("form_keep", { field }) : mock.formKeep(field)),
+  /** The user has been in boxes that needed them, on the page, so the form is up to date. */
+  onFormChanged(handler: (form: FormSummary) => void) {
+    if (!native) return Promise.resolve(mock.onFormChanged(handler));
+    return listen<FormSummary>("form-changed", (e) => handler(e.payload)).then(() => {});
+  },
   /** The island's line has gone, so the core lets the form go, with its outlines. */
   formDone: () => (native ? invoke<void>("form_done") : mock.formDone()),
   /** For Ctrl Alt F: whether the cursor is in a form rather than a reply box. */

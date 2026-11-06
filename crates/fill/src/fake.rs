@@ -19,6 +19,8 @@ pub struct Behaviour {
     pub items: Vec<String>,
     /// Another window came to the front just before this box.
     pub elsewhere: bool,
+    /// A picker the page built: it takes the text, then empties itself once another box is written.
+    pub empties_when_left: bool,
 }
 
 impl Default for Behaviour {
@@ -34,6 +36,7 @@ impl Default for Behaviour {
             strips_spaces: false,
             items: Vec::new(),
             elsewhere: false,
+            empties_when_left: false,
         }
     }
 }
@@ -79,6 +82,15 @@ impl Fake {
         &mut self.boxes[id as usize]
     }
 
+    /// Writing in one box leaves the others, and a picker the page built empties itself then.
+    fn leave_others(&mut self, id: u32) {
+        for (at, other) in self.boxes.iter_mut().enumerate() {
+            if at as u32 != id && other.behaviour.empties_when_left {
+                other.value.clear();
+            }
+        }
+    }
+
     fn focused(&mut self) -> &mut FakeBox {
         let id = self.focus.expect("keys need a focused box");
         self.at(id)
@@ -107,6 +119,7 @@ impl Writer for Fake {
 
     fn set_value(&mut self, id: u32, text: &str) -> Result<(), FillError> {
         self.calls.push(format!("set {id}"));
+        self.leave_others(id);
         if self.steal_focus_on_set {
             self.focus = None;
         }
@@ -144,6 +157,7 @@ impl Writer for Fake {
 
     fn paste(&mut self, id: u32, text: &str, replace: bool) -> Result<(), FillError> {
         self.calls.push(format!("paste {id} {}", if replace { "replace" } else { "at cursor" }));
+        self.leave_others(id);
         let found = self.at(id);
         if found.behaviour.pastes {
             let value = if replace { text.to_string() } else { format!("{}{text}", found.value) };

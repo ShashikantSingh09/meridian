@@ -5,14 +5,18 @@
 //! A fact is kept only when it can be found in what the AI was given (the user's words, the page, a
 //! Knowledge page, the mail read for this fill), so the AI cannot make one up and call it looked up.
 //! Values from Your details come from the app by key, and ID numbers wait for the user's yes.
+//!
+//! The choices of one question are one row (see [`choices`]), with one answer and one write. After the
+//! fill, a box that needs the user can be answered on the island, through the same writer and Undo.
 
 use serde::Serialize;
 
-use crate::mapping::{Answer, Checked, Problem, Source};
+use crate::choices;
+use crate::mapping::{Answer, Checked, Problem, Source, MAX_TEXT};
 use crate::model::{Field, FieldKind};
 use crate::policy::refusal;
 use crate::undo::{UndoLog, Undone};
-use crate::write::{write, Mode, Writer};
+use crate::write::{write, yes_no, Mode, Need, Writer};
 use crate::FillError;
 
 /// Where a value came from, as the Show list and the outlines say it.
@@ -28,6 +32,8 @@ pub enum Origin {
     Page,
     Said,
     WrittenByAi,
+    /// Typed or picked on the island by the user. It never goes to the AI.
+    Typed,
 }
 
 impl From<Source> for Origin {
@@ -60,6 +66,15 @@ pub enum State {
     /// An ID number, waiting for the user's yes.
     AskFirst,
     PutBack,
+    /// It needed the user, and they have been in it on the page since.
+    ByYou,
+}
+
+/// One choice of a question, by its box.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Choice {
+    pub field: u32,
+    pub label: String,
 }
 
 /// One box, for the Show list and the outlines.
@@ -72,12 +87,19 @@ pub struct Row {
     pub state: State,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub origin: Option<Origin>,
-    /// The page, mail or file it came from, as the AI named it.
+    /// The page, mail or file it came from, as the AI named it. For a choice Your details answered,
+    /// the detail that answered it, such as "company".
     pub from: String,
     /// What went in. Masked for an ID number, and empty for a box that is yours.
     pub value: String,
     /// Why a box was left.
     pub why: String,
+    /// For a choice question, its choices. The row stands for them all, and its box is the one picked.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub choices: Vec<Choice>,
+    /// The Your details key for a box Your details had nothing for, so what the user types can be kept.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key: Option<String>,
 }
 
 /// What Your details holds for a key.
@@ -154,38 +176,58 @@ struct Job {
 #[derive(Debug, Clone)]
 pub struct Form {
     pub fields: Vec<Field>,
+    /// A row a box. [`Form::questions`] is what the island and the outlines show.
     pub rows: Vec<Row>,
     undo: UndoLog,
     todo: Vec<Job>,
     /// ID numbers waiting for a yes: the box and the key.
     asks: Vec<(u32, String)>,
+    /// The groups of choices that are one question each, by their boxes' places.
+    groups: Vec<Vec<usize>>,
+    /// What each box that needs the user held when first looked at after the fill, so a change shows
+    /// they have been in it.
+    seen: Vec<(u32, String)>,
+    /// Boxes that are the user's that have had the cursor since the fill.
+    been_in: Vec<u32>,
 }
 
 /// Said for every box a run did not reach.
 const STOPPED: &str = "Meridian stopped before this box.";
 const WINDOW: &str = "You moved to another window, so Meridian stopped.";
+const KEPT: &str = "It held something already, so it was kept.";
+const CLEARED: &str = "The page emptied it after it went in. Pick or type it yourself.";
 
 impl Form {
     /// The boxes read, in page order. The ones that are yours are set aside before the AI hears of any.
     pub fn new(fields: Vec<Field>) -> Self {
-        let rows = fields
+        let groups = choices::groups(&fields);
+        let mut rows: Vec<Row> = fields
             .iter()
             .map(|field| {
                 let (state, why) = match refusal(field) {
                     Some(refused) => (State::Yours, refused.to_string()),
-                    None if holds_text(field) => (State::Kept, "It held something already, so it was kept.".to_string()),
+                    None if holds_text(field) => (State::Kept, KEPT.to_string()),
                     None => (State::Waiting, String::new()),
                 };
-                Row { field: field.id, label: field.label.clone(), kind: field.kind, state, origin: None, from: String::new(), value: String::new(), why }
+                Row { field: field.id, label: field.label.clone(), kind: field.kind, state, origin: None, from: String::new(), value: String::new(), why, choices: Vec::new(), key: None }
             })
             .collect();
-        Self { fields, rows, undo: UndoLog::new(Mode::Form), todo: Vec::new(), asks: Vec::new() }
+        // A question the user has picked a choice for already keeps that choice.
+        for group in groups.iter().filter(|group| group.iter().any(|&at| fields[at].value == "true")) {
+            for &at in group {
+                if rows[at].state == State::Waiting {
+                    rows[at].state = State::Kept;
+                    rows[at].why = KEPT.into();
+                }
+            }
+        }
+        Self { fields, rows, undo: UndoLog::new(Mode::Form), todo: Vec::new(), asks: Vec::new(), groups, seen: Vec::new(), been_in: Vec::new() }
     }
 
     /// The boxes the AI may hear about: every one that is not the user's, with whether it holds
     /// something already.
     pub fn open(&self) -> impl Iterator<Item = (&Field, bool)> {
-        self.fields.iter().zip(&self.rows).filter(|(_, row)| row.state != State::Yours).map(|(field, row)| (field, matches!(row.state, State::Kept | State::Filled)))
+        self.fields.iter().zip(&self.rows).filter(|(_, row)| row.state != State::Yours).map(|(field, row)| (field, matches!(row.state, State::Kept | State::Filled | State::ByYou)))
     }
 
     /// Boxes Meridian may fill: none means there is no form here to ask the AI about.
@@ -203,6 +245,25 @@ impl Form {
         row.why = why.into();
     }
 
+    fn group_of(&self, at: usize) -> Option<&[usize]> {
+        self.groups.iter().find(|group| group.contains(&at)).map(Vec::as_slice)
+    }
+
+    /// The box, or the choices of its question.
+    fn question_of(&self, at: usize) -> Vec<usize> {
+        self.group_of(at).map_or_else(|| vec![at], <[usize]>::to_vec)
+    }
+
+    /// A box of the same question, or the box itself, is to be written already.
+    fn planned(&self, at: usize) -> bool {
+        self.question_of(at).iter().any(|&other| self.todo.iter().any(|job| job.field == self.fields[other].id))
+    }
+
+    /// The box, or a choice of its question, holds something: Meridian's, or the user's.
+    fn holds(&self, at: usize) -> bool {
+        self.question_of(at).iter().any(|&other| matches!(self.rows[other].state, State::Kept | State::Filled | State::ByYou))
+    }
+
     /// Takes the AI's checked answers. `details` looks a key up in Your details on this PC.
     pub fn plan(&mut self, checked: Checked, details: impl Fn(&str) -> Lookup, given: &Given) {
         self.todo.clear();
@@ -211,7 +272,7 @@ impl Form {
             let Some(at) = self.at(fill.field) else { continue };
             let (field, state) = (&self.fields[at], self.rows[at].state);
             // A box that holds something, the user's or Meridian's, changes only with the user's own words.
-            let holds = matches!(state, State::Kept | State::Filled);
+            let holds = self.holds(at);
             if matches!(state, State::Yours | State::AskFirst) {
                 continue;
             }
@@ -230,11 +291,19 @@ impl Form {
                         self.rows[at].state = State::AskFirst;
                         self.rows[at].why = "ID numbers ask first, every time.".into();
                     }
-                    Lookup::Missing => self.need(at, not_found),
+                    Lookup::Missing => {
+                        self.need(at, not_found);
+                        // What the user types for it on the island can be kept under this key.
+                        self.rows[at].key = Some(key);
+                    }
                     Lookup::Off => self.need(at, "Your details are off in Settings."),
                 },
                 Answer::Text { text, source, from } => {
                     if holds && source != Source::Said {
+                        continue;
+                    }
+                    // A question of choices takes one answer: a yes, for one of them. A no picks nothing.
+                    if field.kind == FieldKind::Radio && (yes_no(&text) != Some(true) || self.planned(at)) {
                         continue;
                     }
                     let tick = matches!(field.kind, FieldKind::Checkbox | FieldKind::Radio);
@@ -255,14 +324,26 @@ impl Form {
                 _ => {}
             }
         }
+        self.work_status(&details);
         // Every box the AI said nothing it may write about.
         for at in 0..self.rows.len() {
-            let field = self.rows[at].field;
-            if self.rows[at].state == State::Waiting && !self.todo.iter().any(|job| job.field == field) {
+            if self.rows[at].state == State::Waiting && !self.planned(at) {
                 self.need(at, not_found);
             }
         }
         self.todo.sort_by_key(|job| job.field);
+    }
+
+    /// A work status question nobody answered: with a company or a job title in Your details, the user
+    /// is working. Only whether the detail has a value is asked, here in Rust.
+    fn work_status(&mut self, details: &impl Fn(&str) -> Lookup) {
+        for group in self.groups.clone() {
+            let open = group.iter().all(|&at| matches!(self.rows[at].state, State::Waiting | State::NeedsYou)) && !self.planned(group[0]);
+            let words: Vec<&str> = group.iter().map(|&at| choices::split(&self.fields[at].label).map_or("", |(_, words)| words)).collect();
+            let Some(pick) = open.then(|| choices::working(&words)).flatten() else { continue };
+            let Some(detail) = choices::working_detail(details) else { continue };
+            self.todo.push(Job { field: self.fields[group[pick]].id, text: "yes".into(), origin: Origin::Details, from: detail.into() });
+        }
     }
 
     /// Boxes that will be written.
@@ -271,7 +352,7 @@ impl Form {
     }
 
     /// Writes what was planned, in page order. `each` hears of each box just before it is written,
-    /// with the rows so far, the box's place in the run, the run's length and the box. `stop` is
+    /// with the questions so far, the box's place in the run, the run's length and the box. `stop` is
     /// asked between boxes. The answer is why the run ended early, if it did.
     pub fn put<W: Writer>(&mut self, w: &mut W, mut each: impl FnMut(&[Row], usize, usize, u32), stop: impl Fn() -> bool) -> Result<(), String> {
         let jobs = std::mem::take(&mut self.todo);
@@ -281,7 +362,7 @@ impl Form {
             if stop() {
                 return Err(self.end_early(&jobs[done..], STOPPED));
             }
-            each(&self.rows, done + 1, total, job.field);
+            each(&self.questions(), done + 1, total, job.field);
             let field = self.fields[at].clone();
             match write(w, &field, &job.text, Mode::Form) {
                 Ok(written) => {
@@ -299,7 +380,23 @@ impl Form {
                 Err(error) => self.need(at, error.to_string()),
             }
         }
+        self.recheck(w);
         Ok(())
+    }
+
+    /// A picker the page built can take the text, then empty itself once the cursor moves on. Each
+    /// written one-line box is read again once all are in, so the list never says Filled over an empty box.
+    fn recheck<W: Writer>(&mut self, w: &mut W) {
+        for at in 0..self.rows.len() {
+            let field = &self.fields[at];
+            let text_box = matches!(field.kind, FieldKind::PlainText | FieldKind::Email | FieldKind::Phone | FieldKind::Number);
+            if self.rows[at].state != State::Filled || !text_box || self.rows[at].value.trim().is_empty() {
+                continue;
+            }
+            if matches!(w.value(field.id), Ok(now) if now.trim().is_empty()) {
+                self.need(at, CLEARED);
+            }
+        }
     }
 
     fn end_early(&mut self, left: &[Job], why: &str) -> String {
@@ -309,6 +406,127 @@ impl Form {
             }
         }
         why.to_string()
+    }
+
+    /// The user's own answer for a box that needs them, typed or picked on the island: a choice takes
+    /// "yes". It goes in through the same writer, checks and Undo as the fill. Never into a box that is
+    /// theirs, one filled or kept, or an ID number waiting for its yes. The answer is why it stopped.
+    pub fn answer<W: Writer>(&mut self, w: &mut W, field: u32, text: &str) -> Result<(), String> {
+        let at = self.at(field).ok_or("That box is no longer there.")?;
+        match self.rows[at].state {
+            // Waiting: a choice of a question whose other choice could not be picked.
+            State::NeedsYou | State::Waiting if !self.holds(at) => {}
+            State::Yours => return Err(self.rows[at].why.clone()),
+            _ => return Err("That box does not need you now.".into()),
+        }
+        let text = text.trim();
+        if text.is_empty() {
+            return Err("Type something first.".into());
+        }
+        if text.chars().count() > MAX_TEXT {
+            return Err("That is too long for this box.".into());
+        }
+        self.todo = vec![Job { field, text: text.to_string(), origin: Origin::Typed, from: String::new() }];
+        self.put(w, |_, _, _, _| {}, || false)
+    }
+
+    /// Looks at the boxes that need the user, after the fill, for ones they have been in on the page: a
+    /// box or a choice that shows something new, or a box of theirs they have been in and left. Those
+    /// need them no more. A box of theirs is never read: only whether the cursor is in it. True when one
+    /// changed.
+    pub fn noticed<W: Writer>(&mut self, w: &mut W) -> bool {
+        let mut changed = false;
+        for at in 0..self.rows.len() {
+            let id = self.rows[at].field;
+            match self.rows[at].state {
+                State::Yours => {
+                    if w.check(id, Need::Focus).is_ok() {
+                        if !self.been_in.contains(&id) {
+                            self.been_in.push(id);
+                        }
+                    } else if self.been_in.contains(&id) {
+                        self.by_you(at);
+                        changed = true;
+                    }
+                }
+                // A choice of a question already answered is not watched.
+                State::NeedsYou | State::Waiting if !self.holds(at) => {
+                    let Ok(now) = w.value(id) else { continue };
+                    let new = self.seen.iter().find(|(seen, _)| *seen == id).map(|(_, before)| before.trim() != now.trim());
+                    match new {
+                        None => self.seen.push((id, now)),
+                        Some(true) if !now.trim().is_empty() && now != "false" => {
+                            self.by_you(at);
+                            changed = true;
+                        }
+                        Some(_) => {}
+                    }
+                }
+                _ => {}
+            }
+        }
+        changed
+    }
+
+    /// The user has been in it. A choice picked answers its whole question, and is the one marked.
+    fn by_you(&mut self, at: usize) {
+        for other in self.question_of(at) {
+            let row = &mut self.rows[other];
+            if matches!(row.state, State::NeedsYou | State::Waiting | State::Yours) {
+                row.state = State::ByYou;
+                row.why.clear();
+                row.value = if other == at && row.kind == FieldKind::Radio { "true".into() } else { String::new() };
+            }
+        }
+    }
+
+    /// The rows as the island and the outlines show them: a box a row, and one row for each question of
+    /// choices, standing for its choices, whose box is the one picked.
+    pub fn questions(&self) -> Vec<Row> {
+        let mut out = Vec::new();
+        for (at, row) in self.rows.iter().enumerate() {
+            match self.group_of(at) {
+                None => out.push(row.clone()),
+                Some(group) if group[0] == at => out.push(self.question(group)),
+                Some(_) => {}
+            }
+        }
+        out
+    }
+
+    fn question(&self, group: &[usize]) -> Row {
+        let words = |at: usize| choices::split(&self.fields[at].label).map_or_else(|| self.fields[at].label.clone(), |(_, words)| words.to_string());
+        // What the question is up to: the most settled of its choices.
+        let rank = |state: State| match state {
+            State::Filled => 0,
+            State::ByYou => 1,
+            State::Kept => 2,
+            State::PutBack => 3,
+            State::AskFirst => 4,
+            State::NeedsYou => 5,
+            State::Yours => 6,
+            State::Waiting => 7,
+        };
+        let lead = *group.iter().min_by_key(|&&at| rank(self.rows[at].state)).expect("a group has choices");
+        let picked = group.iter().copied().find(|&at| match self.rows[at].state {
+            State::Filled => true,
+            State::ByYou => self.rows[at].value == "true",
+            State::Kept => self.fields[at].value == "true",
+            _ => false,
+        });
+        let shown = &self.rows[picked.unwrap_or(lead)];
+        Row {
+            field: self.rows[picked.unwrap_or(group[0])].field,
+            label: choices::split(&self.fields[group[0]].label).map_or_else(|| self.fields[group[0]].label.clone(), |(question, _)| question.to_string()),
+            kind: FieldKind::Radio,
+            state: self.rows[lead].state,
+            origin: shown.origin,
+            from: shown.from.clone(),
+            value: picked.map(words).unwrap_or_default(),
+            why: self.rows[lead].why.clone(),
+            choices: group.iter().map(|&at| Choice { field: self.rows[at].field, label: words(at) }).collect(),
+            key: None,
+        }
     }
 
     /// The ID numbers waiting for a yes, as the box and its key.
@@ -385,13 +603,19 @@ impl Form {
         Some(undone)
     }
 
+    /// Questions filled: a box each, and one for a question of choices.
     pub fn filled(&self) -> usize {
-        self.rows.iter().filter(|row| row.state == State::Filled).count()
+        self.questions().iter().filter(|row| row.state == State::Filled).count()
     }
 
-    /// Boxes left for the user: theirs, ones with no value, and ID numbers not yet allowed.
+    /// Questions left for the user: theirs, ones with no value, and ID numbers not yet allowed.
     pub fn need_you(&self) -> usize {
-        self.rows.iter().filter(|row| matches!(row.state, State::Yours | State::NeedsYou | State::AskFirst)).count()
+        self.questions().iter().filter(|row| matches!(row.state, State::Yours | State::NeedsYou | State::AskFirst)).count()
+    }
+
+    /// Questions on the form, as the island counts them.
+    pub fn total(&self) -> usize {
+        self.questions().len()
     }
 
     pub fn can_undo(&self) -> bool {
@@ -546,6 +770,17 @@ mod tests {
     }
 
     #[test]
+    fn a_box_the_page_empties_after_it_went_in_needs_you_again() {
+        let mut form = planned(application(), vec![profile(0, "name"), profile(1, "email"), profile(2, "phone")], ravi, &Given::default());
+        let mut w = boxes(8);
+        // The email box is a picker the page built: it keeps only its own choices, so it empties once left.
+        w.boxes[1].behaviour.empties_when_left = true;
+        form.put(&mut w, |_, _, _, _| {}, || false).unwrap();
+        assert_eq!(state(&form, 1), (State::NeedsYou, CLEARED));
+        assert_eq!((form.rows[0].state, form.rows[2].state), (State::Filled, State::Filled), "the boxes that kept their value stay filled");
+    }
+
+    #[test]
     fn an_id_number_waits_for_a_yes_and_is_read_only_then() {
         let mut fields = application();
         fields.push(field(8, "PAN", FieldKind::PlainText));
@@ -658,5 +893,190 @@ mod tests {
         assert_eq!((json["state"].as_str(), json["kind"].as_str()), (Some("waiting"), Some("plain-text")));
         assert_eq!(serde_json::to_value(Origin::WrittenByAi).unwrap(), "written-by-ai");
         assert_eq!(serde_json::to_value(&form.rows[4]).unwrap()["state"], "yours");
+    }
+
+    /// Naukri's sign-up form, as the owner tried it: two choice cards for one Work status question.
+    fn sign_up(experienced: &str, fresher: &str) -> Vec<Field> {
+        let mut fields = vec![
+            field(0, "Full name", FieldKind::PlainText),
+            field(1, "Email ID", FieldKind::Email),
+            field(2, "Password", FieldKind::Password),
+            field(3, "Mobile number", FieldKind::Phone),
+            field(4, experienced, FieldKind::Radio),
+            field(5, fresher, FieldKind::Radio),
+        ];
+        fields[4].value = "false".into();
+        fields[5].value = "false".into();
+        fields
+    }
+
+    fn naukri() -> Vec<Field> {
+        sign_up("Work status: I'm experienced", "Work status: I'm a fresher")
+    }
+
+    fn sign_up_boxes() -> Fake {
+        let choice = Behaviour { value: "false".into(), ..Default::default() };
+        Fake::new(vec![Behaviour::default(), Behaviour::default(), Behaviour::default(), Behaviour::default(), choice.clone(), choice])
+    }
+
+    fn working(key: &str) -> Lookup {
+        match key {
+            "work.company" => Lookup::Plain("Northwind Software".into()),
+            other => ravi(other),
+        }
+    }
+
+    fn question<'a>(rows: &'a [Row], label: &str) -> &'a Row {
+        rows.iter().find(|row| row.label == label).unwrap_or_else(|| panic!("no row {label}"))
+    }
+
+    #[test]
+    fn the_choices_of_one_question_are_one_row_with_a_button_each() {
+        let form = planned(naukri(), vec![profile(0, "name"), profile(3, "phone")], ravi, &Given::default());
+        let rows = form.questions();
+        assert_eq!(rows.iter().map(|row| row.label.as_str()).collect::<Vec<_>>(), ["Full name", "Email ID", "Password", "Mobile number", "Work status"]);
+        let status = question(&rows, "Work status");
+        assert_eq!(status.state, State::NeedsYou);
+        assert_eq!(status.choices, [Choice { field: 4, label: "I'm experienced".into() }, Choice { field: 5, label: "I'm a fresher".into() }]);
+        assert_eq!((form.total(), form.need_you()), (5, 3), "Email ID, Password and Work status: one question, not two");
+        let json = serde_json::to_value(status).unwrap();
+        assert_eq!(json["choices"][1], serde_json::json!({ "field": 5, "label": "I'm a fresher" }));
+        assert!(serde_json::to_value(&rows[0]).unwrap().get("choices").is_none());
+    }
+
+    #[test]
+    fn a_question_of_choices_takes_one_answer_and_one_write() {
+        let given = Given { said: "I'm a fresher".into(), ..Given::default() };
+        let fills = vec![text(4, "no", Source::Said, ""), text(5, "yes", Source::Said, "")];
+        let mut form = planned(naukri(), fills, ravi, &given);
+        assert_eq!(form.todo(), 1, "a no picks nothing");
+        let mut w = sign_up_boxes();
+        form.put(&mut w, |_, _, _, _| {}, || false).unwrap();
+        assert_eq!(w.calls, ["tick 5"]);
+        let rows = form.questions();
+        let status = question(&rows, "Work status");
+        assert_eq!((status.state, status.field, status.value.as_str()), (State::Filled, 5, "I'm a fresher"));
+
+        let both = planned(naukri(), vec![text(4, "yes", Source::Said, ""), text(5, "yes", Source::Said, "")], ravi, &given);
+        assert_eq!(both.todo(), 1, "two yeses for one question: only the first goes in");
+    }
+
+    #[test]
+    fn a_work_status_follows_from_a_company_in_your_details_without_the_ai() {
+        let mut form = planned(naukri(), vec![profile(0, "name")], working, &Given::default());
+        assert_eq!(form.todo(), 2);
+        let mut w = sign_up_boxes();
+        form.put(&mut w, |_, _, _, _| {}, || false).unwrap();
+        assert_eq!((w.boxes[4].value.as_str(), w.boxes[5].value.as_str()), ("true", "false"));
+        let rows = form.questions();
+        let status = question(&rows, "Work status");
+        assert_eq!((status.state, status.origin, status.from.as_str(), status.value.as_str()), (State::Filled, Some(Origin::Details), "company", "I'm experienced"));
+    }
+
+    #[test]
+    fn a_work_status_in_hindi_follows_from_a_job_title() {
+        let title = |key: &str| if key == "work.title" { Lookup::Plain("Senior Product Designer".into()) } else { Lookup::Missing };
+        let mut form = planned(sign_up("कार्य स्थिति: मैं अनुभवी हूँ", "कार्य स्थिति: मैं फ्रेशर हूँ"), vec![], title, &Given::default());
+        let mut w = sign_up_boxes();
+        form.put(&mut w, |_, _, _, _| {}, || false).unwrap();
+        let rows = form.questions();
+        let status = question(&rows, "कार्य स्थिति");
+        assert_eq!((status.state, status.from.as_str(), status.field), (State::Filled, "job title", 4));
+    }
+
+    #[test]
+    fn with_no_work_details_the_work_status_is_left_for_the_user() {
+        let form = planned(naukri(), vec![], ravi, &Given::default());
+        assert_eq!(form.todo(), 0);
+        assert_eq!(question(&form.questions(), "Work status").state, State::NeedsYou);
+        let off = planned(naukri(), vec![], |_| Lookup::Off, &Given::default());
+        assert_eq!(off.todo(), 0, "Your details off in Settings");
+    }
+
+    #[test]
+    fn the_users_own_choice_and_the_ais_answer_win_over_the_rule() {
+        let mut picked = naukri();
+        picked[5].value = "true".into();
+        let form = planned(picked, vec![], working, &Given::default());
+        assert_eq!(form.todo(), 0, "the user picked fresher already");
+        let status = question(&form.questions(), "Work status").clone();
+        assert_eq!((status.state, status.value.as_str(), status.field), (State::Kept, "I'm a fresher", 5));
+
+        let said = Given { said: "I'm a fresher".into(), ..Given::default() };
+        let mut form = planned(naukri(), vec![text(5, "yes", Source::Said, "")], working, &said);
+        let mut w = sign_up_boxes();
+        form.put(&mut w, |_, _, _, _| {}, || false).unwrap();
+        assert_eq!(w.calls, ["tick 5"], "what the AI answered from the user's words");
+    }
+
+    #[test]
+    fn a_box_the_ai_named_a_key_for_keeps_it_when_your_details_has_nothing() {
+        let form = planned(naukri(), vec![profile(1, "work.email"), profile(0, "name")], ravi, &Given::default());
+        assert_eq!((form.rows[1].state, form.rows[1].key.as_deref()), (State::NeedsYou, Some("work.email")));
+        assert_eq!(form.rows[0].key, None);
+    }
+
+    #[test]
+    fn an_answer_typed_on_the_island_goes_in_marked_typed_and_can_be_undone() {
+        let mut form = planned(naukri(), vec![profile(0, "name")], ravi, &Given::default());
+        let mut w = sign_up_boxes();
+        form.put(&mut w, |_, _, _, _| {}, || false).unwrap();
+        form.answer(&mut w, 1, "  ravi.sharma84@gmail.com ").unwrap();
+        assert_eq!(w.boxes[1].value, "ravi.sharma84@gmail.com");
+        assert_eq!((form.rows[1].state, form.rows[1].origin, form.rows[1].value.as_str()), (State::Filled, Some(Origin::Typed), "ravi.sharma84@gmail.com"));
+        assert_eq!(serde_json::to_value(Origin::Typed).unwrap(), "typed");
+        assert_eq!(form.undo_one(&mut w, 1), Some(Undone::PutBack));
+        assert_eq!(w.boxes[1].value, "");
+    }
+
+    #[test]
+    fn a_choice_answered_on_the_island_picks_that_one() {
+        let mut form = planned(naukri(), vec![], ravi, &Given::default());
+        let mut w = sign_up_boxes();
+        form.answer(&mut w, 5, "yes").unwrap();
+        assert_eq!(w.calls, ["tick 5"]);
+        let status = question(&form.questions(), "Work status").clone();
+        assert_eq!((status.state, status.origin, status.value.as_str()), (State::Filled, Some(Origin::Typed), "I'm a fresher"));
+        assert_eq!(form.answer(&mut w, 4, "yes"), Err("That box does not need you now.".into()), "one answer for one question");
+    }
+
+    #[test]
+    fn the_island_never_answers_for_a_box_that_is_yours_or_one_already_filled() {
+        let mut form = planned(naukri(), vec![profile(0, "name")], ravi, &Given::default());
+        let mut w = sign_up_boxes();
+        form.put(&mut w, |_, _, _, _| {}, || false).unwrap();
+        w.calls.clear();
+        assert_eq!(form.answer(&mut w, 2, "hunter2"), Err("Password boxes are yours to fill.".into()));
+        assert_eq!(form.answer(&mut w, 0, "Someone Else"), Err("That box does not need you now.".into()));
+        assert_eq!(form.answer(&mut w, 1, "   "), Err("Type something first.".into()));
+        assert_eq!(form.answer(&mut w, 1, &"a".repeat(MAX_TEXT + 1)), Err("That is too long for this box.".into()));
+        assert!(w.calls.is_empty(), "nothing was written: {:?}", w.calls);
+    }
+
+    #[test]
+    fn boxes_the_user_fills_on_the_page_need_them_no_more() {
+        let mut form = planned(naukri(), vec![profile(0, "name"), profile(3, "phone")], ravi, &Given::default());
+        let mut w = sign_up_boxes();
+        form.put(&mut w, |_, _, _, _| {}, || false).unwrap();
+        w.focus = None;
+        assert!(!form.noticed(&mut w), "the first look only sees how they are");
+        w.boxes[1].value = "ravi@example.com".into();
+        assert!(form.noticed(&mut w));
+        assert_eq!((form.rows[1].state, form.rows[1].value.as_str()), (State::ByYou, ""), "what the user typed is not kept");
+
+        // The password is never read: being in it and leaving is enough.
+        w.focus = Some(2);
+        assert!(!form.noticed(&mut w));
+        assert_eq!(form.rows[2].state, State::Yours, "still in it");
+        w.focus = None;
+        assert!(form.noticed(&mut w));
+        assert_eq!(form.rows[2].state, State::ByYou);
+
+        w.boxes[5].value = "true".into();
+        assert!(form.noticed(&mut w));
+        let status = question(&form.questions(), "Work status").clone();
+        assert_eq!((status.state, status.value.as_str()), (State::ByYou, "I'm a fresher"));
+        assert_eq!(form.need_you(), 0);
+        assert!(!form.noticed(&mut w), "nothing more changed");
     }
 }

@@ -303,6 +303,11 @@ export function wireHere() {
     const here = getState().here;
     if (here?.step === "filling") show({ ...here, progress });
   });
+  // The user has been in boxes that needed them, on the page. Set, not shown, so a card's timer runs on.
+  void bridge.onFormChanged((form) => {
+    const here = getState().here;
+    if (here?.kind === "form" && here.form && !working()) setHere({ ...here, form });
+  });
   // The page was left, or Undo ran out.
   void bridge.onFormEnded(() => {
     if (getState().here?.kind === "form" && !working()) end();

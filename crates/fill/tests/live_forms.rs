@@ -12,6 +12,11 @@
 //!    and keyboard alone until it ends. Each test prints what it read.
 //! 4. Afterwards, check "What the page saw" at the bottom of the page: no "Enter
 //!    pressed", no "Tab pressed", no "Submitted" and no "A trap box was filled".
+//!
+//! The tests from `signup_page_…` on use the other pages in `tests/fill/`, one page each: open the
+//! page the test's comment names the same way, zoom out until it fits, then run the test. They read
+//! only, except `a_drop_down_the_page_built_is_picked_through_the_list_it_opens`, which picks one
+//! choice on `dropdowns.html` through UI Automation (no keys, no mouse).
 
 #![cfg(windows)]
 
@@ -21,15 +26,32 @@ use std::time::Duration;
 use fill::{access, refusal, write, Access, Field, FieldKind, FillError, Method, Mode, Reader, Refusal, Uia, UndoLog, Undone, Writer};
 
 fn after_click(what: &str) -> Uia {
+    on_page("Meridian fill test forms", what)
+}
+
+/// Waits for the click, then checks the browser shows the test page whose title holds `title`.
+fn on_page(title: &str, what: &str) -> Uia {
     println!("Click {what} within 5 seconds.");
     std::thread::sleep(Duration::from_secs(5));
     let mut uia = Uia::new().expect("UI Automation");
     let target = uia.target().expect("a window in front");
-    println!("target: {} {:?}", target.process, target.site);
+    println!("target: {} {:?} {}", target.process, target.site, target.title);
     assert!(fill::is_browser(&target.process), "the browser must be in front, not {}", target.process);
     assert_eq!(target.site.as_deref(), Some("file:"), "the test page must be open");
+    assert!(target.title.contains(title), "open the page called {title}, not {}", target.title);
     assert_eq!(access(&target), Access::Usual);
     uia
+}
+
+fn read(title: &str, what: &str) -> (Uia, Vec<Field>) {
+    let mut uia = on_page(title, what);
+    let fields = uia.fields().expect("fields");
+    print(&fields);
+    (uia, fields)
+}
+
+fn has(fields: &[Field], label: &str) -> bool {
+    fields.iter().any(|field| field.label.contains(label))
 }
 
 fn find<'a>(fields: &'a [Field], label: &str) -> &'a Field {
@@ -86,7 +108,7 @@ fn reads_every_box_on_the_test_page_and_no_trap() {
     assert_eq!(refusal(find(&fields, "I agree")), Some(Refusal::Consent));
     assert!(fields.iter().all(|field| !field.label.contains("Trap")), "trap boxes are never read");
     assert!(fields.iter().all(|field| field.kind != FieldKind::Button), "plain buttons are not boxes");
-    assert_eq!(find(&fields, "Message").kind, FieldKind::RichText, "every box on the page counts, in a form or not");
+    assert!(!has(&fields, "Message"), "the chat box below the form is not the form");
     assert!(!fields.iter().any(|field| field.label.contains("Address and search")), "the browser's address bar is not the page");
 }
 
@@ -262,4 +284,158 @@ fn finish_reads_buttons_and_links_and_keeps_their_ids() {
     let again = uia.elements().expect("elements again");
     assert_eq!(find(&again, "Submit application").id, submit.id, "ids stay the same across reads");
     assert_eq!(uia.fresh(submit.id).expect("read again").label, submit.label);
+}
+
+// ── The other pages in tests/fill/ ──────────────────────────────────────────
+
+/// `tests/fill/signup.html`. Click on the heading "Create your profile". Reads only.
+#[test]
+#[ignore = "reads the window in front; run by hand against tests/fill/signup.html"]
+fn signup_page_reads_only_the_sign_up_form() {
+    let (_, fields) = read("sign-up page", "on the heading Create your profile");
+    assert_eq!(find(&fields, "Full name").kind, FieldKind::PlainText);
+    assert!(find(&fields, "Full name").required);
+    assert_eq!(find(&fields, "Email ID").kind, FieldKind::Email, "a floating label and domain suggestions");
+    assert_eq!(find(&fields, "Password *").kind, FieldKind::Password);
+    assert_eq!(find(&fields, "Country code").kind, FieldKind::List, "the +91 beside the phone box");
+    assert_eq!(find(&fields, "Enter your mobile number").kind, FieldKind::Phone);
+    let card = find(&fields, "I'm a fresher");
+    assert_eq!(card.kind, FieldKind::Radio, "a card around a one-pixel radio");
+    assert!(card.visible && card.label.starts_with("Work status"));
+    assert_eq!(find(&fields, "Show my profile").kind, FieldKind::Checkbox, "a switch");
+    assert_eq!(refusal(find(&fields, "WhatsApp")), Some(Refusal::Consent));
+    assert_eq!(refusal(find(&fields, "I agree")), Some(Refusal::Consent));
+    for noise in ["Search jobs", "Analytics", "Your email", "Get job alerts", "Type a message", "On registering"] {
+        assert!(!has(&fields, noise), "{noise} is not the sign-up form");
+    }
+    assert!(!fields.iter().any(|field| field.label == "Email" || field.label == "Password"), "the header's login is not the sign-up form");
+}
+
+/// `tests/fill/signup.html`. Click in the header's "Search jobs here" box. Reads only.
+#[test]
+#[ignore = "reads the window in front; run by hand against tests/fill/signup.html"]
+fn signup_page_with_the_cursor_in_the_header_search_reads_only_that_box() {
+    let (_, fields) = read("sign-up page", "in the header's Search jobs here box");
+    assert_eq!(fields.iter().map(|field| field.label.as_str()).collect::<Vec<_>>(), ["Search jobs"]);
+}
+
+/// `tests/fill/signup.html`. Click in the header's Email box, next to Login. Reads only.
+#[test]
+#[ignore = "reads the window in front; run by hand against tests/fill/signup.html"]
+fn signup_page_with_the_cursor_in_the_header_login_reads_only_the_login() {
+    let (_, fields) = read("sign-up page", "in the header's Email box");
+    assert_eq!(fields.iter().map(|field| field.label.as_str()).collect::<Vec<_>>(), ["Email", "Password"]);
+}
+
+/// `tests/fill/signup.html`. Click in "Enter your mobile number". Reads only.
+#[test]
+#[ignore = "reads the window in front; run by hand against tests/fill/signup.html"]
+fn signup_page_with_the_cursor_in_the_form_reads_the_form() {
+    let (_, fields) = read("sign-up page", "in Enter your mobile number");
+    assert!(has(&fields, "Full name") && has(&fields, "Show my profile"));
+    assert!(!has(&fields, "Search jobs") && !has(&fields, "Your email"));
+}
+
+/// `tests/fill/dropdowns.html`. Click on the heading. Reads only.
+#[test]
+#[ignore = "reads the window in front; run by hand against tests/fill/dropdowns.html"]
+fn dropdowns_are_read_by_what_they_take() {
+    let (_, fields) = read("drop-downs", "on the heading Drop-downs, as sites build them");
+    assert_eq!(find(&fields, "Email ID").kind, FieldKind::Email, "suggestions, but it takes typing");
+    assert_eq!(find(&fields, "Notice period").kind, FieldKind::List, "a plain <select>");
+    let team = find(&fields, "Team size");
+    assert_eq!((team.kind, team.value.as_str()), (FieldKind::List, "1–10"), "a button that opens a list");
+    assert_eq!(find(&fields, "Total experience").kind, FieldKind::List, "a div with role=combobox");
+    assert_eq!(find(&fields, "Key skills").kind, FieldKind::List, "a picker that keeps only its choices");
+    assert!(!has(&fields, "Current city"), "React-Select's 2-pixel input is left for you");
+}
+
+/// `tests/fill/dropdowns.html`. Click on the heading. Picks "11–50" for Team size through UI Automation:
+/// the list opens, the choice is selected, and the page says "Picked 11–50 for team". No keys, no mouse.
+#[test]
+#[ignore = "changes the window in front; run by hand against tests/fill/dropdowns.html"]
+fn a_drop_down_the_page_built_is_picked_through_the_list_it_opens() {
+    let (mut uia, fields) = read("drop-downs", "on the heading Drop-downs, as sites build them");
+    let written = write(&mut uia, find(&fields, "Team size"), "11–50", Mode::Form);
+    println!("{written:?}");
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(page_text(&mut uia).contains("Picked 11–50 for team"), "the page took the choice");
+}
+
+/// `tests/fill/codes.html`. Click on the heading. Reads only.
+#[test]
+#[ignore = "reads the window in front; run by hand against tests/fill/codes.html"]
+fn split_and_unlabelled_codes_are_refused() {
+    let (_, fields) = read("one-time codes", "on the heading Verify your mobile number");
+    let codes: Vec<&Field> = fields.iter().filter(|field| refusal(field) == Some(Refusal::OneTimeCode)).collect();
+    assert_eq!(codes.len(), 6 + 4 + 1, "six cells, a four-digit PIN and the box under the words about a code");
+    assert!(codes.iter().all(|code| code.value.is_empty()));
+    assert_eq!(refusal(find(&fields, "Full name")), None);
+    assert_eq!(refusal(find(&fields, "PIN code")), None, "a postcode is not a code");
+}
+
+/// `tests/fill/codes.html`. Click in the third of the six code boxes. Reads only: the write is refused.
+#[test]
+#[ignore = "reads the window in front; run by hand against tests/fill/codes.html"]
+fn write_here_refuses_one_cell_of_a_split_code() {
+    let mut uia = on_page("one-time codes", "in the third of the six code boxes");
+    let field = uia.focused().expect("the code box");
+    println!("{field:?}");
+    assert_eq!(write(&mut uia, &field, "7", Mode::Here), Err(FillError::Refused(Refusal::OneTimeCode)));
+}
+
+/// `tests/fill/dates.html`. Click on the heading. Reads only.
+#[test]
+#[ignore = "reads the window in front; run by hand against tests/fill/dates.html"]
+fn three_part_dates_are_read_as_their_parts() {
+    let (_, fields) = read("dates in parts", "on the heading Education and dates");
+    for part in ["Date of birth *: Day", "Date of birth *: Month", "Date of birth *: Year"] {
+        let field = find(&fields, part);
+        assert_eq!(field.kind, FieldKind::List, "{part}");
+        assert!(field.required, "{part}");
+    }
+    for part in ["DD", "MM", "YYYY"] {
+        assert_eq!(refusal(find(&fields, part)), None, "three boxes are a date, not a code");
+    }
+    assert_eq!(find(&fields, "Start date").kind, FieldKind::Date);
+    assert_eq!(find(&fields, "Year of passing").kind, FieldKind::List);
+}
+
+/// `tests/fill/cards.html`. Click on the heading. Reads only.
+#[test]
+#[ignore = "reads the window in front; run by hand against tests/fill/cards.html"]
+fn choice_cards_switches_and_styled_ticks_are_read() {
+    let (_, fields) = read("choice cards", "on the heading Choice cards, switches and styled ticks");
+    assert_eq!(find(&fields, "Gender: Male").kind, FieldKind::Radio, "role=radio cards");
+    assert_eq!(find(&fields, "Work status: I'm a fresher").kind, FieldKind::Radio, "a one-pixel radio in a card");
+    assert_eq!(find(&fields, "Show my profile").kind, FieldKind::Checkbox, "a switch");
+    assert_eq!(find(&fields, "Open to relocation").kind, FieldKind::Checkbox, "a one-pixel checkbox");
+    assert!(!has(&fields, "shift"), "toggle buttons stay buttons");
+    assert!(!has(&fields, "Full time"), "a div with a click handler is not a box");
+    assert!(!has(&fields, "fax"), "the trap off screen is never read");
+}
+
+/// `tests/fill/hindi.html`. Click on the heading नया पंजीकरण. Reads only.
+#[test]
+#[ignore = "reads the window in front; run by hand against tests/fill/hindi.html"]
+fn a_hindi_form_is_read_in_hindi() {
+    let (_, fields) = read("हिंदी फ़ॉर्म", "on the heading नया पंजीकरण");
+    assert!(find(&fields, "पूरा नाम").required, "the star");
+    assert_eq!(find(&fields, "ईमेल पता").kind, FieldKind::Email);
+    assert_eq!(find(&fields, "मोबाइल नंबर").kind, FieldKind::Phone);
+    assert_eq!(find(&fields, "जन्म तिथि").kind, FieldKind::Date);
+    assert_eq!(refusal(find(&fields, "पिन कोड")), None);
+    assert_eq!(find(&fields, "अपना शहर लिखें").kind, FieldKind::PlainText, "a placeholder is the label");
+    assert_eq!(find(&fields, "पासवर्ड").kind, FieldKind::Password);
+    assert_eq!(refusal(find(&fields, "ओटीपी")), Some(Refusal::OneTimeCode));
+    assert_eq!(refusal(find(&fields, "सहमत")), Some(Refusal::Consent));
+    assert!(!has(&fields, "खोजें"), "the header's search is not the form");
+}
+
+/// `tests/fill/steps.html`. Click on the heading. Reads only.
+#[test]
+#[ignore = "reads the window in front; run by hand against tests/fill/steps.html"]
+fn only_the_step_on_screen_is_read() {
+    let (_, fields) = read("a form in steps", "on the heading Apply in three steps");
+    assert_eq!(fields.iter().map(|field| field.label.as_str()).collect::<Vec<_>>(), ["Full name", "Email", "Mobile number"]);
 }

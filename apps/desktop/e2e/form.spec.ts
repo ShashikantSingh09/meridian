@@ -20,6 +20,11 @@ type Mock = {
   fillingBox(done: number, total: number, reading?: string | null): void;
   leaveThePage(): void;
   refuseUndo(why: string): void;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  sampleSignUp(): any;
+  fillOnThePage(field: number): void;
+  refuseKeep(why: string | null): void;
+  keyboard(): boolean[];
 };
 type App = {
   updateSettings(patch: object): Promise<void>;
@@ -41,7 +46,25 @@ const pressInForm = async (page: Page) => {
   await hooks(page, (w) => w.__mock.pickForm(true));
   await hooks(page, (w) => w.__mock.pressHereKey());
 };
-const filled = (page: Page) => expect(island(page)).toContainText("Filled 8 of 11 · 3 need you");
+const point = (page: Page, on: boolean) => page.evaluate((on) => (window as never as Hooks).__meridian.setHovered(on), on);
+/** The line after a fill, which the small pill opens to under the pointer. */
+const filled = async (page: Page) => {
+  await point(page, true);
+  await expect(island(page)).toContainText("Filled 8 of 11 · 3 need you");
+};
+/** Show, from the line under the pointer. */
+const openList = async (page: Page) => {
+  await point(page, true);
+  await island(page).getByRole("button", { name: "Show" }).click();
+};
+/** Naukri's sign-up form, filled, with its list open. */
+const signUpList = async (page: Page) => {
+  await hooks(page, (w) => w.__mock.formNext({ outcome: "filled", form: w.__mock.sampleSignUp() }));
+  await pressInForm(page);
+  await openList(page);
+  await expect(island(page).getByRole("dialog", { name: "Filled 2 of 5 · 3 need you" })).toBeVisible();
+};
+const rowOf = (page: Page, label: string) => island(page).locator(".form-row", { hasText: label });
 /** The sample form changed in the page, then queued as the next run's answer. */
 const nextForm = (page: Page, change: string) => page.evaluate(`(() => { const form = window.__mock.sampleForm(); ${change}; window.__mock.formNext({ outcome: "filled", form }); })()`);
 const mood = async (page: Page, feeling: string) => {
@@ -79,7 +102,7 @@ test.describe("a · a job application", () => {
 
   test("Show lists every box and where it came from, and Go to it goes to a box that is yours", async ({ page }) => {
     await pressInForm(page);
-    await island(page).getByRole("button", { name: "Show" }).click();
+    await openList(page);
     const list = island(page).getByRole("dialog", { name: "Filled 8 of 11 · 3 need you" });
     await expect(list).toContainText("kestrellabs.in");
     await expect(list.locator(".form-row")).toHaveCount(11);
@@ -98,7 +121,7 @@ test.describe("a · a job application", () => {
 
   test("one box can be put back from the list", async ({ page }) => {
     await pressInForm(page);
-    await island(page).getByRole("button", { name: "Show" }).click();
+    await openList(page);
     const row = island(page).locator(".form-row", { hasText: "Current company" });
     await row.hover();
     await row.getByRole("button", { name: "Undo" }).click();
@@ -114,11 +137,12 @@ test.describe("a · a job application", () => {
        form.filled = 6; form.need = 5`,
     );
     await pressInForm(page);
-    await island(page).getByRole("button", { name: "Show" }).click();
+    await openList(page);
     const list = island(page).getByRole("dialog", { name: "Filled 6 of 11 · 5 need you" });
     await mood(page, "needs");
     await expect(list.locator(".form-row")).toHaveCount(5);
-    await expect(list.locator(".form-row", { hasText: "Notice period" })).toContainText("Not in Your details or Knowledge");
+    // Why it was left is in the box to answer it in.
+    await expect(list.locator(".form-row", { hasText: "Notice period" }).getByRole("textbox")).toHaveAttribute("placeholder", "Not in Your details or Knowledge");
     await expect(list.locator(".form-row", { hasText: "Notice period" }).getByRole("button", { name: "Go to it" })).toBeVisible();
     await expect(list.locator(".form-row", { hasText: "Create a password" }).getByRole("button")).toHaveCount(0);
     await expect(list).toContainText("Say it and it fills that box: “notice period …”");
@@ -126,11 +150,11 @@ test.describe("a · a job application", () => {
     await expect(list.locator(".form-row")).toHaveCount(11);
   });
 
-  test("Add to Your details opens Settings › Your details", async ({ page }) => {
+  test("Open Your details opens Settings › Your details", async ({ page }) => {
     await nextForm(page, `form.rows[5] = { ...form.rows[5], state: "needs-you", why: "Not in Your details or Knowledge" }; form.filled = 7; form.need = 4`);
     await pressInForm(page);
-    await island(page).getByRole("button", { name: "Show" }).click();
-    await island(page).getByRole("button", { name: "Add to Your details" }).click();
+    await openList(page);
+    await island(page).getByRole("button", { name: "Open Your details" }).click();
     await expect(page.getByRole("heading", { name: "Your details", exact: true })).toBeVisible();
   });
 
@@ -285,7 +309,135 @@ test.describe("the island's button", () => {
   });
 });
 
+test.describe("c · out of the way, and answered on the island", () => {
+  test("after a fill it waits as a small pill, and pointing opens the line with Undo", async ({ page }) => {
+    await pressInForm(page);
+    await expect(island(page)).toContainText("3 need you");
+    await expect(island(page)).not.toContainText("Filled 8 of 11");
+    await expect(island(page).getByRole("button")).toHaveCount(0);
+    await mood(page, "needs");
+    const small = (await island(page).boundingBox())!.width;
+    expect(small).toBeLessThan(200);
+    await point(page, true);
+    await expect(island(page)).toContainText("Filled 8 of 11 · 3 need you");
+    await expect(island(page).getByRole("button", { name: "Undo", exact: true })).toBeVisible();
+    await expect.poll(async () => (await island(page).boundingBox())!.width).toBeGreaterThan(400);
+    await point(page, false);
+    await expect(island(page)).toContainText("3 need you");
+    await expect(island(page).getByRole("button", { name: "Undo", exact: true })).toHaveCount(0);
+  });
+
+  test("with nothing left for the user, the pill says Filled", async ({ page }) => {
+    await nextForm(page, `form.rows = form.rows.slice(0, 8); form.total = 8; form.need = 0`);
+    await pressInForm(page);
+    await expect(island(page).locator(".form-pill")).toHaveText("Filled");
+    await mood(page, "done");
+  });
+
+  test("Work status is one question with a button for each choice, and a click puts that one in", async ({ page }) => {
+    await signUpList(page);
+    const status = rowOf(page, "Work status");
+    await expect(status).toHaveCount(1);
+    await expect(status.getByRole("button")).toHaveText(["I'm experienced", "I'm a fresher", "Go to it"]);
+    await status.getByRole("button", { name: "I'm a fresher" }).click();
+    await expect(status).toContainText("I'm a fresher");
+    await expect(status.locator(".form-src")).toHaveText("You picked");
+    await expect(status.getByRole("button", { name: "I'm experienced" })).toHaveCount(0);
+    await expect(island(page).getByRole("dialog", { name: "Filled 3 of 5 · 2 need you" })).toBeVisible();
+    expect(await calls(page)).toContain("form answer 5 yes");
+  });
+
+  test("a box that needs you takes your answer, and the island has the keyboard only while you type", async ({ page }) => {
+    await signUpList(page);
+    const email = rowOf(page, "Email ID");
+    const box = email.getByRole("textbox", { name: "Answer for Email ID" });
+    await expect(box).toHaveAttribute("placeholder", "Not in Your details");
+    const before = ((await hooks(page, (w) => w.__mock.keyboard())) as boolean[]).length;
+    await box.click();
+    await box.fill("ravi.sharma84@gmail.com");
+    expect(((await hooks(page, (w) => w.__mock.keyboard())) as boolean[]).slice(before)).toEqual([true]);
+    await box.press("Enter");
+    await expect(email).toContainText("ravi.sharma84@gmail.com");
+    await expect(email.locator(".form-src")).toHaveText("You typed");
+    expect(await calls(page)).toContain("form answer 1 ravi.sharma84@gmail.com");
+    const keys = (await hooks(page, (w) => w.__mock.keyboard())) as boolean[];
+    expect(keys.slice(before)).toEqual([true, false]);
+    // The password stays yours: no box, no button.
+    const password = rowOf(page, "Password");
+    await expect(password.getByRole("textbox")).toHaveCount(0);
+    await expect(password.getByRole("button")).toHaveCount(0);
+    await expect(password).toContainText("Yours to fill");
+  });
+
+  test("what you typed is added to Your details in one tap, through its checks", async ({ page }) => {
+    await signUpList(page);
+    const email = rowOf(page, "Email ID");
+    await email.getByRole("textbox").fill("ravi.sharma84@gmail.com");
+    await email.getByRole("textbox").press("Enter");
+    const add = email.getByRole("button", { name: "Add to Your details" });
+    await expect(add).toHaveAttribute("title", "Keep it in Your details as your email");
+    await hooks(page, (w) => w.__mock.refuseKeep("An email looks like name@example.com."));
+    await add.click();
+    await expect(island(page).locator(".form-said")).toHaveText("An email looks like name@example.com.");
+    await hooks(page, (w) => w.__mock.refuseKeep(null));
+    await add.click();
+    await expect(email).toContainText("Added to Your details");
+    await expect(email.getByRole("button", { name: "Add to Your details" })).toHaveCount(0);
+    expect((await calls(page)).filter((call) => call === "form keep 1")).toHaveLength(2);
+  });
+
+  test("a work status picked from Your details says which detail picked it", async ({ page }) => {
+    await page.evaluate(() => {
+      const mock = (window as never as Hooks).__mock;
+      const form = mock.sampleSignUp();
+      form.rows[4] = { ...form.rows[4], state: "filled", origin: "details", from: "company", value: "I'm experienced", why: "" };
+      Object.assign(form, { filled: 3, need: 2 });
+      mock.formNext({ outcome: "filled", form });
+    });
+    await pressInForm(page);
+    await openList(page);
+    await island(page).getByRole("button", { name: "Show all 5" }).click();
+    const status = rowOf(page, "Work status");
+    await expect(status).toContainText("I'm experienced");
+    await expect(status.locator(".form-src")).toHaveText("Your details");
+    await expect(status.locator(".form-src")).toHaveAttribute("title", "Picked because Your details has your company");
+  });
+
+  test("a box you fill on the page itself needs you no more", async ({ page }) => {
+    await signUpList(page);
+    await expect(island(page).locator(".form-row")).toHaveCount(3);
+    await hooks(page, (w) => w.__mock.fillOnThePage(1));
+    await expect(island(page).getByRole("dialog", { name: "Filled 2 of 5 · 2 need you" })).toBeVisible();
+    await expect(rowOf(page, "Email ID")).toHaveCount(0);
+    await island(page).getByRole("button", { name: "Show all 5" }).click();
+    await expect(rowOf(page, "Email ID")).toContainText("Done by you");
+  });
+});
+
 test.describe("the outlines over the page", () => {
+  test("a filled box fades from where it had got to, and stays still with reduced motion", async ({ page }) => {
+    await page.goto("/outlines.html");
+    const draw = (motion: string) =>
+      page.evaluate((motion) => {
+        const w = window as never as { draw(o: object[], motion: string): void };
+        w.draw(
+          [
+            { x: 20, y: 20, w: 300, h: 26, look: "ok", age: 1000 },
+            { x: 20, y: 70, w: 300, h: 26, look: "need", tag: ["need", "Needs you"] },
+          ],
+          motion,
+        );
+      }, motion);
+    await draw("system");
+    const boxes = page.locator(".ol-box");
+    await expect(boxes.nth(0)).toHaveAttribute("data-fade", "");
+    await expect(boxes.nth(0)).toHaveCSS("animation-delay", "2.4s");
+    await expect(boxes.nth(0)).toHaveCSS("animation-name", "ol-fade");
+    await expect(boxes.nth(1)).not.toHaveAttribute("data-fade", "");
+    await draw("reduced");
+    await expect(boxes.nth(0)).toHaveCSS("animation-name", "none");
+  });
+
   test("green for filled, amber with a lock for yours, blue for the box being filled, and a tip on pointing", async ({ page }) => {
     await page.goto("/outlines.html");
     await page.evaluate(() => {

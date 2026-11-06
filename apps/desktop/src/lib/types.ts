@@ -320,24 +320,34 @@ export type HereOutcome =
   /** Fill this form found one box only, so Write here takes it. */
   | { outcome: "single" };
 
-/** Where one box of a form is up to. */
-export type FormRowState = "waiting" | "filled" | "yours" | "needs-you" | "kept" | "ask-first" | "put-back";
-/** Where a value came from. Your details are put in by Meridian and never go to the AI. */
-export type FormOrigin = "details" | "knowledge" | "mail" | "notes" | "file" | "clipboard" | "page" | "said" | "written-by-ai";
+/** Where one box of a form is up to. `by-you`: it needed the user, and they have been in it on the page. */
+export type FormRowState = "waiting" | "filled" | "yours" | "needs-you" | "kept" | "ask-first" | "put-back" | "by-you";
+/** Where a value came from. Your details are put in by Meridian and never go to the AI. `typed`: on the island. */
+export type FormOrigin = "details" | "knowledge" | "mail" | "notes" | "file" | "clipboard" | "page" | "said" | "written-by-ai" | "typed";
 
-/** One box of a form, for the Show list. */
+/** One choice of a question, by its box. */
+export interface FormChoice {
+  field: number;
+  label: string;
+}
+
+/** One box of a form, or one question of choices, for the Show list. */
 export interface FormRow {
   field: number;
   label: string;
   kind: string;
   state: FormRowState;
   origin?: FormOrigin;
-  /** The Knowledge page, mail or file it came from. */
+  /** The Knowledge page, mail or file it came from. For a choice Your details answered, the detail, such as "company". */
   from: string;
   /** What went in. An ID number is masked. */
   value: string;
   /** Why it was left. */
   why: string;
+  /** A question's choices, a button each. Its `field` is the one picked. */
+  choices?: FormChoice[];
+  /** The Your details key what the user types here can be kept under, when Your details has nothing for it. */
+  key?: string;
 }
 
 /** A form as Fill this form left it. */

@@ -1,5 +1,24 @@
 # Development ledger
 
+## 2026-11-06: Fill this form on any form, and seamless
+
+The owner asked that no sign-up or form have the faults Naukri showed, and approved six changes to make filling seamless. See D76's two
+new paragraphs. Two builds ran in parallel and were merged: one hardened how forms are read (patterns from Chromium's and Firefox's
+own source, a pure scoping rule for the form in front, seven new offline test pages), the other built the pill, fading outlines, answers
+on the island, choices as one question, the work status rule and Add to Your details. Merging added a re-read of written boxes at the end
+of a run, and the list's footer button became "Open Your details", since each row now has its own "Add to Your details".
+
+### Proved
+
+Rust: every crate passes, including 125 for the fill engine (kinds from properties, labels, split codes, scoping, grouping, the work
+status rule, island answers, the end-of-run re-read, failing without it) and 165 for the app core. Vitest 260 and Playwright 307 pass.
+
+### Not proved
+
+- Any of it in a real browser. The 21 by-hand tests in `crates/fill/tests/live_forms.rs` run against the pages in `tests/fill/`.
+- Answering on the island and Add to Your details writing into a real page; the fade in the real outlines window; whether Naukri's work
+  status cards report as radios.
+
 ## 2026-11-06: Fill this form on a real sign-up page
 
 The owner tried 0.7.0 on Naukri's sign-up form. Three faults, all fixed:

@@ -1,6 +1,7 @@
 //! The outlines Fill this form draws over the form: a window of its own over the form's window, that
 //! the mouse goes straight through and that never takes the keyboard. Green for a box Meridian filled,
-//! amber for one that is the user's or needs them, blue for the box being filled now.
+//! fading after a few seconds, amber for one that is the user's or needs them, blue for the box being
+//! filled now.
 //!
 //! Pointing at a box says where its value came from. The window cannot see the mouse, so while the
 //! outlines show, the cursor's place is read every 100 ms, as the island reads it: no hook. The page
@@ -37,6 +38,10 @@ pub struct Outline {
     /// What pointing at it says: a title and a line.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tip: Option<(String, String)>,
+    /// For a filled box, how long ago, in ms: the page fades it from where it has got to, so a redraw
+    /// never starts the fade again.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub age: Option<u64>,
 }
 
 struct Shown {
@@ -55,10 +60,16 @@ fn rect_of(hwnd: isize) -> Option<RECT> {
     (rect.right > rect.left && rect.bottom > rect.top).then_some(rect)
 }
 
-/// The boxes from the window's corner, in physical pixels. The page divides by its own ratio.
-fn script(corner: (i32, i32), outlines: &[Outline]) -> String {
+/// The boxes from the window's corner, in physical pixels. The page divides by its own ratio. `motion`
+/// is the app's own setting, "system", "reduced" or "full", which the page cannot read itself.
+fn script(corner: (i32, i32), outlines: &[Outline], motion: &str) -> String {
     let moved: Vec<Outline> = outlines.iter().map(|o| Outline { x: o.x - corner.0, y: o.y - corner.1, ..o.clone() }).collect();
-    format!("window.draw && window.draw({})", serde_json::to_string(&moved).unwrap_or_else(|_| "[]".into()))
+    let motion = serde_json::to_string(motion).unwrap_or_else(|_| "\"system\"".into());
+    format!("window.draw && window.draw({}, {motion})", serde_json::to_string(&moved).unwrap_or_else(|_| "[]".into()))
+}
+
+fn motion(app: &AppHandle) -> String {
+    app.state::<crate::commands::Core>().settings.lock().unwrap().motion.clone()
 }
 
 fn shown_window(win: &WebviewWindow, show: bool) {
@@ -90,7 +101,8 @@ fn window(app: &AppHandle) -> Option<WebviewWindow> {
         .visible(false)
         .on_page_load(|win, payload| {
             if matches!(payload.event(), PageLoadEvent::Finished) {
-                let drawn = SHOWN.lock().unwrap().as_ref().map(|shown| script(shown.corner, &shown.outlines));
+                let motion = motion(win.app_handle());
+                let drawn = SHOWN.lock().unwrap().as_ref().map(|shown| script(shown.corner, &shown.outlines, &motion));
                 if let Some(drawn) = drawn {
                     let _ = win.eval(drawn);
                 }
@@ -124,7 +136,7 @@ pub fn draw(app: &AppHandle, hwnd: isize, outlines: Vec<Outline>) {
     let Some(win) = window(app) else { return };
     let _ = win.set_position(PhysicalPosition::new(rect.left, rect.top));
     let _ = win.set_size(PhysicalSize::new((rect.right - rect.left) as u32, (rect.bottom - rect.top) as u32));
-    let _ = win.eval(script(corner, &outlines));
+    let _ = win.eval(script(corner, &outlines, &motion(app)));
     shown_window(&win, true);
     follow(app);
 }
@@ -179,15 +191,16 @@ mod tests {
     use super::*;
 
     fn outline(x: i32, tip: bool) -> Outline {
-        Outline { x, y: 100, w: 200, h: 26, look: "ok", tag: None, tip: tip.then(|| ("From Your details · Phone".into(), "Put in by Meridian.".into())) }
+        Outline { x, y: 100, w: 200, h: 26, look: "ok", tag: None, tip: tip.then(|| ("From Your details · Phone".into(), "Put in by Meridian.".into())), age: Some(1200) }
     }
 
     #[test]
     fn the_page_gets_boxes_from_the_windows_corner() {
-        let said = script((50, 40), &[outline(250, true)]);
+        let said = script((50, 40), &[outline(250, true)], "reduced");
         assert!(said.starts_with("window.draw && window.draw(["));
         assert!(said.contains(r#""x":200,"y":60"#), "{said}");
         assert!(said.contains("From Your details · Phone"));
+        assert!(said.contains(r#""age":1200"#) && said.ends_with(r#"], "reduced")"#), "the fade and the motion setting go too: {said}");
     }
 
     #[test]

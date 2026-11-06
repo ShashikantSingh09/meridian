@@ -5,7 +5,7 @@
 
 import { bridge } from "./bridge";
 import { describe, end, sayFor, settle, show, showFor } from "./here";
-import { getState, openPanel, openSettings } from "./store";
+import { getState, islandTyping, openPanel, openSettings } from "./store";
 import type { FormRow, FormSummary, HereOutcome } from "./types";
 
 /** The card that says what Undo put back stays this long. */
@@ -20,6 +20,50 @@ export function filledLine(form: FormSummary) {
   const filled = `Filled ${form.filled} of ${form.total}`;
   return form.need > 0 ? `${filled} · ${form.need} need you` : filled;
 }
+
+/** The small pill a filled form stays as until the pointer is on it: "2 need you", or "Filled". */
+export function pillLine(form: FormSummary) {
+  if (form.need === 0) return "Filled";
+  return form.need === 1 ? "1 needs you" : `${form.need} need you`;
+}
+
+/** Kinds of box the island has no words for: lists, whose choices are not read, tick boxes, and the
+ *  user's own. They keep Go to it. */
+const NO_WORDS = ["list", "checkbox", "radio", "password", "file", "button"];
+
+/** How the island can answer a box that needs the user: a button for each choice of a question, a box
+ *  for words, or not at all. Never a box that is the user's, or an ID number waiting for its yes. */
+export function answerWith(row: FormRow): "choices" | "words" | null {
+  if (row.state !== "needs-you") return null;
+  if (row.choices?.length) return "choices";
+  return NO_WORDS.includes(row.kind) ? null : "words";
+}
+
+/** How the island names a Your details key, on the button that keeps what was typed under it. */
+const DETAIL_NAMES: Record<string, string> = {
+  name: "name",
+  "name.en": "name",
+  "name.hi": "name in Hindi",
+  birth: "date of birth",
+  email: "email",
+  phone: "phone",
+  "phone.other": "other phone",
+  "address.lines": "address",
+  "address.city": "city",
+  "address.pin": "PIN code",
+  "address.state": "state",
+  "address.hi": "address in Hindi",
+  "work.company": "company",
+  "work.title": "job title",
+  "work.department": "department",
+  "work.id": "employee ID",
+  "work.email": "work email",
+  "work.linkedin": "LinkedIn",
+};
+export const detailName = (key: string) => DETAIL_NAMES[key] ?? key;
+
+/** Rows the user answered on the island, which offer Add to Your details. */
+export const typedHere = (row: FormRow) => row.state === "filled" && row.origin === "typed";
 
 /** Where a value came from, as the Show list says it. */
 export function sourceOf(row: FormRow): string {
@@ -43,6 +87,8 @@ export function sourceOf(row: FormRow): string {
       return "You said";
     case "written-by-ai":
       return "Written by AI";
+    case "typed":
+      return row.choices?.length ? "You picked" : "You typed";
     default:
       return "";
   }
@@ -53,10 +99,10 @@ const missing = (row: FormRow) => row.state === "needs-you";
 const needsUser = (row: FormRow) => row.state === "needs-you" || row.state === "yours" || row.state === "ask-first";
 
 /** The Show list starts with only the boxes that need the user when one has no value, as the board
- *  draws it, and with every box otherwise. */
+ *  draws it, and with every box otherwise. A box answered on the island stays, to offer Add to Your details. */
 export function listedRows(form: FormSummary, all: boolean): { rows: FormRow[]; missing: boolean } {
   const gaps = form.rows.some(missing);
-  return { rows: gaps && !all ? form.rows.filter(needsUser) : form.rows, missing: gaps && !all };
+  return { rows: gaps && !all ? form.rows.filter((row) => needsUser(row) || typedHere(row)) : form.rows, missing: gaps && !all };
 }
 
 /** Rows of room the Show list needs: its rows, up to where it scrolls, and the hint or the note. */
@@ -111,6 +157,37 @@ export async function undoBox(field: number) {
     if (here?.kind === "form") show({ ...here, form: undone.form });
   } catch (err) {
     sayFor(describe(err));
+  }
+}
+
+/** The form as the core has it now, on the card on show. */
+function update(form: FormSummary) {
+  const here = current();
+  if (here?.kind === "form") show({ ...here, form });
+}
+
+/** An answer typed or picked on the island for a box that needs the user. The keyboard goes back to the
+ *  page first, even from a box only left a moment ago, so the core finds the page in front and writes it
+ *  there, as it writes every value. */
+export async function answerBox(field: number, text: string) {
+  await islandTyping(false);
+  try {
+    update(await bridge.formAnswer(field, text));
+  } catch (err) {
+    sayFor(describe(err));
+  }
+}
+
+/** Add to Your details: what the user typed in that box is kept, through Your details' own checks.
+ *  Whether it was, and if not, the card says why. */
+export async function keepBox(field: number) {
+  try {
+    update(await bridge.formKeep(field));
+    return true;
+  } catch (err) {
+    const here = current();
+    if (here?.form) update({ ...here.form, note: describe(err) });
+    return false;
   }
 }
 

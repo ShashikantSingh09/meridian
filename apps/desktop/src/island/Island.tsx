@@ -109,7 +109,7 @@ function CompactContent({ view, reduced, hovered, sliver, mediaOpen, here, ask, 
     case "note":
       return <NoteView hovered={hovered} reduced={reduced} />;
     case "here":
-      return <HereView here={here} reduced={reduced} />;
+      return <HereView here={here} reduced={reduced} hovered={hovered} />;
     case "ask":
       return <AskView ask={ask} reduced={reduced} />;
     case "finish":
@@ -313,7 +313,14 @@ export function Island() {
   }, [lit, reduced, view, lapMs, lapEvery]);
   const glow = view === "media" ? artTint ?? "#ff7a9c" : `var(${stateToken(view, snapshot)})`;
   // A waiting request looks the same either way, and swapping it would lose the answers so far.
-  const opensOnHover = view === "idle" || view === "live" || view === "note" || (view === "working" && waiting === null) || (view === "notification" && snapshot.notices[0]?.cards !== undefined);
+  const opensOnHover =
+    view === "idle" ||
+    view === "live" ||
+    view === "note" ||
+    (view === "working" && waiting === null) ||
+    (view === "notification" && snapshot.notices[0]?.cards !== undefined) ||
+    // A filled form waits as a small pill, and opens to its line with Undo.
+    (view === "here" && hereStep === "filled");
   const contentKey = expanded
     ? "panel"
     : view + (opened && opensOnHover ? "-hover" : "") + (view === "media" && playerOpen ? "-open" : "") + (view === "here" ? `-${hereStep}` : view === "ask" ? `-${askPhase}` : view === "finish" ? `-${finish?.phase}-${finish?.ask?.id ?? finish?.end?.kind ?? finish?.card?.kind ?? ""}` : "");

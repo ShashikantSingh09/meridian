@@ -151,3 +151,56 @@
   font-size: 12px;
   color: rgba(240, 240, 248, 0.66);
 }
+
+.form-row[data-state="by-you"] .form-v {
+  color: rgba(240, 240, 248, 0.6);
+}
+
+/* A box that needs you takes its answer on the row: a box to type in, or a button a choice. */
+.form-answer {
+  display: flex;
+  height: 20px;
+}
+
+.island .form-answer input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 6px;
+  background: rgba(255, 159, 10, 0.1);
+  box-shadow: inset 0 0 0 1px rgba(255, 190, 92, 0.35);
+  font: 400 12px Inter, sans-serif;
+  color: #f7f7f9;
+  outline: none;
+}
+
+.island .form-answer input::placeholder {
+  color: #ffd18a;
+  opacity: 0.85;
+}
+
+.island .form-answer input:focus {
+  box-shadow: inset 0 0 0 1.5px #ffbe5c;
+}
+
+.form-choices {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.form-choices .form-sm {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.form-added {
+  flex: none;
+  font-size: 11px;
+  color: #30d158;
+  white-space: nowrap;
+}

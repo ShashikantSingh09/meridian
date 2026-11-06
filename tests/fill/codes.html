@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Meridian test: one-time codes</title>
+<style>
+  :root { color-scheme: light dark; --line: #8886; }
+  body { font: 15px/1.4 system-ui, sans-serif; max-width: 640px; margin: 24px auto; padding: 0 16px; }
+  form { display: grid; gap: 14px; }
+  input { font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; }
+  .cells { display: flex; gap: 10px; }
+  .cells input { width: 28px; height: 32px; text-align: center; font-size: 20px; padding: 2px; }
+</style>
+</head>
+<body>
+<h1>Verify your mobile number</h1>
+<p>For <code>crates/fill/tests/live_forms.rs</code>. Every code box here is yours to fill, even with no label. Nothing here goes online.</p>
+
+<form id="verify">
+  <label>Full name <input id="name"></label>
+
+  <!-- A split code: six one-character boxes, each in its own wrapper, none of them labelled. -->
+  <p>Enter the 6-digit code we sent to +91 98xxxx4317</p>
+  <div class="cells">
+    <div><input maxlength="1" inputmode="numeric"></div><div><input maxlength="1" inputmode="numeric"></div>
+    <div><input maxlength="1" inputmode="numeric"></div><div><input maxlength="1" inputmode="numeric"></div>
+    <div><input maxlength="1" inputmode="numeric"></div><div><input maxlength="1" inputmode="numeric"></div>
+  </div>
+
+  <!-- A four-digit PIN whose boxes are only called "Digit 1" to "Digit 4". -->
+  <p>Set a 4-digit PIN for quick login</p>
+  <div class="cells">
+    <input aria-label="Digit 1" maxlength="1"><input aria-label="Digit 2" maxlength="1">
+    <input aria-label="Digit 3" maxlength="1"><input aria-label="Digit 4" maxlength="1">
+  </div>
+
+  <!-- One box, no label, with only the words above it. -->
+  <p>Enter the verification code from your email</p>
+  <input id="email-code">
+
+  <label>PIN code <input id="pincode" placeholder="6 digits"></label>
+</form>
+</body>
+</html>

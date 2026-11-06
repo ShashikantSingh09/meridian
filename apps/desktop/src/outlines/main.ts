@@ -18,7 +18,13 @@ export interface Outline {
   tag?: ["ai" | "mail" | "lock" | "need", string];
   /** What pointing at it says. */
   tip?: [string, string];
+  /** For a filled box, how long ago in ms. It fades out by FADE_MS, and the core then stops sending it. */
+  age?: number;
 }
+
+/** A filled box is green for this long, then fades out over the rest of FADE_MS. */
+export const FADE_AT_MS = 3400;
+export const FADE_MS = 4000;
 
 const root = document.getElementById("outlines")!;
 let shown: Outline[] = [];
@@ -43,14 +49,21 @@ function eyes() {
 /** Physical pixels to the page's own, which follow the screen's scale. */
 const css = (px: number) => px / (window.devicePixelRatio || 1);
 
-export function draw(outlines: Outline[]) {
+/** `motion` is the app's own setting, which this page cannot read: "system" follows Windows. */
+export function draw(outlines: Outline[], motion = "system") {
   shown = outlines;
+  document.documentElement.dataset.motion = motion;
   root.replaceChildren();
   outlines.forEach((o, index) => {
     const box = el("div", "ol-box");
     box.dataset.look = o.look;
     box.dataset.index = String(index);
     Object.assign(box.style, { left: `${css(o.x)}px`, top: `${css(o.y)}px`, width: `${css(o.w)}px`, height: `${css(o.h)}px` });
+    // Drawn again as the page scrolls, so the fade starts from where it had got to, never over.
+    if (o.age !== undefined) {
+      box.dataset.fade = "";
+      box.style.animationDelay = `${FADE_AT_MS - o.age}ms`;
+    }
     if (o.tag) {
       const [kind, text] = o.tag;
       const tag = el("span", "ol-tag");

@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Meridian test: drop-downs</title>
+<style>
+  :root { color-scheme: light dark; --line: #8886; }
+  body { font: 15px/1.4 system-ui, sans-serif; max-width: 720px; margin: 24px auto; padding: 0 16px; }
+  form { display: grid; gap: 14px; }
+  .row { display: grid; gap: 4px; position: relative; }
+  input, select, button, .control, [role=combobox] { font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: Canvas; text-align: left; }
+  [role=listbox] { list-style: none; margin: 0; padding: 4px; border: 1px solid var(--line); border-radius: 6px; background: Canvas; position: absolute; top: 100%; left: 0; right: 0; z-index: 1; }
+  [role=option] { padding: 4px 6px; cursor: default; }
+  [role=option][aria-selected=true] { font-weight: 600; }
+  /* React-Select sizes its input to what is typed: 2 px wide when empty. */
+  .rs-control { display: flex; align-items: center; gap: 4px; }
+  .rs-input { width: 2px; min-width: 2px; border: 0; padding: 0; outline: 0; background: transparent; }
+  #log { margin-top: 16px; color: GrayText; }
+</style>
+</head>
+<body>
+<h1>Drop-downs, as sites build them</h1>
+<p>For <code>crates/fill/tests/live_forms.rs</code>. Nothing here goes online.</p>
+
+<form id="prefs" aria-label="Job preferences">
+  <!-- An email box with domain suggestions: it takes typing, so it is a text box. -->
+  <div class="row">
+    <label for="email">Email ID</label>
+    <input id="email" role="combobox" aria-autocomplete="list" aria-expanded="false" placeholder="Tell us your email ID">
+  </div>
+
+  <!-- A plain <select>. Chrome gives it a value that is not read-only, but it is a list. -->
+  <div class="row">
+    <label for="notice">Notice period</label>
+    <select id="notice"><option value="">Select</option><option>15 days</option><option>30 days</option><option>60 days</option></select>
+  </div>
+
+  <!-- A button that opens a list, as Headless UI and MUI's Select build it. -->
+  <div class="row">
+    <span id="team-label">Team size</span>
+    <button type="button" id="team" aria-haspopup="listbox" aria-expanded="false" aria-labelledby="team-label team">1–10</button>
+    <ul id="team-options" role="listbox" aria-labelledby="team-label" hidden>
+      <li role="option" aria-selected="true">1–10</li>
+      <li role="option" aria-selected="false">11–50</li>
+      <li role="option" aria-selected="false">51–200</li>
+    </ul>
+  </div>
+
+  <!-- ARIA 1.2's select-only combobox: a div you cannot type in. -->
+  <div class="row">
+    <span id="exp-label">Total experience</span>
+    <div id="exp" role="combobox" tabindex="0" aria-labelledby="exp-label" aria-haspopup="listbox" aria-expanded="false" aria-controls="exp-options">Select experience</div>
+    <div id="exp-options" role="listbox" hidden>
+      <div role="option" aria-selected="false">Fresher</div>
+      <div role="option" aria-selected="false">1 year</div>
+      <div role="option" aria-selected="false">2 years</div>
+    </div>
+  </div>
+
+  <!-- A picker like MUI's Autocomplete: you type, but only a choice from its list stays. -->
+  <div class="row">
+    <label for="skills">Key skills</label>
+    <input id="skills" class="MuiAutocomplete-input MuiInputBase-input" role="combobox" aria-autocomplete="list" aria-expanded="false">
+  </div>
+
+  <!-- React-Select: the input you type in is 2 px wide, and the words you see are a div beside it. -->
+  <div class="row">
+    <label for="react-select-2-input">Current city</label>
+    <div class="control rs-control">
+      <div class="rs-value">Select...</div>
+      <input id="react-select-2-input" class="rs-input" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-haspopup="true">
+    </div>
+  </div>
+</form>
+<p id="log" aria-live="polite">Nothing picked yet.</p>
+
+<script>
+  const log = (text) => { document.getElementById('log').textContent = text; };
+  // The button and the div open their lists on a click, the way their libraries do.
+  for (const [opener, list] of [['team', 'team-options'], ['exp', 'exp-options']]) {
+    const button = document.getElementById(opener);
+    const options = document.getElementById(list);
+    const open = (yes) => {
+      options.hidden = !yes;
+      button.setAttribute('aria-expanded', String(yes));
+      if (yes) button.setAttribute('aria-controls', list); else if (opener === 'team') button.removeAttribute('aria-controls');
+    };
+    button.addEventListener('click', () => open(options.hidden));
+    for (const option of options.querySelectorAll('[role=option]')) {
+      option.addEventListener('click', () => {
+        for (const other of options.querySelectorAll('[role=option]')) other.setAttribute('aria-selected', String(other === option));
+        button.textContent = option.textContent;
+        open(false);
+        log(`Picked ${option.textContent} for ${opener}`);
+      });
+    }
+  }
+</script>
+</body>
+</html>

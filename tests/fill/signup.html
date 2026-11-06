@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Meridian test: sign-up page</title>
+<style>
+  :root { color-scheme: light dark; --line: #8886; }
+  body { font: 15px/1.4 system-ui, sans-serif; margin: 0; }
+  header, footer { display: flex; gap: 16px; align-items: center; padding: 8px 16px; border-bottom: 1px solid var(--line); }
+  footer { border: 0; border-top: 1px solid var(--line); margin-top: 48px; }
+  header form, footer form { display: flex; gap: 6px; }
+  main { max-width: 760px; margin: 40px auto; padding: 0 16px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px 16px; }
+  .wide { grid-column: 1 / -1; }
+  input, select, button { font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; }
+  .float { position: relative; display: grid; }
+  .float label { position: absolute; left: 10px; top: 7px; color: GrayText; pointer-events: none; }
+  .float input:not(:placeholder-shown) + label, .float input:focus + label { top: -9px; font-size: 11px; background: Canvas; }
+  .phone { display: flex; gap: 6px; }
+  .cards { display: flex; gap: 12px; border: 0; padding: 0; margin: 0; }
+  .card { position: relative; border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; width: 220px; }
+  .card:has(input:checked) { outline: 2px solid Highlight; }
+  .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); border: 0; padding: 0; }
+  .tick { display: flex; gap: 8px; align-items: center; }
+  .cookie { position: fixed; left: 16px; bottom: 16px; width: 340px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: Canvas; }
+  .chat { position: fixed; right: 16px; bottom: 16px; width: 300px; height: 180px; border: 1px solid var(--line); border-radius: 12px; }
+</style>
+</head>
+<body>
+<!-- The page's own noise: a header search, a login in the header, a cookie banner, a footer newsletter and
+     an open chat bubble. None of it is the sign-up form, which is built from divs with no <form>, as
+     many single-page apps build theirs. Nothing here goes online. -->
+<header>
+  <strong>JobKart</strong>
+  <form role="search"><input type="search" aria-label="Search jobs" placeholder="Search jobs here"><button>Go</button></form>
+  <form aria-label="Log in">
+    <input type="email" aria-label="Email" placeholder="Email">
+    <input type="password" aria-label="Password" placeholder="Password">
+    <button>Login</button>
+  </form>
+</header>
+
+<main>
+  <h1>Create your profile</h1>
+  <p>On registering, you can</p>
+  <ul><li>Build your profile and let recruiters find you</li><li>Get job postings delivered right to your email</li></ul>
+
+  <div id="signup" class="grid">
+    <div class="float"><input id="name" placeholder=" " required><label for="name">Full name *</label></div>
+    <div class="float">
+      <input id="email" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="email-suggest" placeholder=" ">
+      <label for="email">Email ID *</label>
+      <ul id="email-suggest" role="listbox" hidden><li role="option" aria-selected="false">@gmail.com</li></ul>
+    </div>
+    <div class="float"><input id="password" type="password" placeholder=" "><label for="password">Password *</label></div>
+    <div>
+      <span>Mobile number *</span>
+      <div class="phone">
+        <select id="dial"><option>+91</option><option>+1</option><option>+44</option></select>
+        <input id="mobile" type="tel" placeholder="Enter your mobile number">
+      </div>
+    </div>
+    <fieldset class="cards wide"><legend>Work status *</legend>
+      <label class="card"><input class="sr-only" type="radio" name="status" value="exp"> I'm experienced <small>I have work experience</small></label>
+      <label class="card"><input class="sr-only" type="radio" name="status" value="fresher"> I'm a fresher <small>I am a student or just graduated</small></label>
+    </fieldset>
+    <label class="tick wide"><input type="checkbox" role="switch" id="visible"> Show my profile to recruiters</label>
+    <label class="tick wide"><input type="checkbox" role="switch" id="whatsapp" checked> Send me important updates on WhatsApp</label>
+    <label class="tick wide"><input class="sr-only" type="checkbox" id="terms"> I agree to the Terms and Privacy Policy</label>
+    <button class="wide" type="button" id="register">Register now</button>
+  </div>
+</main>
+
+<div class="cookie" role="region" aria-label="Cookie banner">
+  We use cookies to improve your experience.
+  <label class="tick"><input type="checkbox" role="switch"> Analytics</label>
+  <button>Accept all</button>
+</div>
+
+<footer>
+  <form aria-label="Newsletter">
+    <label>Get job alerts in your inbox <input type="email" placeholder="Your email"></label>
+    <button>Subscribe</button>
+  </form>
+</footer>
+
+<iframe class="chat" title="Chat with us" srcdoc="<!doctype html><body style='font:14px system-ui;margin:8px'><p>Hi! How can we help?</p><textarea aria-label='Type a message' style='width:95%;height:60px'></textarea></body>"></iframe>
+
+<p id="log" aria-live="polite"></p>
+<script>
+  document.getElementById('register').addEventListener('click', () => {
+    document.getElementById('log').textContent = 'Register was pressed: this must never happen during a fill';
+  });
+</script>
+</body>
+</html>

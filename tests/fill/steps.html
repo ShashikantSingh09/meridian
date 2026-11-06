@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Meridian test: a form in steps</title>
+<style>
+  :root { color-scheme: light dark; --line: #8886; }
+  body { font: 15px/1.4 system-ui, sans-serif; max-width: 640px; margin: 24px auto; padding: 0 16px; }
+  form, .step { display: grid; gap: 12px; }
+  nav ol { display: flex; gap: 16px; list-style: none; padding: 0; }
+  nav [aria-current] { font-weight: 600; }
+  label { display: grid; gap: 2px; }
+  input, select, button { font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; }
+  .later { transform: translateX(-200vw); position: absolute; }
+</style>
+</head>
+<body>
+<h1>Apply in three steps</h1>
+<p>For <code>crates/fill/tests/live_forms.rs</code>. Only the step on screen is the form. Nothing here goes online.</p>
+
+<form id="apply">
+  <!-- A stepper inside the form, as many multi-step forms have. -->
+  <nav aria-label="Progress"><ol><li aria-current="step">1. You</li><li>2. Education</li><li>3. Review</li></ol></nav>
+
+  <section class="step" aria-label="You">
+    <label>Full name <input id="name"></label>
+    <label>Email <input id="email" type="email"></label>
+    <label>Mobile number <input id="mobile" type="tel"></label>
+  </section>
+
+  <!-- Later steps: one not shown at all, one slid off the screen. -->
+  <section class="step" aria-label="Education" hidden>
+    <label>Highest qualification <input id="degree"></label>
+  </section>
+  <section class="step later" aria-label="Review">
+    <label>Anything else? <textarea id="more"></textarea></label>
+  </section>
+
+  <button type="button">Next</button>
+</form>
+</body>
+</html>

@@ -36,6 +36,28 @@ body {
   background: rgba(255, 159, 10, 0.07);
 }
 
+/* A filled box fades out after a few seconds, from where it had got to. Only boxes that need you stay.
+   With reduced motion it stays until the core stops drawing it, a moment later, with no fade. */
+.ol-box[data-fade] {
+  animation: ol-fade 0.6s ease forwards;
+}
+
+@keyframes ol-fade {
+  to {
+    opacity: 0;
+  }
+}
+
+[data-motion="reduced"] .ol-box[data-fade] {
+  animation: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-motion="full"]) .ol-box[data-fade] {
+    animation: none;
+  }
+}
+
 .ol-box[data-look="now"] {
   box-shadow: 0 0 0 1.5px #64d2ff, 0 0 14px rgba(100, 210, 255, 0.75);
 }
