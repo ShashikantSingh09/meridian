@@ -6,6 +6,11 @@ export interface NewThing {
 }
 
 export const WHATS_NEW: Record<string, NewThing[]> = {
+  "0.7.2": [
+    { title: "Fills the form you are in", line: "Search, newsletter and cookie boxes elsewhere on the page are left alone." },
+    { title: "Answer on the island", line: "Type or pick what a box needs, and add it to Your details for next time." },
+    { title: "Out of your way", line: "A small pill after a fill, and green outlines fade after a few seconds." },
+  ],
   "0.7.1": [
     { title: "Fill this form reads forms better", line: "Email boxes that suggest domains now fill in, and a page's lists are left alone." },
     { title: "Outlines stay with their tab", line: "They hide when you switch tabs and come back when you return." },
