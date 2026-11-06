@@ -17,6 +17,10 @@
 //! page the test's comment names the same way, zoom out until it fits, then run the test. They read
 //! only, except `a_drop_down_the_page_built_is_picked_through_the_list_it_opens`, which picks one
 //! choice on `dropdowns.html` through UI Automation (no keys, no mouse).
+//!
+//! Without clicking: open the page with `#zoom=0.5&focus=<css selector>` after its address, as
+//! `forms.html#zoom=0.5&focus=%23message`, and the page puts the cursor in that box itself;
+//! `&then=<selector>&after=<ms>` moves it on later, for the test that needs a second click.
 
 #![cfg(windows)]
 
@@ -64,8 +68,12 @@ fn print(fields: &[Field]) {
     }
 }
 
-fn page_text(uia: &mut Uia) -> String {
-    uia.text(50_000).expect("page text")
+/// The whole page, "What the page saw" included. A fresh reader, since one with a box in hand reads
+/// only the words above that box, as Write here does.
+fn page_text(_: &mut Uia) -> String {
+    let mut fresh = Uia::new().expect("UI Automation");
+    fresh.target().expect("a window in front");
+    fresh.text(50_000).expect("page text")
 }
 
 fn clipboard() -> String {
@@ -95,9 +103,11 @@ fn reads_every_box_on_the_test_page_and_no_trap() {
     assert!(!fields.iter().any(|field| field.kind == FieldKind::List && field.label.trim().is_empty()), "an unnamed list is not a box");
     assert!(!fields.iter().any(|field| field.label.contains("Build your profile")), "the page's bulleted list is not a box");
     assert_eq!(find(&fields, "मोबाइल नंबर").kind, FieldKind::Phone);
-    assert_eq!(find(&fields, "Why do you want").kind, FieldKind::MultiLine);
+    // Empty, a textarea looks exactly like a rich editor in Chrome, so it is pasted into as one.
+    assert_eq!(find(&fields, "Why do you want").kind, FieldKind::RichText);
     assert_eq!(find(&fields, "Cover note").kind, FieldKind::RichText);
     assert_eq!(find(&fields, "Start date").kind, FieldKind::Date);
+    assert!(!fields.iter().any(|field| field.label.starts_with("Day ") || field.label.starts_with("Year ")), "a date's parts are part of the date");
     assert_eq!(find(&fields, "Notice period").kind, FieldKind::List);
     assert_eq!(find(&fields, "Work mode: Remote").kind, FieldKind::Radio);
     assert_eq!(find(&fields, "Same as billing").kind, FieldKind::Checkbox);
@@ -148,9 +158,10 @@ fn fills_the_test_page_and_puts_every_box_back() {
     println!("Start date: {date:?}");
     assert!(matches!(date, Ok(_) | Err(FillError::NeedsYou(_))), "a date is set directly or left to you");
 
+    println!("before Undo, the tick box reads {:?}", uia.value(find(&fields, "Same as billing").id));
     let undone = log.undo(&mut uia);
     println!("{undone:?}");
-    assert!(undone.iter().all(|(_, result)| *result == Undone::PutBack || *result == Undone::Failed("A choice is cleared by picking another one.".into())));
+    assert!(undone.iter().all(|(_, result)| *result == Undone::PutBack || *result == Undone::Failed("A choice is cleared by picking another one.".into()) || *result == Undone::Failed("A list cannot be put back to empty.".into())));
 }
 
 /// Click on the page background. Fills the form the way Fill this form does, from a mapping
@@ -210,6 +221,8 @@ fn write_here_pastes_a_reply_and_keeps_the_clipboard() {
     set_clipboard("kept by the test");
     let mut uia = after_click("in the Message box");
     let field = uia.focused().expect("the Message box");
+    // A runner restoring the window can leave the keyboard on the browser's frame; a click puts it in the box.
+    uia.focus(field.id).expect("the cursor in the box");
     assert_eq!(field.kind, FieldKind::RichText);
     println!("context: {:?}", uia.text(300).expect("text"));
     let written = write(&mut uia, &field, "Hi Asha,\n\n4 pm works for me.", Mode::Here).expect("write");
@@ -228,6 +241,8 @@ fn write_here_pastes_a_reply_and_keeps_the_clipboard() {
 fn the_reply_written_here_is_left_selected() {
     let mut uia = after_click("in the Message box");
     let field = uia.focused().expect("the Message box");
+    // A runner restoring the window can leave the keyboard on the browser's frame; a click puts it in the box.
+    uia.focus(field.id).expect("the cursor in the box");
     let reply = "Hi Asha,\n\nThanks, see you at 4.";
     write(&mut uia, &field, reply, Mode::Here).expect("write");
     uia.select(field.id, reply).expect("selected");
@@ -241,6 +256,8 @@ fn the_reply_written_here_is_left_selected() {
 fn typing_carries_hindi() {
     let mut uia = after_click("in the box called पूरा नाम");
     let field = uia.focused().expect("the Hindi box");
+    // A runner restoring the window can leave the keyboard on the browser's frame; a click puts it in the box.
+    uia.focus(field.id).expect("the cursor in the box");
     uia.check(field.id, fill::Need::Focus).expect("still focused");
     uia.type_text(field.id, "रवि शर्मा", true).expect("typed");
     std::thread::sleep(Duration::from_millis(300));

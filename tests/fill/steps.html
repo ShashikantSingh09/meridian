@@ -8,6 +8,7 @@
   :root { color-scheme: light dark; --line: #8886; }
   body { font: 15px/1.4 system-ui, sans-serif; max-width: 640px; margin: 24px auto; padding: 0 16px; }
   form, .step { display: grid; gap: 12px; }
+  .step[hidden] { display: none; }
   nav ol { display: flex; gap: 16px; list-style: none; padding: 0; }
   nav [aria-current] { font-weight: 600; }
   label { display: grid; gap: 2px; }
@@ -39,5 +40,22 @@
 
   <button type="button">Next</button>
 </form>
+<script>
+// For crates/fill/tests/live_forms.rs, so a test can run without a click: #focus=<css selector>&nth=<n>
+// puts the cursor in that box, and #zoom=<n> shrinks the page so every box is on screen.
+(() => {
+  const p = new URLSearchParams(location.hash.slice(1));
+  if (p.get("zoom")) document.body.style.zoom = p.get("zoom");
+  const f = p.get("focus");
+  const box = f ? document.querySelectorAll(f)[Number(p.get("nth") || 0)] : null;
+  box?.focus();
+  // Back in the box whenever the window regains focus, until the test moves it on.
+  let moved = false;
+  addEventListener("focus", () => { if (!moved) box?.focus(); });
+  // #then=<selector>&after=<ms> moves the cursor later, as a person clicking another box would.
+  const then = p.get("then");
+  if (then) setTimeout(() => { moved = true; document.querySelector(then)?.focus(); }, Number(p.get("after") || 2000));
+})();
+</script>
 </body>
 </html>

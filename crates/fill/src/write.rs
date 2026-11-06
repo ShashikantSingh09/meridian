@@ -79,6 +79,11 @@ pub trait Writer {
     fn select(&mut self, _id: u32, _text: &str) -> Result<(), FillError> {
         Ok(())
     }
+    /// The box holds plain text with nothing inside it, as a textarea does, so setting its text back is
+    /// safe. An editor with paragraphs inside (Gmail, Slack) is not: its own history must undo it.
+    fn plain(&mut self, _id: u32) -> bool {
+        false
+    }
 }
 
 // ponytail: about 300 ms for a read back to settle, since a browser updates its

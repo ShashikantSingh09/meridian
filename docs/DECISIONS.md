@@ -532,6 +532,12 @@ then the placeholder, then the words just before the box. Only the form in front
 the biggest form or group of nearby boxes, leaving out search, newsletter, cookie, chat and header login boxes unless the cursor is in
 them. Outlines stay on their tab. After a run, each written one-line box is read again, and one the page emptied needs the user.
 
+From the by-hand tests in a real Chrome: the page read is the tab in front (on screen, carrying the window's title), never a background
+tab whose page Chrome also keeps; the address bar is never a box; a browser asked for the first time is asked again briefly before the
+answer is "no box" or "moved"; groups of boxes in one column are one form unless a Submit, Send or Sign up button lies between them; an
+empty many-line box on a page is pasted into, since an empty textarea and an empty editor look alike; and Undo gives a box with nothing
+inside it (a textarea) its old text back directly, while an editor gets Ctrl+Z.
+
 **Seamless (added after 0.7.0).** After a fill the island is a small pill, "2 need you" or "Filled", until pointed at. Filled boxes show
 green for 4 s, then fade; boxes that need the user stay outlined until the user has dealt with them on the page. A box that is the user's
 own is never read, only whether the cursor has been in it. The choices of one question are one row, take one answer and one write, and

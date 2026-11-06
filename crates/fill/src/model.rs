@@ -141,7 +141,9 @@ const DATE: &[&str] = &[
     "date", "dob", "birthday", "dd mm yyyy", "mm dd yyyy", "yyyy mm dd", "dd mm yy", "तारीख", "तिथि", "दिनांक",
 ];
 const UPLOAD: &[&str] = &[
-    "upload", "attach", "attachment", "choose file", "choose files", "browse", "select file", "file", "अपलोड",
+    "upload", "attach", "attachment", "choose file", "choose files", "browse", "select file", "file",
+    // A file box takes its label for its name, so "Your CV *" is all a button says.
+    "cv", "resume", "résumé", "बायोडाटा", "अपलोड",
     "संलग्न", "फ़ाइल", "फाइल",
 ];
 
@@ -190,6 +192,10 @@ pub(crate) struct Props {
     pub selectable: bool,
     pub focusable: bool,
     pub focused: bool,
+    /// The box shows nothing yet.
+    pub empty: bool,
+    /// A spin button inside a date box: Chrome's Day, Month and Year parts of one date.
+    pub in_date: bool,
 }
 
 /// Pickers that look like a text box but keep only a choice from their list: what is typed and not
@@ -211,8 +217,10 @@ pub(crate) fn kind_of(p: &Props, children: impl FnOnce() -> bool) -> Option<Fiel
         // A switch is a tick box that slides. Chrome and Edge call it a button with a toggle.
         _ if role == "switch" => FieldKind::Checkbox,
         Control::Edit if p.password => FieldKind::Password,
-        // A contenteditable editor has its paragraphs as children; a textarea has none.
-        Control::Edit if p.class.contains("RichEdit") || (p.multiline && children()) => FieldKind::RichText,
+        // A contenteditable editor has its paragraphs as children; a textarea has none. Empty, Chrome shows
+        // the two exactly alike, so an empty many-line box on a page is pasted into as an editor: a direct
+        // set would show in Gmail's or Slack's box without reaching what they send.
+        Control::Edit if p.class.contains("RichEdit") || (p.multiline && (children() || (!role.is_empty() && p.empty))) => FieldKind::RichText,
         Control::Edit if p.multiline => FieldKind::MultiLine,
         Control::Edit if p.localized.contains("date") || p.localized.contains("time") => FieldKind::Date,
         Control::Edit if role == "spinbutton" => FieldKind::Number,
@@ -235,6 +243,8 @@ pub(crate) fn kind_of(p: &Props, children: impl FnOnce() -> bool) -> Option<Fiel
         Control::List => return None,
         Control::CheckBox => FieldKind::Checkbox,
         Control::RadioButton => FieldKind::Radio,
+        // The Day, Month and Year of a date box are that one box.
+        Control::Spinner if p.in_date => return None,
         Control::Spinner => FieldKind::Number,
         // A button that opens a list of choices is a drop-down the page built itself (Headless UI, MUI).
         // A button with aria-pressed stays a button: "Like" and "Follow" are toggles too.
@@ -247,8 +257,9 @@ pub(crate) fn kind_of(p: &Props, children: impl FnOnce() -> bool) -> Option<Fiel
         Control::ListItem | Control::TreeItem => FieldKind::Item,
         Control::Group | Control::Document | Control::Other => return None,
     };
-    // A link's address is read-only, and is what tells where it goes.
-    if p.read_only && !matches!(kind, FieldKind::List | FieldKind::Link | FieldKind::Tab | FieldKind::MenuItem | FieldKind::Item) {
+    // A link's address is read-only, and is what tells where it goes. A file box is a button whose value,
+    // "No file chosen", is read-only too: it stays, as the user's to fill.
+    if p.read_only && !matches!(kind, FieldKind::List | FieldKind::Link | FieldKind::Tab | FieldKind::MenuItem | FieldKind::Item | FieldKind::Button) {
         return None;
     }
     Some(kind)
@@ -344,6 +355,11 @@ pub fn site_from_address(address: &str) -> Option<String> {
     if text.is_empty() || text.contains(char::is_whitespace) {
         return None;
     }
+    // Chrome shows a local file without its scheme, as a path from the drive: g:/tests/fill/forms.html.
+    let bytes = text.as_bytes();
+    if bytes.len() >= 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && matches!(bytes[2], b'/' | b'\\') {
+        return Some("file:".into());
+    }
     let rest = match text.split_once("://") {
         Some(("http" | "https", rest)) => rest,
         Some((scheme, _)) => return Some(format!("{scheme}:")),
@@ -407,6 +423,8 @@ mod tests {
         assert_eq!(finished("मोबाइल नंबर", FieldKind::PlainText), FieldKind::Phone);
         assert_eq!(finished("Date of birth", FieldKind::PlainText), FieldKind::Date);
         assert_eq!(finished("Your CV Choose File No file chosen", FieldKind::Button), FieldKind::File);
+        assert_eq!(finished("Your CV *", FieldKind::Button), FieldKind::File, "named by its label alone");
+        assert_eq!(finished("Upload resume", FieldKind::Button), FieldKind::File);
         assert_eq!(finished("Submit application", FieldKind::Button), FieldKind::Button);
         assert_eq!(finished("Full name", FieldKind::PlainText), FieldKind::PlainText);
     }
@@ -493,10 +511,16 @@ mod tests {
         assert_eq!(kind(web(Control::Edit, "searchbox")), Some(FieldKind::PlainText));
         assert_eq!(kind(Props { password: true, ..web(Control::Edit, "textbox") }), Some(FieldKind::Password));
         assert_eq!(kind(Props { multiline: true, ..web(Control::Edit, "textbox") }), Some(FieldKind::MultiLine));
+        // Empty on a page, a textarea and a rich editor look the same, so it is pasted into; a desktop box is not.
+        assert_eq!(kind(Props { multiline: true, empty: true, ..web(Control::Edit, "textbox") }), Some(FieldKind::RichText));
+        assert_eq!(kind(Props { multiline: true, empty: true, ..web(Control::Edit, "") }), Some(FieldKind::MultiLine));
+        assert_eq!(kind(Props { in_date: true, ..web(Control::Spinner, "spinbutton") }), None, "a date's Day is part of the date");
+        assert_eq!(kind(web(Control::Spinner, "spinbutton")), Some(FieldKind::Number));
         assert_eq!(kind_of(&Props { multiline: true, ..web(Control::Edit, "textbox") }, || true), Some(FieldKind::RichText));
         assert_eq!(kind(Props { localized: "date picker".into(), ..web(Control::Edit, "textbox") }), Some(FieldKind::Date));
         assert_eq!(kind(web(Control::Edit, "spinbutton")), Some(FieldKind::Number));
         assert_eq!(kind(Props { read_only: true, ..web(Control::Edit, "textbox") }), None, "a read-only box is not filled");
+        assert_eq!(kind(Props { read_only: true, value_pattern: true, ..web(Control::Button, "button") }), Some(FieldKind::Button), "a file box says No file chosen, read-only");
         assert_eq!(kind(web(Control::Group, "group")), None);
         assert_eq!(kind(Props { focused: true, text_pattern: true, ..web(Control::Group, "group") }), Some(FieldKind::RichText));
         assert_eq!(kind(Props { focused: true, automation_id: "RootWebArea".into(), ..web(Control::Document, "document") }), None);
@@ -566,6 +590,9 @@ mod tests {
         assert_eq!(site_from_address("localhost:3000/form").as_deref(), Some("localhost"));
         assert_eq!(site_from_address("chrome://settings/passwords").as_deref(), Some("chrome:"));
         assert_eq!(site_from_address("file:///G:/tests/fill/forms.html").as_deref(), Some("file:"));
+        // How Chrome shows that same file, with no scheme.
+        assert_eq!(site_from_address("G:/Personal%20Projects/tests/fill/forms.html#zoom=0.5").as_deref(), Some("file:"));
+        assert_eq!(site_from_address("C:\\Users\\me\\form.html").as_deref(), Some("file:"));
         assert_eq!(site_from_address("about:blank").as_deref(), Some("about:"));
     }
 

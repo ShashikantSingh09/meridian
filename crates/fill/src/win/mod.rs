@@ -19,12 +19,19 @@ use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowLong
 
 use crate::model::{kind_of, label_of, list_hint, marked_required, says, site_from_address, tick_bounds, Bounds, Control, Field, FieldKind, Props, Target};
 use crate::policy::{code_cells, is_browser, mark_code, mark_codes};
+use crate::finish::Commit;
 use crate::scope::{holds, pick, Part, Region, Seen};
 use crate::write::{same, Need, Writer};
 use crate::{FillError, Reader};
 
 /// The most text a read back takes, so a huge document cannot stall a check.
 const MAX_READ: i32 = 200_000;
+/// How long a tick box is given to show a turn: 30 waits of 10 ms.
+const TURN_WAITS: u32 = 30;
+const TURN_WAIT_MS: u64 = 10;
+/// How long a browser is given to show the box with the cursor the first time it is asked: 4 tries, 150 ms apart.
+const FOCUS_RETRIES: u32 = 4;
+const FOCUS_RETRY_MS: u64 = 150;
 
 impl From<windows::core::Error> for FillError {
     fn from(error: windows::core::Error) -> Self {
@@ -198,8 +205,10 @@ impl Uia {
         site_from_address(&text(unsafe { value.CurrentValue() }))
     }
 
+    /// Children a screen reader would see: an editor's paragraphs. A textarea's text is held in hidden
+    /// parts only, which do not count.
     fn has_children(&self, element: &IUIAutomationElement) -> bool {
-        let Ok(all) = (unsafe { self.automation.CreateTrueCondition() }) else { return false };
+        let Ok(all) = (unsafe { self.automation.ControlViewCondition() }) else { return false };
         unsafe { element.FindFirst(TreeScope_Children, &all) }.is_ok()
     }
 
@@ -219,9 +228,27 @@ impl Uia {
         None
     }
 
+    /// The page in front. Chrome keeps a page for every tab of the window in its tree, so the first one
+    /// found can be a tab in the background, with its own boxes: the one in front is on screen and
+    /// carries the window's title. Frames inside it are pages too, and smaller.
     fn first_document(&self, root: &IUIAutomationElement) -> Option<IUIAutomationElement> {
         let document = self.control_is(&[UIA_DocumentControlTypeId]).ok()?;
-        unsafe { root.FindFirst(TreeScope_Descendants, &document) }.ok()
+        let all = unsafe { root.FindAll(TreeScope_Descendants, &document) }.ok()?;
+        let title = screen::foreground().filter(|front| Some(HWND(front.hwnd as *mut _)) == self.window).map(|front| front.title).unwrap_or_default();
+        let mut best: Option<((bool, i64), IUIAutomationElement)> = None;
+        for index in 0..unsafe { all.Length() }.unwrap_or(0) {
+            let Ok(page) = (unsafe { all.GetElement(index) }) else { continue };
+            let at = bounds(unsafe { page.CurrentBoundingRectangle() }.unwrap_or_default());
+            if flag(unsafe { page.CurrentIsOffscreen() }) || !at.big_enough() {
+                continue;
+            }
+            let name = text(unsafe { page.CurrentName() });
+            let score = (!name.trim().is_empty() && title.starts_with(name.trim()), at.width as i64 * at.height as i64);
+            if best.as_ref().is_none_or(|(known, _)| score > *known) {
+                best = Some((score, page));
+            }
+        }
+        best.map(|(_, page)| page).or_else(|| unsafe { root.FindFirst(TreeScope_Descendants, &document) }.ok())
     }
 
     /// A box from its cached properties, or None when it is not a box. The rules are in `model`.
@@ -246,13 +273,20 @@ impl Uia {
                 selectable: cached(UIA_IsSelectionPatternAvailablePropertyId),
                 focusable: cached(UIA_IsKeyboardFocusablePropertyId),
                 focused,
+                empty: value_pattern.as_ref().is_none_or(|pattern| text(pattern.CachedValue()).trim().is_empty()),
+                // Asked only of spin buttons, which are rare outside dates.
+                in_date: element.CachedControlType()? == UIA_SpinnerControlTypeId
+                    && self.parent(element).is_some_and(|parent| {
+                        let local = text(parent.CurrentLocalizedControlType()).to_lowercase();
+                        local.contains("date") || local.contains("time")
+                    }),
             };
             let Some(kind) = kind_of(&props, || self.has_children(element)) else { return Ok(None) };
             let name = text(element.CachedName());
             // A drop-down the page built from a button shows its choice as its name.
             let button_list = kind == FieldKind::List && props.control == Control::Button;
 
-            let value = match kind {
+            let mut value = match kind {
                 FieldKind::Checkbox => element
                     .GetCachedPatternAs::<IUIAutomationTogglePattern>(UIA_TogglePatternId)
                     .and_then(|pattern| pattern.CachedToggleState())
@@ -287,6 +321,12 @@ impl Uia {
                 || element.CurrentLabeledBy().map(|label| text(label.CurrentName())).unwrap_or_default(),
                 || if a_box { self.nearby(element) } else { String::new() },
             );
+            // A drop-down the page built is often named by its label and its choice together: "Team size 1–10".
+            if button_list && !label.is_empty() {
+                if let Some(rest) = value.strip_prefix(label.as_str()) {
+                    value = rest.trim().to_string();
+                }
+            }
             if button_list && label.is_empty() {
                 label = name;
             }
@@ -579,6 +619,14 @@ impl Reader for Uia {
             let Ok(Some(box_seen)) = self.describe(&element, 0, false) else { continue };
             // Plain buttons are not boxes. A file input shows as a button and stays, as yours to fill.
             if !box_seen.field.visible || box_seen.field.kind == FieldKind::Button {
+                // A Submit, Send or Sign up button ends its form, so the boxes after it are another one.
+                let ends_a_form = matches!(
+                    crate::finish::commit(&box_seen.field.words()),
+                    Some(Commit::Submit | Commit::Send | Commit::Account | Commit::Pay | Commit::Book | Commit::Confirm)
+                );
+                if box_seen.field.visible && box_seen.field.kind == FieldKind::Button && ends_a_form {
+                    regions.push(Region { part: Part::Submit, name: box_seen.field.label.clone(), bounds: box_seen.field.bounds });
+                }
                 continue;
             }
             elements.push(element);
@@ -641,6 +689,20 @@ impl Uia {
         let element = unsafe { self.automation.GetFocusedElementBuildCache(&cache) }.map_err(|_| FillError::NoBox)?;
         // The focus lives in the window in front, so it is still ours if that has not changed.
         self.window()?;
+        // In a browser only the page counts: the address bar and the browser's own boxes are not the user's to have written in.
+        // A browser asked for the first time shows the focus on its own frame, and the box a moment later, once it has
+        // built the page's tree for us: so it is asked again, briefly, before the answer is no.
+        let mut element = element;
+        let mut tries = 0;
+        while self.browser && self.document_around(&element).is_none() {
+            tries += 1;
+            if tries > FOCUS_RETRIES {
+                return Err(FillError::NoBox);
+            }
+            std::thread::sleep(Duration::from_millis(FOCUS_RETRY_MS));
+            element = unsafe { self.automation.GetFocusedElementBuildCache(&cache) }.map_err(|_| FillError::NoBox)?;
+            self.window()?;
+        }
         let mut field = self.describe(&element, 0, true)?.ok_or(FillError::NoBox)?.field;
         if matches!(
             field.kind,
@@ -799,9 +861,21 @@ impl Writer for Uia {
         // A box that has left the page fails any live read.
         unsafe { element.CurrentBoundingRectangle() }?;
         if need == Need::Focus {
-            let focused = unsafe { self.automation.GetFocusedElement() }.map_err(|_| FillError::Moved)?;
-            if !unsafe { self.automation.CompareElements(&focused, &element) }?.as_bool() {
-                return Err(FillError::Moved);
+            let mut tries = 0;
+            loop {
+                let focused = unsafe { self.automation.GetFocusedElement() }.map_err(|_| FillError::Moved)?;
+                if unsafe { self.automation.CompareElements(&focused, &element) }?.as_bool() {
+                    break;
+                }
+                // A browser shows the focus on its own frame for a moment after the cursor goes into a box,
+                // and only then on the box: asked again, briefly. A cursor in another box of the page is an
+                // answer at once.
+                tries += 1;
+                if !self.browser || self.document_around(&focused).is_some() || tries > FOCUS_RETRIES {
+                    return Err(FillError::Moved);
+                }
+                std::thread::sleep(Duration::from_millis(FOCUS_RETRY_MS));
+                self.window()?;
             }
         }
         Ok(())
@@ -860,12 +934,21 @@ impl Writer for Uia {
                 return Ok(());
             }
             let toggle: IUIAutomationTogglePattern = element.GetCurrentPatternAs(UIA_TogglePatternId)?;
-            // At most two turns: a three-state box may pass through "mixed".
+            // At most two turns: a three-state box may pass through "mixed". A browser shows a turn a
+            // moment later, so each one waits to show before the next is decided: read too soon, the
+            // box still looks unticked, a second turn goes in, and the tick is taken back out.
             for _ in 0..2 {
-                if (toggle.CurrentToggleState()? == ToggleState_On) == on {
+                let state = toggle.CurrentToggleState()?;
+                if (state == ToggleState_On) == on {
                     return Ok(());
                 }
                 toggle.Toggle()?;
+                for _ in 0..TURN_WAITS {
+                    if toggle.CurrentToggleState()? != state {
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(TURN_WAIT_MS));
+                }
             }
             if (toggle.CurrentToggleState()? == ToggleState_On) == on {
                 Ok(())
@@ -949,6 +1032,10 @@ impl Writer for Uia {
     fn undo_keys(&mut self, id: u32) -> Result<(), FillError> {
         self.keys_ready(id)?;
         input::undo_keys()
+    }
+
+    fn plain(&mut self, id: u32) -> bool {
+        self.entry(id).is_ok_and(|(element, _)| !self.has_children(&element))
     }
 
     /// Found from the end, so the words just written come before an older copy above them. Line

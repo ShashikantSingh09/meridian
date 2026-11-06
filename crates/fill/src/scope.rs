@@ -27,6 +27,9 @@ pub(crate) enum Part {
     Aside,
     /// A named section, such as a cookie banner.
     Region,
+    /// A button that sends its form off: Submit, Sign up, Send, Pay. A form ends at one, so the boxes
+    /// on either side of it are two forms.
+    Submit,
 }
 
 impl Part {
@@ -178,6 +181,45 @@ fn clusters(seen: &[Seen], members: &[usize], unit: i32) -> Vec<Vec<usize>> {
     out
 }
 
+/// Groups that share a column are one form, however far apart: a form's sections often sit a few rows
+/// apart (a heading, a row of buttons between them), while a sidebar sits beside it in a column of its
+/// own. A footer's boxes join too, and are left out again as noise when the form is tidied.
+// ponytail: one pass in page order, so three groups that overlap only in a chain may stay two.
+fn columns(seen: &[Seen], groups: Vec<Vec<usize>>, regions: &[Region]) -> Vec<Vec<usize>> {
+    let span = |group: &[usize]| {
+        group.iter().map(|&at| (seen[at].field.bounds.x, seen[at].field.bounds.x + seen[at].field.bounds.width)).fold((i32::MAX, i32::MIN), |a, b| (a.0.min(b.0), a.1.max(b.1)))
+    };
+    let rows = |group: &[usize]| {
+        group.iter().map(|&at| (seen[at].field.bounds.y, seen[at].field.bounds.y + seen[at].field.bounds.height)).fold((i32::MAX, i32::MIN), |a, b| (a.0.min(b.0), a.1.max(b.1)))
+    };
+    // A Submit button between the two, in their column, ends the one above.
+    let fenced = |a: &[usize], b: &[usize], column: (i32, i32)| {
+        let ((a0, a1), (b0, b1)) = (rows(a), rows(b));
+        let (gap_top, gap_bottom) = if a1 <= b0 { (a1, b0) } else if b1 <= a0 { (b1, a0) } else { return false };
+        regions.iter().filter(|region| region.part == Part::Submit).any(|fence| {
+            let at = &fence.bounds;
+            at.y >= gap_top - 2 && at.y + at.height <= gap_bottom + 2 && at.x < column.1 && at.x + at.width > column.0
+        })
+    };
+    let mut out: Vec<Vec<usize>> = Vec::new();
+    for group in groups {
+        let (x0, x1) = span(&group);
+        let shared = out.iter_mut().find(|other| {
+            let (y0, y1) = span(other);
+            // Overlapping by at least half of the narrower one.
+            2 * (x1.min(y1) - x0.max(y0)) >= (x1 - x0).min(y1 - y0) && !fenced(&group, other, (x0.min(y0), x1.max(y1)))
+        });
+        match shared {
+            Some(other) => {
+                other.extend(group);
+                other.sort_unstable();
+            }
+            None => out.push(group),
+        }
+    }
+    out
+}
+
 /// The boxes to keep from a group of near boxes: the ones that are not header, menu or footer boxes,
 /// unless that is all there is, and the search-like boxes that sit among them ("Search your college").
 fn tidy(seen: &[Seen], noise: &[Noise], home: &[Option<usize>], group: &[usize], unit: i32, keep_too: Option<usize>) -> Vec<usize> {
@@ -213,7 +255,7 @@ pub(crate) fn pick(seen: &[Seen], regions: &[Region], focus: Option<Bounds>) -> 
     let loose = |also: Option<usize>| {
         let joins = |at: usize| matches!(noise[at], Noise::None | Noise::Edge) || Some(at) == also;
         let members: Vec<usize> = (0..seen.len()).filter(|&at| home[at].is_none() && joins(at)).collect();
-        clusters(seen, &members, unit)
+        columns(seen, clusters(seen, &members, unit), regions)
     };
 
     if let Some(focus) = focus {
@@ -385,6 +427,44 @@ mod tests {
             seen("Phone", FieldKind::Phone, at(1000, 420, 300, 40)),
         ];
         assert_eq!(pick(&boxes, &[], None), [2, 3, 4], "log in on the left, sign up on the right");
+    }
+
+    #[test]
+    fn a_form_whose_sections_sit_apart_is_one_form_and_a_sidebar_is_not() {
+        // An unnamed <form> is no landmark in Chrome: radios, a row of buttons, then the ticks far below.
+        let boxes = vec![
+            seen("Gender: Male", FieldKind::Radio, at(100, 200, 120, 40)),
+            seen("Gender: Female", FieldKind::Radio, at(230, 200, 120, 40)),
+            seen("Show my profile", FieldKind::Checkbox, at(100, 600, 20, 20)),
+            seen("Open to relocation", FieldKind::Checkbox, at(100, 640, 20, 20)),
+            seen("City", FieldKind::PlainText, at(1300, 200, 300, 40)),
+            seen("Budget", FieldKind::PlainText, at(1300, 260, 300, 40)),
+            seen("Rooms", FieldKind::PlainText, at(1300, 320, 300, 40)),
+            seen("Sort by", FieldKind::List, at(1300, 380, 300, 40)),
+            seen("Within", FieldKind::List, at(1300, 440, 300, 40)),
+        ];
+        assert_eq!(pick(&boxes, &[], None), [4, 5, 6, 7, 8], "the bigger column");
+        assert_eq!(pick(&boxes[..4], &[], None), [0, 1, 2, 3], "the radios and the ticks are one form");
+        assert_eq!(pick(&boxes, &[], Some(at(100, 600, 20, 20))), [0, 1, 2, 3], "the cursor's column");
+    }
+
+    #[test]
+    fn a_submit_button_between_two_groups_makes_them_two_forms() {
+        // The application ends at Submit; a chat box below it is something else.
+        let boxes = vec![
+            seen("Full name", FieldKind::PlainText, at(100, 200, 400, 40)),
+            seen("Email", FieldKind::Email, at(100, 260, 400, 40)),
+            seen("Phone", FieldKind::Phone, at(100, 320, 400, 40)),
+            seen("Message", FieldKind::RichText, at(100, 700, 400, 80)),
+        ];
+        let submit = region(Part::Submit, "Submit application", at(100, 420, 160, 40));
+        assert_eq!(pick(&boxes, std::slice::from_ref(&submit), None), [0, 1, 2]);
+        assert_eq!(pick(&boxes, &[submit], Some(at(100, 700, 400, 80))), [3], "the cursor in the chat box picks only that");
+        // With no Submit between them, as sections of one form, they are one.
+        assert_eq!(pick(&boxes, &[], None), [0, 1, 2, 3]);
+        // A Submit beside the column, not in it, divides nothing.
+        let aside = region(Part::Submit, "Subscribe", at(900, 420, 160, 40));
+        assert_eq!(pick(&boxes, &[aside], None), [0, 1, 2, 3]);
     }
 
     #[test]

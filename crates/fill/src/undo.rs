@@ -7,6 +7,9 @@ use crate::model::{Field, FieldKind};
 use crate::write::{keys_ready, same, settle, yes_no, Method, Mode, Need, Settled, Written, Writer};
 use crate::FillError;
 
+/// More time for Ctrl+Z to show, after the usual read back.
+const UNDO_SETTLE_MS: u64 = 500;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "result", content = "message", rename_all = "kebab-case")]
 pub enum Undone {
@@ -101,17 +104,27 @@ fn undo_one<W: Writer>(w: &mut W, mode: Mode, entry: &Entry) -> Undone {
         }
         (Method::Set, FieldKind::List) => w.choose(id, before),
         (Method::Set, _) => w.set_value(id, before),
-        // A paste or typing is undone the way a person would, so the editor's own
-        // history stays right.
+        // A box with nothing inside it, as a textarea, gets its old text back directly: a browser's
+        // history can miss the paste, and once Ctrl+Z has been tried there it ignores a direct set too.
+        (Method::Paste | Method::Type, _) if w.plain(id) => w.set_value(id, before),
+        // An editor's paste or typing is undone the way a person would, so its own history stays right.
         (Method::Paste | Method::Type, _) => keys_ready(w, id, mode).and_then(|()| w.undo_keys(id)),
     };
     if let Err(error) = put_back {
         return Undone::Failed(error.to_string());
     }
-    match settle(w, id, Some(after), |value| same(value, before)) {
-        Settled::Done(_) => Undone::PutBack,
-        _ => Undone::Failed("It could not be put back.".into()),
+    let typed = matches!(entry.written.method, Method::Paste | Method::Type);
+    if let Settled::Done(_) = settle(w, id, Some(after), |value| same(value, before)) {
+        return Undone::PutBack;
     }
+    // A browser can take longer than a read back to show what Ctrl+Z did.
+    if typed {
+        w.wait(UNDO_SETTLE_MS);
+        if let Settled::Done(_) = settle(w, id, Some(after), |value| same(value, before)) {
+            return Undone::PutBack;
+        }
+    }
+    Undone::Failed("It could not be put back.".into())
 }
 
 #[cfg(test)]
@@ -153,6 +166,26 @@ mod tests {
         assert_eq!(log.undo(&mut w), vec![(0, Undone::PutBack)]);
         assert_eq!(w.boxes[0].value, "Thanks");
         assert_eq!(w.calls.last().map(String::as_str), Some("ctrl z"));
+    }
+
+    #[test]
+    fn a_paste_into_a_plain_box_is_set_back_and_an_editor_is_left_to_its_own_history() {
+        let undo = |plain: bool| {
+            let mut w = Fake::one(Behaviour { value: String::new(), no_history: true, plain, ..Default::default() });
+            w.focus = Some(0);
+            // Empty on a page, a textarea is read as an editor, so it was pasted into.
+            let why = field(0, "Why do you want to join?", FieldKind::RichText);
+            let mut log = UndoLog::new(Mode::Form);
+            log.record(&why, write(&mut w, &why, "I build payment screens.", Mode::Form).unwrap());
+            let undone = log.undo(&mut w);
+            (undone, w.boxes[0].value.clone(), w.calls.iter().filter(|call| call.starts_with("set")).count(), w.calls.iter().any(|call| call == "ctrl z"))
+        };
+        let (undone, value, sets, ctrl_z) = undo(true);
+        assert_eq!((undone, value.as_str()), (vec![(0, Undone::PutBack)], ""), "a textarea is set back");
+        assert!(sets >= 1 && !ctrl_z, "set back directly, never Ctrl+Z first");
+        let (undone, value, sets, ctrl_z) = undo(false);
+        assert_eq!(undone, vec![(0, Undone::Failed("It could not be put back.".into()))]);
+        assert_eq!((value.as_str(), sets, ctrl_z), ("I build payment screens.", 0, true), "an editor gets Ctrl+Z, never a set behind its back");
     }
 
     #[test]

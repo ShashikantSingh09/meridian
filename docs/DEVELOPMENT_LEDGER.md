@@ -1,5 +1,34 @@
 # Development ledger
 
+## 2026-11-06: The by-hand tests, run in a real browser
+
+The owner asked for the live tests to be run on their screen. All 21 now pass in Chrome, run one at a time in a throwaway Chrome
+profile, with the cursor put in place by the test pages themselves (`#focus=`, see `crates/fill/tests/live_forms.rs`). The page saw no
+Enter, Tab, submit or trap-box fill, and the clipboard came back after every paste. Getting there found these faults, all fixed:
+
+- **The wrong tab's form.** Chrome keeps every tab's page in the window's tree, and the reader took the first one: a background tab's
+  boxes could be read and filled. It now takes the page that is on screen and carries the window's title.
+- **No box on the first press.** Chrome, asked for the first time, reports the focus on its own frame and the box a moment later, so the
+  first Ctrl Alt F after Chrome started said "Click in a text box first", and the first paste stopped as "moved". Both now ask again,
+  briefly. A cursor in Chrome's address bar is no box at all, so Write here never writes there.
+- **A tick box ticked twice.** A browser shows a toggle a moment later; read too soon, a second toggle went in and took the tick back out.
+  Each turn now waits to show.
+- **Undo after two long answers.** Chrome's history missed the paste into a textarea once the editor beside it had been undone, and then
+  ignored a direct set too. A box with nothing inside it (a textarea) now gets its old text back directly; an editor still uses Ctrl+Z.
+- **Rich editors when empty.** An empty textarea and an empty rich editor look the same in Chrome, so an empty many-line box on a page is
+  pasted into, which both take; a direct set would show in Gmail's or Slack's box without reaching what they send.
+- **A date counted four times.** Chrome lists a date box's Day, Month and Year as boxes of their own; they are now part of the date.
+- **A file box missing.** Chrome gives it a read-only "No file chosen", and read-only boxes were dropped; it is a button, so it stays, as
+  the user's to fill. "CV" and "résumé" mark one too.
+- **A form cut in two, or joined to the chat box below.** An unnamed `<form>` is no landmark in Chrome, so groups of boxes in one column
+  now count as one form, unless a Submit, Send or Sign up button lies between them.
+- **A local page's address.** Chrome shows `G:/…` for a file, with no scheme; it is now read as a local file.
+
+### Not proved
+
+Real sites beyond the test pages, Edge and Firefox, and the island's own flows (Write here, Fill this form, answering on the island)
+driven end to end in the installed app.
+
 ## 2026-11-06: Fill this form on any form, and seamless
 
 The owner asked that no sign-up or form have the faults Naukri showed, and approved six changes to make filling seamless. See D76's two

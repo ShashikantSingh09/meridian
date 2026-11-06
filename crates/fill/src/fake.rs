@@ -21,6 +21,10 @@ pub struct Behaviour {
     pub elsewhere: bool,
     /// A picker the page built: it takes the text, then empties itself once another box is written.
     pub empties_when_left: bool,
+    /// Ctrl+Z does nothing here, as a browser's history can miss a paste into a textarea.
+    pub no_history: bool,
+    /// Plain text with nothing inside, as a textarea; an editor with paragraphs is not.
+    pub plain: bool,
 }
 
 impl Default for Behaviour {
@@ -37,6 +41,8 @@ impl Default for Behaviour {
             items: Vec::new(),
             elsewhere: false,
             empties_when_left: false,
+            no_history: false,
+            plain: false,
         }
     }
 }
@@ -182,10 +188,17 @@ impl Writer for Fake {
         assert_eq!(self.focus, Some(id), "keys go only to the focused box");
         self.calls.push("ctrl z".into());
         let found = self.focused();
+        if found.behaviour.no_history {
+            return Ok(());
+        }
         if let Some(previous) = found.history.pop() {
             found.value = previous;
         }
         Ok(())
+    }
+
+    fn plain(&mut self, id: u32) -> bool {
+        self.at(id).behaviour.plain
     }
 
     fn wait(&mut self, _ms: u64) {}
