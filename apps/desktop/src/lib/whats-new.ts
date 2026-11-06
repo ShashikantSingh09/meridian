@@ -6,6 +6,9 @@ export interface NewThing {
 }
 
 export const WHATS_NEW: Record<string, NewThing[]> = {
+  "0.7.5": [
+    { title: "Your AI on another machine", line: "Give Ollama or LM Studio an address, and a key if it asks, in Settings, AI models." },
+  ],
   "0.7.4": [
     { title: "Your AI on another machine", line: "Give Ollama or LM Studio an address in Settings, AI models, and Meridian uses it." },
   ],
