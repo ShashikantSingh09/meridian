@@ -58,7 +58,8 @@ hooks load without a trust prompt in print mode, so the new-session form warns a
 
 **Local-only mode** also stops Claude Code and Codex sessions, which send what they are given to their makers, and mail and calendar sync, and it is enforced in Rust on the resolved address, including custom endpoints. A hostname merely containing
 "localhost" does not pass. A local AI set to another machine's address (Settings, AI models, Address) is used like any other endpoint,
-over plain HTTP unless the address says https, so chats cross the network to it. In local-only mode it is neither called nor counted as
+over plain HTTP unless the address says https, so chats cross the network to it. Its API key, if it has one, is kept in Windows Credential Manager and sent only to the
+address set for that server, with chats and when Find models on this PC checks it, so over plain HTTP the key crosses the network too. In local-only mode it is neither called nor counted as
 running, so Write here and Fill this form never pick it.
 
 **The OAuth loopback listener** binds 127.0.0.1 on a random port for one sign-in, and checks `state` and PKCE.

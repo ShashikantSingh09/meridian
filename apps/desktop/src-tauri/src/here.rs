@@ -206,7 +206,7 @@ fn local_engine(settings: &Settings, running: &[ai_core::LocalServer]) -> Result
 pub(crate) async fn engine(core: &Core, settings: &Settings) -> Result<Engine, Outcome> {
     if settings.local_only {
         let urls = settings.provider_base_urls.clone();
-        let running = crate::commands::running_here(ai_core::discover(|id| urls.get(id).cloned()).await, true);
+        let running = crate::commands::running_here(ai_core::discover(|id| urls.get(id).cloned(), crate::secrets::get).await, true);
         return local_engine(settings, &running);
     }
     match settings.fill.ai.as_str() {

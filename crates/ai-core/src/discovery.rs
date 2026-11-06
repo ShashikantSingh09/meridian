@@ -18,20 +18,20 @@ pub struct LocalServer {
     pub models: Vec<String>,
 }
 
-async fn probe(id: &str, base_url: String) -> Option<LocalServer> {
+async fn probe(id: &str, base_url: String, api_key: Option<String>) -> Option<LocalServer> {
     let def = crate::find(id)?;
-    let provider = client(def.protocol, Endpoint { base_url: base_url.clone(), api_key: None }).ok()?;
+    let provider = client(def.protocol, Endpoint { base_url: base_url.clone(), api_key }).ok()?;
     let models = tokio::time::timeout(PROBE_TIMEOUT, provider.models()).await.ok()?.ok()?;
     Some(LocalServer { provider_id: id.to_string(), base_url, models: models.into_iter().map(|m| m.id).collect() })
 }
 
-/// Probes every local provider at the address `resolve` gives for it. Silent
-/// ports are simply absent from the result.
-pub async fn discover(resolve: impl Fn(&str) -> Option<String>) -> Vec<LocalServer> {
+/// Probes every local provider at the address `resolve` gives for it, with the key `key` gives,
+/// for a server on another machine that asks for one. Silent ports are simply absent from the result.
+pub async fn discover(resolve: impl Fn(&str) -> Option<String>, key: impl Fn(&str) -> Option<String>) -> Vec<LocalServer> {
     let probes = catalog()
         .iter()
         .filter(|p| p.kind == Kind::Local)
-        .map(|p| probe(p.id, resolve(p.id).unwrap_or_else(|| p.base_url.to_string())));
+        .map(|p| probe(p.id, resolve(p.id).unwrap_or_else(|| p.base_url.to_string()), key(p.id)));
     join_all(probes).await.into_iter().flatten().collect()
 }
 
@@ -46,7 +46,7 @@ mod tests {
         let found = discover(|id| match id {
             "llamacpp" => Some(url.clone()),
             _ => Some("http://127.0.0.1:9/v1".to_string()),
-        })
+        }, |_| None)
         .await;
         assert!(found.is_empty());
     }
@@ -57,7 +57,7 @@ mod tests {
         let found = discover(|id| match id {
             "lmstudio" => Some(url.clone()),
             _ => Some("http://127.0.0.1:9/v1".to_string()),
-        })
+        }, |_| None)
         .await;
         assert_eq!(found.len(), 1);
     }
@@ -68,10 +68,22 @@ mod tests {
         let found = discover(|id| match id {
             "lmstudio" => Some(url.clone()),
             _ => Some("http://127.0.0.1:9/v1".to_string()),
-        })
+        }, |_| None)
         .await;
         assert_eq!(found.len(), 1);
         assert_eq!(found[0].provider_id, "lmstudio");
         assert_eq!(found[0].models, ["phi-4"]);
+    }
+
+    #[tokio::test]
+    async fn a_server_that_asks_for_a_key_gets_its_own() {
+        let (url, seen) = serve(vec![Canned::json(r#"{"data":[{"id":"llama3"}]}"#)]).await;
+        let found = discover(
+            |id| Some(if id == "ollama" { url.clone() } else { "http://127.0.0.1:9/v1".to_string() }),
+            |id| (id == "ollama").then(|| "lan-secret".to_string()),
+        )
+        .await;
+        assert_eq!(found.len(), 1);
+        assert!(seen.lock().unwrap()[0].to_ascii_lowercase().contains("authorization: bearer lan-secret"));
     }
 }

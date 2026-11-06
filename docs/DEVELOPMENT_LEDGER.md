@@ -8,6 +8,9 @@ it here. Find models on this PC then checks the address given, and the row says 
 In local-only mode a server on another machine is not counted as running, so Write here and Fill this form never pick it. Tested in
 `store.test.ts`, `island.spec.ts` and `here.rs`; not yet tried against a real server on another machine.
 
+The Address panel also takes an API key, for a server that asks for one. It is kept in Windows Credential Manager like the cloud
+keys, and Find models on this PC sends it, so such a server is found. Tested in `discovery.rs` and `island.spec.ts`.
+
 ## 2026-11-06: The by-hand tests, run in a real browser
 
 The owner asked for the live tests to be run on their screen. All 21 now pass in Chrome, run one at a time in a throwaway Chrome

@@ -13,34 +13,64 @@ const CAP_LABELS: [keyof Capabilities, string][] = [
   ["usage", "Usage"],
 ];
 
-function ProviderCard({ provider }: { provider: ProviderInfo }) {
-  const settings = useApp((s) => s.settings);
-  const localOnline = useApp((s) => s.localOnline);
-  const [key, setKey] = useState("");
-  const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(null);
-  const [busy, setBusy] = useState(false);
-  const blocked = settings.localOnly && provider.kind !== "local";
+type Status = { ok: boolean; text: string } | null;
 
+/** Runs a click's work with the buttons held, and says how it went. */
+function useRun(say: (status: Status) => void) {
+  const [busy, setBusy] = useState(false);
   const run = async (action: () => Promise<string | void>) => {
     setBusy(true);
-    setStatus(null);
+    say(null);
     try {
       const text = await action();
-      setStatus(text ? { ok: true, text } : null);
+      say(text ? { ok: true, text } : null);
     } catch (err) {
-      setStatus({ ok: false, text: String(err) });
+      say({ ok: false, text: String(err) });
     } finally {
       setBusy(false);
     }
   };
+  return [busy, run] as const;
+}
 
-  const saveKey = () =>
-    run(async () => {
-      await bridge.setProviderKey(provider.id, key);
-      setKey("");
-      await refreshProviders();
-      return "Key saved to Windows Credential Manager.";
-    });
+/** A key kept in Windows Credential Manager. A stored key is never shown, only that there is one. */
+function KeyField({ provider, hint, say }: { provider: ProviderInfo; hint: string; say: (status: Status) => void }) {
+  const [key, setKey] = useState("");
+  const [busy, run] = useRun(say);
+  // A server on another machine that asks for a key is only found once it has it.
+  const refresh = () => Promise.all([refreshProviders(), provider.kind === "local" ? refreshLocal() : null]);
+  return (
+    <div className="field-row">
+      <input
+        type="password"
+        aria-label={`${provider.name} API key`}
+        placeholder={provider.hasKey ? "Key stored" : hint}
+        value={key}
+        onChange={(e) => setKey(e.target.value)}
+      />
+      {key ? (
+        <button
+          className="solid"
+          disabled={busy}
+          onClick={() => run(async () => { await bridge.setProviderKey(provider.id, key); setKey(""); await refresh(); return "Key saved to Windows Credential Manager."; })}
+        >
+          Save
+        </button>
+      ) : provider.hasKey ? (
+        <button className="ghost" disabled={busy} onClick={() => run(async () => { await bridge.clearProviderKey(provider.id); await refresh(); })}>
+          Remove
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function ProviderCard({ provider }: { provider: ProviderInfo }) {
+  const settings = useApp((s) => s.settings);
+  const localOnline = useApp((s) => s.localOnline);
+  const [status, setStatus] = useState<Status>(null);
+  const [busy, run] = useRun(setStatus);
+  const blocked = settings.localOnly && provider.kind !== "local";
 
   return (
     <article className="card" data-blocked={blocked}>
@@ -70,28 +100,7 @@ function ProviderCard({ provider }: { provider: ProviderInfo }) {
         />
       </label>
 
-      {provider.needsKey && (
-        <div className="field-row">
-          <input
-            type="password"
-            aria-label={`${provider.name} API key`}
-            placeholder={provider.hasKey ? "Key stored" : "API key"}
-            value={key}
-            onChange={(e) => setKey(e.target.value)}
-          />
-          {key ? (
-            <button className="solid" disabled={busy} onClick={saveKey}>Save</button>
-          ) : provider.hasKey ? (
-            <button
-              className="ghost"
-              disabled={busy}
-              onClick={() => run(async () => { await bridge.clearProviderKey(provider.id); await refreshProviders(); })}
-            >
-              Remove
-            </button>
-          ) : null}
-        </div>
-      )}
+      {provider.needsKey && <KeyField provider={provider} hint="API key" say={setStatus} />}
 
       <div className="row">
         <button className="ghost" disabled={busy || blocked} onClick={() => run(() => bridge.testProvider(provider.id))}>Test</button>
@@ -158,7 +167,7 @@ function SignIn() {
 function LocalRow({ provider }: { provider: ProviderInfo }) {
   const settings = useApp((s) => s.settings);
   const running = useApp((s) => s.localOnline.includes(provider.id));
-  const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(null);
+  const [status, setStatus] = useState<Status>(null);
   const [editing, setEditing] = useState(false);
   const [typed, setTyped] = useState("");
   const set = provider.id in settings.providerBaseUrls;
@@ -212,7 +221,8 @@ function LocalRow({ provider }: { provider: ProviderInfo }) {
             <button className="solid" disabled={!typed.trim()} onClick={save}>Save</button>
             {set && <button className="ghost" onClick={() => void keep(null)}>Use this PC</button>}
           </div>
-          <p className="meta">For {provider.name} on another machine, type that machine's address. Your chats go over your network to it. Leave it unset and Meridian finds {provider.name} on this PC.</p>
+          <KeyField provider={provider} hint="API key, if that server asks for one" say={setStatus} />
+          <p className="meta">For {provider.name} on another machine, type that machine's address, and its key if it has one. Your chats go over your network to it, so use an https address when that server has one. Leave it unset and Meridian finds {provider.name} on this PC.</p>
           {settings.localOnly && elsewhere && <p className="meta bad">Local-only mode is on, so another machine is not used.</p>}
         </div>
       )}

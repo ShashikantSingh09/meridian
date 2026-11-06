@@ -244,7 +244,7 @@ pub async fn providers_discover(core: State<'_, Core>) -> Result<Vec<LocalServer
         let settings = core.settings.lock().unwrap();
         (settings.provider_base_urls.clone(), settings.local_only)
     };
-    Ok(running_here(ai_core::discover(|id| overrides.get(id).cloned()).await, local_only))
+    Ok(running_here(ai_core::discover(|id| overrides.get(id).cloned(), secrets::get).await, local_only))
 }
 
 /// In local-only mode a server set to another machine's address does not count as running,

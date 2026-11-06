@@ -1086,6 +1086,15 @@ test.describe("panel", () => {
     await page.getByRole("button", { name: "Use an API key instead" }).click();
     await expect(page.getByLabel("Ollama endpoint")).toHaveValue("http://192.168.1.20:11434/v1");
     await page.getByRole("button", { name: "Address" }).click();
+    const key = page.getByLabel("Ollama API key");
+    await expect(key).toHaveAttribute("placeholder", "API key, if that server asks for one");
+    await key.fill("lan-secret");
+    await key.locator("..").getByRole("button", { name: "Save" }).click();
+    await expect(page.getByText("Key saved to Windows Credential Manager.")).toBeVisible();
+    await expect(key).toHaveValue("");
+    await expect(key).toHaveAttribute("placeholder", "Key stored");
+    await key.locator("..").getByRole("button", { name: "Remove" }).click();
+    await expect(key).toHaveAttribute("placeholder", "API key, if that server asks for one");
     await page.getByRole("button", { name: "Use this PC" }).click();
     await expect(page.getByText("Not running", { exact: true })).toBeVisible();
   });
