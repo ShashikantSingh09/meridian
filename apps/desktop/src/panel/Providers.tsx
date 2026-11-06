@@ -2,7 +2,7 @@ import { useState } from "react";
 import { bridge } from "../lib/bridge";
 import { Brand } from "../lib/brands";
 import { Icon } from "../lib/icons";
-import { isReady, openLink, refreshLocal, refreshProviders, signInAgent, signInProvider, updateSettings, useApp } from "../lib/store";
+import { hostOf, isReady, onThisPc, openLink, refreshLocal, refreshProviders, serverAddress, signInAgent, signInProvider, updateSettings, useApp } from "../lib/store";
 import type { Capabilities, ProviderInfo } from "../lib/types";
 
 const CAP_LABELS: [keyof Capabilities, string][] = [
@@ -154,23 +154,68 @@ function SignIn() {
   );
 }
 
-/** A server on this PC, which answers or does not. */
+/** A server on this PC, or at an address on another machine, which answers or does not. */
 function LocalRow({ provider }: { provider: ProviderInfo }) {
+  const settings = useApp((s) => s.settings);
   const running = useApp((s) => s.localOnline.includes(provider.id));
   const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [typed, setTyped] = useState("");
+  const set = provider.id in settings.providerBaseUrls;
+  const elsewhere = !onThisPc(provider.baseUrl);
+  const host = elsewhere ? hostOf(provider.baseUrl) : null;
+
   const test = () =>
     bridge.testProvider(provider.id).then(
       (text) => setStatus({ ok: true, text }),
       (err) => setStatus({ ok: false, text: String(err) }),
     );
+
+  const keep = async (address: string | null) => {
+    const { [provider.id]: _old, ...others } = settings.providerBaseUrls;
+    await updateSettings({ providerBaseUrls: address ? { ...others, [provider.id]: address } : others });
+    setEditing(false);
+    setStatus(null);
+    await refreshLocal();
+  };
+
+  const save = () => {
+    const address = serverAddress(typed, provider.baseUrl);
+    if (address) void keep(address);
+    else setStatus({ ok: false, text: "That is not an address. Try 192.168.1.20 or http://192.168.1.20:11434/v1" });
+  };
+
+  const said = status?.text ?? (running ? (host ? `Running on ${host}` : "Running") : host ? `Not answering at ${host}` : "Not running");
   return (
-    <div className="setting">
-      <Brand id={provider.id} name={provider.name} size={28} />
-      <span className="stacked grow">
-        <span className="label">{provider.name}</span>
-        <span className={status ? (status.ok ? "meta ok truncate" : "meta bad truncate") : "meta"} role="status" title={status?.text}>{status?.text ?? (running ? "Running" : "Not running")}</span>
-      </span>
-      <button className="ghost" onClick={() => void test()}>Test</button>
+    <div className="stack-sm">
+      <div className="setting">
+        <Brand id={provider.id} name={provider.name} size={28} />
+        <span className="stacked grow">
+          <span className="label">{provider.name}</span>
+          <span className={status ? (status.ok ? "meta ok truncate" : "meta bad truncate") : "meta"} role="status" title={status?.text}>{said}</span>
+        </span>
+        <button className="ghost" aria-expanded={editing} onClick={() => { setTyped(set ? provider.baseUrl : ""); setEditing(!editing); }}>Address</button>
+        <button className="ghost" onClick={() => void test()}>Test</button>
+      </div>
+      {editing && (
+        <div className="stack-sm">
+          <div className="field-row">
+            <input
+              className="grow"
+              aria-label={`${provider.name} address`}
+              placeholder={provider.baseUrl}
+              value={typed}
+              autoFocus
+              onChange={(e) => setTyped(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") save(); if (e.key === "Escape") setEditing(false); }}
+            />
+            <button className="solid" disabled={!typed.trim()} onClick={save}>Save</button>
+            {set && <button className="ghost" onClick={() => void keep(null)}>Use this PC</button>}
+          </div>
+          <p className="meta">For {provider.name} on another machine, type that machine's address. Your chats go over your network to it. Leave it unset and Meridian finds {provider.name} on this PC.</p>
+          {settings.localOnly && elsewhere && <p className="meta bad">Local-only mode is on, so another machine is not used.</p>}
+        </div>
+      )}
     </div>
   );
 }

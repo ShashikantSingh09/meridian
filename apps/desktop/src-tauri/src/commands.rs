@@ -240,8 +240,20 @@ pub async fn provider_test(core: State<'_, Core>, id: String) -> Result<String, 
 
 #[tauri::command]
 pub async fn providers_discover(core: State<'_, Core>) -> Result<Vec<LocalServer>, String> {
-    let overrides = core.settings.lock().unwrap().provider_base_urls.clone();
-    Ok(ai_core::discover(|id| overrides.get(id).cloned()).await)
+    let (overrides, local_only) = {
+        let settings = core.settings.lock().unwrap();
+        (settings.provider_base_urls.clone(), settings.local_only)
+    };
+    Ok(running_here(ai_core::discover(|id| overrides.get(id).cloned()).await, local_only))
+}
+
+/// In local-only mode a server set to another machine's address does not count as running,
+/// because `resolve` will not call it.
+pub(crate) fn running_here(mut found: Vec<LocalServer>, local_only: bool) -> Vec<LocalServer> {
+    if local_only {
+        found.retain(|server| ai_core::is_loopback(&server.base_url));
+    }
+    found
 }
 
 #[tauri::command]

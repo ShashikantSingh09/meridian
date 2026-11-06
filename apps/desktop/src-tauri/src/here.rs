@@ -206,7 +206,7 @@ fn local_engine(settings: &Settings, running: &[ai_core::LocalServer]) -> Result
 pub(crate) async fn engine(core: &Core, settings: &Settings) -> Result<Engine, Outcome> {
     if settings.local_only {
         let urls = settings.provider_base_urls.clone();
-        let running = ai_core::discover(|id| urls.get(id).cloned()).await;
+        let running = crate::commands::running_here(ai_core::discover(|id| urls.get(id).cloned()).await, true);
         return local_engine(settings, &running);
     }
     match settings.fill.ai.as_str() {
@@ -892,6 +892,16 @@ mod tests {
 
     fn running(id: &str, models: &[&str]) -> ai_core::LocalServer {
         ai_core::LocalServer { provider_id: id.into(), base_url: "http://127.0.0.1:11434".into(), models: models.iter().map(|m| m.to_string()).collect() }
+    }
+
+    #[test]
+    fn a_server_on_another_machine_does_not_count_in_local_only_mode() {
+        let mut away = running("ollama", &["llama3"]);
+        away.base_url = "http://192.168.1.20:11434/v1".into();
+        let found = || vec![running("lmstudio", &["phi-4"]), away.clone()];
+        let here = crate::commands::running_here(found(), true);
+        assert_eq!(here.iter().map(|s| s.provider_id.as_str()).collect::<Vec<_>>(), ["lmstudio"]);
+        assert_eq!(crate::commands::running_here(found(), false).len(), 2);
     }
 
     #[test]

@@ -1,5 +1,13 @@
 # Development ledger
 
+## 2026-11-06: A local AI on another machine
+
+Each server under On this PC in Settings, AI models, now has an Address button. Typing `192.168.1.20` becomes
+`http://192.168.1.20:11434/v1`, taking that server's usual port and path; a full link is kept as typed. Use this PC goes back to finding
+it here. Find models on this PC then checks the address given, and the row says `Running on 192.168.1.20:11434` or `Not answering at …`.
+In local-only mode a server on another machine is not counted as running, so Write here and Fill this form never pick it. Tested in
+`store.test.ts`, `island.spec.ts` and `here.rs`; not yet tried against a real server on another machine.
+
 ## 2026-11-06: The by-hand tests, run in a real browser
 
 The owner asked for the live tests to be run on their screen. All 21 now pass in Chrome, run one at a time in a throwaway Chrome

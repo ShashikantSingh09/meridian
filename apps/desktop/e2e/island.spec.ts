@@ -1076,6 +1076,20 @@ test.describe("panel", () => {
     await expect(key).toHaveAttribute("placeholder", "Key stored");
   });
 
+  test("a model server on another machine is found at the address typed, and Use this PC goes back", async ({ page }) => {
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await page.getByRole("button", { name: "AI models", exact: true }).click();
+    await page.getByRole("button", { name: "Address" }).click();
+    await page.getByLabel("Ollama address").fill("192.168.1.20");
+    await page.getByLabel("Ollama address").press("Enter");
+    await expect(page.getByText("Not answering at 192.168.1.20:11434")).toBeVisible();
+    await page.getByRole("button", { name: "Use an API key instead" }).click();
+    await expect(page.getByLabel("Ollama endpoint")).toHaveValue("http://192.168.1.20:11434/v1");
+    await page.getByRole("button", { name: "Address" }).click();
+    await page.getByRole("button", { name: "Use this PC" }).click();
+    await expect(page.getByText("Not running", { exact: true })).toBeVisible();
+  });
+
   test("the model list is the app's own, and works from the keyboard", async ({ page }) => {
     await page.getByRole("button", { name: "Chat", exact: true }).click();
     await useEngine(page, "Anthropic");

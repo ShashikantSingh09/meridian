@@ -659,6 +659,47 @@ export async function refreshLocal() {
   return servers;
 }
 
+/** Whether an address is this PC, the same way the core's local-only check decides it. */
+export function onThisPc(address: string) {
+  try {
+    const host = new URL(address).hostname.replace(/^\[|\]$/g, "").toLowerCase();
+    return host === "localhost" || host === "::1" || /^127\./.test(host);
+  } catch {
+    return false;
+  }
+}
+
+/** The machine an address points at, with its port, for saying where a server is. */
+export function hostOf(address: string) {
+  try {
+    return new URL(address).host;
+  } catch {
+    return address;
+  }
+}
+
+/** What someone typed for a model server, made a full address. A bare "192.168.1.20" takes the port
+ *  and path of `usual`, the address the server uses by default. Null when it is not an address. */
+export function serverAddress(typed: string, usual: string): string | null {
+  const text = typed.trim();
+  if (!text) return null;
+  const bare = !/^[a-z][a-z\d+.-]*:\/\//i.test(text);
+  let url: URL;
+  try {
+    url = new URL(bare ? `http://${text}` : text);
+  } catch {
+    return null;
+  }
+  if ((url.protocol !== "http:" && url.protocol !== "https:") || !url.hostname) return null;
+  const fallback = URL.canParse(usual) ? new URL(usual) : null;
+  // ponytail: a bare "host:80" loses its port to the URL parser and takes the usual one; type http:// to keep 80.
+  if (fallback && bare && url.port === "") url.port = fallback.port;
+  if (fallback && url.pathname === "/") url.pathname = fallback.pathname;
+  url.search = "";
+  url.hash = "";
+  return url.href.replace(/\/$/, "");
+}
+
 /** Can this provider answer right now, as far as we can tell without calling it? */
 export function isReady(p: ProviderInfo, localOnline: string[]) {
   if (p.kind === "local") return localOnline.includes(p.id);

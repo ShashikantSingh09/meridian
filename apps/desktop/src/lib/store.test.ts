@@ -3,7 +3,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { bridge } from "./bridge";
-import { applyAgentEvent, nextEngine, clearAgentFocus, clearChat, closeOnBlur, closePanel, dismissError, dismissNotice, getState, openPanel, openSession, pushError, pushNotice, refreshProviders, selectProvider, sendChat, sendToSession, setHovered, startSession, toggleFromCore } from "./store";
+import { applyAgentEvent, nextEngine, clearAgentFocus, clearChat, closeOnBlur, closePanel, dismissError, dismissNotice, getState, onThisPc, openPanel, openSession, pushError, pushNotice, refreshProviders, selectProvider, sendChat, serverAddress, sendToSession, setHovered, startSession, toggleFromCore } from "./store";
 import type { AgentEvent } from "./types";
 
 vi.mock("./sound", () => ({ chime: () => {} }));
@@ -290,5 +290,34 @@ describe("choosing an AI", () => {
 
   it("takes a working provider when nothing was chosen", () => {
     expect(nextEngine(null, "anthropic", "claude-code")).toBe("anthropic");
+  });
+});
+
+describe("a model server on another machine", () => {
+  const ollama = "http://localhost:11434/v1";
+
+  it("takes a bare address and fills in the usual port and path", () => {
+    expect(serverAddress("192.168.1.20", ollama)).toBe("http://192.168.1.20:11434/v1");
+    expect(serverAddress(" studio-pc.local:1234 ", ollama)).toBe("http://studio-pc.local:1234/v1");
+    expect(serverAddress("[fe80::1]", ollama)).toBe("http://[fe80::1]:11434/v1");
+  });
+
+  it("keeps a full address as it was typed", () => {
+    expect(serverAddress("https://ai.example.test/api/v1/", ollama)).toBe("https://ai.example.test/api/v1");
+    expect(serverAddress("http://10.0.0.5:8000/v1?x=1#y", ollama)).toBe("http://10.0.0.5:8000/v1");
+  });
+
+  it("refuses what is not a web address", () => {
+    expect(serverAddress("", ollama)).toBeNull();
+    expect(serverAddress("file:///C:/models", ollama)).toBeNull();
+    expect(serverAddress("http://", ollama)).toBeNull();
+  });
+
+  it("counts only this PC as this PC", () => {
+    expect(onThisPc("http://localhost:11434/v1")).toBe(true);
+    expect(onThisPc("http://127.0.0.1:1234/v1")).toBe(true);
+    expect(onThisPc("http://[::1]:8080/v1")).toBe(true);
+    expect(onThisPc("http://192.168.1.20:11434/v1")).toBe(false);
+    expect(onThisPc("http://localhost.example.test/v1")).toBe(false);
   });
 });

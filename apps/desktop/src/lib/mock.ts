@@ -585,7 +585,7 @@ export const mock = {
   seedPlaces: (places: FillPlace[]) => void (settings = { ...settings, fill: { ...settings.fill, places } }),
   /** The stand-in agent's next answer, or the reason it fails. */
   answerNext: (answer: { text?: string; fail?: string }) => void (nextAnswer = answer),
-  listProviders: async () => providers.map((p) => ({ ...p })),
+  listProviders: async () => providers.map((p) => ({ ...p, baseUrl: settings.providerBaseUrls[p.id] ?? p.baseUrl })),
   setProviderKey: async (id: string) => void providers.filter((p) => p.id === id).forEach((p) => (p.hasKey = true)),
   clearProviderKey: async (id: string) => void providers.filter((p) => p.id === id).forEach((p) => (p.hasKey = false)),
   listModels: async (): Promise<ModelInfo[]> => [
