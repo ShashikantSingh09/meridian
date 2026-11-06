@@ -1,5 +1,20 @@
 # Development ledger
 
+## 2026-11-06: Fill this form on a real sign-up page
+
+The owner tried 0.7.0 on Naukri's sign-up form. Three faults, all fixed:
+
+- The email box offers domain suggestions, so it reports as a combo box, and was read as a list of fixed choices: "That choice is not in
+  the list". A combo box that takes typing has the text pattern, which a drop-down never has, so it is now a text box.
+- The page's bulleted "On registering, you can" list reported as a list, and was taken for a box. A list now counts only when it can be
+  selected in or focused.
+- The outlines stayed over another tab of the same browser, because a background tab's boxes still answer with their old places. They
+  now hide when the window's title changes and come back on return. Carrying on a form filled a moment ago now needs the same tab too.
+
+### Not proved
+
+The fix in the real browser: the read test in `crates/fill/tests/live_forms.rs` now covers both cases on `tests/fill/forms.html`.
+
 ## 2026-11-06: Fill this form and Finish this for me (phases 3 and 4)
 
 Built by two builds in parallel, then merged. See D76 and D77. Merging found one real gap between them: Finish taught the reader about

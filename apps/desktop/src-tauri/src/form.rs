@@ -323,7 +323,8 @@ fn begin(seat: &mut Seat, app: &AppHandle, exclusions: &[String], places: &[Plac
     if carry_on {
         let target = here::look(&mut seat.look).ok_or_else(|| failed(GONE))?.target().map_err(|err| line(err.to_string()))?;
         let live = seat.form.as_mut().expect("checked above");
-        if target.process == live.target.process && target.site == live.target.site {
+        // The same tab too: another tab of the site has its own boxes, and the window's title is the tab's.
+        if target.process == live.target.process && target.site == live.target.site && target.title == live.target.title {
             here::gate(&target, here::excluded(&target, exclusions), places, allow)?;
             live.watching = false;
             return Ok(read_of(&live.form, live.site.clone(), live.page.clone()));
@@ -445,7 +446,10 @@ pub fn watch(seat: &mut Seat, app: &AppHandle) {
         let _ = app.emit_to(island::LABEL, "form-ended", ());
         return;
     }
-    if screen::foreground().map(|front| front.hwnd) != Some(live.hwnd) {
+    // Another window, or another tab of the same browser: its title is the tab's. A background tab's boxes
+    // still answer with their old places, so without this the outlines would sit over the new tab.
+    let front = screen::foreground();
+    if front.as_ref().map(|front| front.hwnd) != Some(live.hwnd) || front.as_ref().map(|front| front.title.as_str()) != Some(live.target.title.as_str()) {
         outlines::hide(app);
         return;
     }

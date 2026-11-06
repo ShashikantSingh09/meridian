@@ -67,6 +67,11 @@ fn reads_every_box_on_the_test_page_and_no_trap() {
     assert!(find(&fields, "Full name").required);
     assert_eq!(find(&fields, "पूरा नाम").kind, FieldKind::PlainText);
     assert_eq!(find(&fields, "Email").kind, FieldKind::Email);
+    // An input with suggestions reports as a combo box; it is still a box you type in.
+    assert_eq!(find(&fields, "Work email").kind, FieldKind::Email);
+    // A bulleted list is the page's words, not a box.
+    assert!(!fields.iter().any(|field| field.kind == FieldKind::List && field.label.trim().is_empty()), "an unnamed list is not a box");
+    assert!(!fields.iter().any(|field| field.label.contains("Build your profile")), "the page's bulleted list is not a box");
     assert_eq!(find(&fields, "मोबाइल नंबर").kind, FieldKind::Phone);
     assert_eq!(find(&fields, "Why do you want").kind, FieldKind::MultiLine);
     assert_eq!(find(&fields, "Cover note").kind, FieldKind::RichText);

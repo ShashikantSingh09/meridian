@@ -137,6 +137,8 @@ impl Uia {
             UIA_AriaPropertiesPropertyId,
             UIA_NativeWindowHandlePropertyId,
             UIA_IsTextPatternAvailablePropertyId,
+            UIA_IsSelectionPatternAvailablePropertyId,
+            UIA_IsKeyboardFocusablePropertyId,
             UIA_ValueIsReadOnlyPropertyId,
             UIA_ToggleToggleStatePropertyId,
             UIA_SelectionItemIsSelectedPropertyId,
@@ -198,11 +200,10 @@ impl Uia {
             let value_pattern = element.GetCachedPatternAs::<IUIAutomationValuePattern>(UIA_ValuePatternId).ok();
             let read_only = value_pattern.as_ref().is_some_and(|pattern| flag(pattern.CachedIsReadOnly()));
             let multiline = text(element.CachedAriaProperties()).contains("multiline=true") || native_multiline(element, &class);
-            let text_pattern = element
-                .GetCachedPropertyValue(UIA_IsTextPatternAvailablePropertyId)
-                .ok()
-                .and_then(|value| bool::try_from(&value).ok())
-                .unwrap_or(false);
+            let cached = |property| element.GetCachedPropertyValue(property).ok().and_then(|value| bool::try_from(&value).ok()).unwrap_or(false);
+            let text_pattern = cached(UIA_IsTextPatternAvailablePropertyId);
+            // A list you can pick from can be selected in or focused. A page's bulleted list can be neither.
+            let pickable = cached(UIA_IsSelectionPatternAvailablePropertyId) || cached(UIA_IsKeyboardFocusablePropertyId);
 
             let kind = match control {
                 UIA_EditControlTypeId if flag(element.CachedIsPassword()) => FieldKind::Password,
@@ -220,8 +221,13 @@ impl Uia {
                     FieldKind::RichText
                 }
                 // A combo box you can type in is a text box with suggestions.
-                UIA_ComboBoxControlTypeId if value_pattern.is_some() && !read_only => FieldKind::PlainText,
-                UIA_ComboBoxControlTypeId | UIA_ListControlTypeId => FieldKind::List,
+                // An input with suggestions, such as an email box offering domains, reports as a combo box.
+                // It takes typing, so it has the text pattern; a drop-down of fixed choices never does.
+                UIA_ComboBoxControlTypeId if (value_pattern.is_some() && !read_only) || text_pattern => FieldKind::PlainText,
+                UIA_ComboBoxControlTypeId => FieldKind::List,
+                UIA_ListControlTypeId if pickable => FieldKind::List,
+                // Every bulleted list on a page reports as a list. It is the page's words, not a box.
+                UIA_ListControlTypeId => return Ok(None),
                 UIA_CheckBoxControlTypeId => FieldKind::Checkbox,
                 UIA_RadioButtonControlTypeId => FieldKind::Radio,
                 UIA_SpinnerControlTypeId => FieldKind::Number,
