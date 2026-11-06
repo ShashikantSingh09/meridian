@@ -6,6 +6,9 @@ export interface NewThing {
 }
 
 export const WHATS_NEW: Record<string, NewThing[]> = {
+  "0.7.4": [
+    { title: "Your AI on another machine", line: "Give Ollama or LM Studio an address in Settings, AI models, and Meridian uses it." },
+  ],
   "0.7.3": [
     { title: "Fills the tab you are on", line: "A form in another open tab is never read or filled." },
     { title: "Works the first time", line: "Ctrl Alt F finds your box right after Chrome starts." },
