@@ -6,6 +6,10 @@ export interface NewThing {
 }
 
 export const WHATS_NEW: Record<string, NewThing[]> = {
+  "0.7.1": [
+    { title: "Fill this form reads forms better", line: "Email boxes that suggest domains now fill in, and a page's lists are left alone." },
+    { title: "Outlines stay with their tab", line: "They hide when you switch tabs and come back when you return." },
+  ],
   "0.7.0": [
     { title: "Write here and Fill this form", line: "Ctrl Alt F writes a reply or fills a form in place. Turn it on in Settings." },
     { title: "Cards in My Day", line: "Replies you owe, renewals and trips, each with a draft or a plan." },
