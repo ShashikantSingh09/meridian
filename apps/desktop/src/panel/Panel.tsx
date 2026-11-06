@@ -64,6 +64,7 @@ export function Panel() {
   const onboarded = useApp((s) => s.settings.onboarded);
   const wakeOn = useApp((s) => s.wake.state === "listening");
   const recording = useApp((s) => s.notes.notes.find((n) => n.id === s.notes.recording));
+  const needs = useApp((s) => s.cards.cards.length);
   const Page = onboarded ? PAGES[tab] : Welcome;
   const title = !onboarded ? "Welcome" : tab === "home" ? greetingWord() : NAV.find((n) => n.tab === tab)?.label;
   const date = new Date().toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
@@ -100,6 +101,7 @@ export function Panel() {
               {tab === n.tab && <motion.span layoutId="dock-pill" className="dock-pill" transition={spring.snap} />}
               <Icon name={n.icon} size={19} />
               {n.tab === "agents" && running > 0 && <span className="badge tabular">{running}</span>}
+              {n.tab === "day" && needs > 0 && <span className="badge tabular" aria-hidden="true">{needs}</span>}
             </button>
           ))}
         </nav>

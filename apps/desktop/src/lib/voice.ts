@@ -479,15 +479,17 @@ async function finishTurn() {
 }
 
 /** What holds the current chat. Asking something replaces it, so it tells a new reply from an old one. */
-function chatNow() {
+export function chatNow() {
   const app = getState();
   return app.agentChat.agent ? app.sessions.find((s) => s.id === app.agentChat.sessionId)?.log : app.chat.messages;
 }
 
-/** Everything the AI has written since the last thing the user said. */
-function replySoFar(): { text: string; done: boolean; waiting: { sessionId: string; approvalId: string; summary: string; agent: string; tool: string; whole: boolean } | null } {
+const replySoFar = () => replySince(session?.before);
+
+/** Everything the AI has written since the last thing the user said, `before` being what `chatNow` gave then. */
+export function replySince(before: unknown): { text: string; done: boolean; waiting: { sessionId: string; approvalId: string; summary: string; agent: string; tool: string; whole: boolean } | null } {
   const app = getState();
-  const unchanged = chatNow() === session?.before;
+  const unchanged = chatNow() === before;
   if (!app.agentChat.agent) {
     const last = app.chat.messages[app.chat.messages.length - 1];
     return { text: !unchanged && last?.role === "assistant" ? last.content : "", done: !app.chatPending, waiting: null };

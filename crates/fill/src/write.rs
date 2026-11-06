@@ -74,6 +74,11 @@ pub trait Writer {
     fn wait(&mut self, ms: u64) {
         std::thread::sleep(Duration::from_millis(ms));
     }
+    /// Shows `text`, just written, as selected in the box. Only shown: nothing is sent or changed.
+    /// A box that cannot show it is left as it is.
+    fn select(&mut self, _id: u32, _text: &str) -> Result<(), FillError> {
+        Ok(())
+    }
 }
 
 // ponytail: about 300 ms for a read back to settle, since a browser updates its

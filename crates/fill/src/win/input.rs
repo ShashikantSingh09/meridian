@@ -200,6 +200,18 @@ impl Swap {
     }
 }
 
+/// The user's own copy, asked for with a click, so it stays like any other: in history, and theirs.
+pub(super) fn copy(text: &str) -> Result<(), FillError> {
+    let owner = Owner::new()?;
+    let _open = Open::new(&owner)?;
+    unsafe { EmptyClipboard() }.map_err(|_| busy())?;
+    if put(CF_UNICODETEXT, &clipboard_text(text)) {
+        Ok(())
+    } else {
+        Err(FillError::Clipboard("The clipboard could not be used, so nothing was copied.".into()))
+    }
+}
+
 fn key(vk: VIRTUAL_KEY, flags: KEYBD_EVENT_FLAGS) -> INPUT {
     INPUT {
         r#type: INPUT_KEYBOARD,

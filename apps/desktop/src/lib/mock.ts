@@ -17,6 +17,8 @@ import type {
   AgentInfo,
   AuthStatus,
   Capture,
+  Card,
+  CardsState,
   Category,
   ChatEvent,
   ConnectedAccount,
@@ -38,9 +40,37 @@ import type {
   NotesState,
   Track,
   WakeStatus,
+  FillPlace,
+  HereOutcome,
+  HereRequest,
 } from "./types";
 import { defaultSettings } from "./types";
 import { emptyProfile, idProblem, problem, tidyId, type IdKind, type IdNumbers, type Profile } from "./details";
+
+// Write here: how the next runs end, what the page asked, and a run held open so a test can look at it.
+const hereOutcomes: HereOutcome[] = [];
+const hereCalls: string[] = [];
+let hereOffered = false;
+let hereHeld: Promise<void> | null = null;
+let releaseHere = () => {};
+let undoRefused = "";
+let hereKey: (() => void) | null = null;
+let hereAsked: ((start: { instruction: string }) => void) | null = null;
+let hereEnded: (() => void) | null = null;
+/** The next answer the stand-in agent gives, or why it fails. */
+let nextAnswer: { text?: string; fail?: string } | null = null;
+const nextHere = async () => {
+  if (hereHeld) await hereHeld;
+  return hereOutcomes.shift() ?? ({ outcome: "written" } as HereOutcome);
+};
+const answerWith = async (send: (event: AgentEvent) => void) => {
+  const answer = nextAnswer!;
+  nextAnswer = null;
+  await new Promise((r) => setTimeout(r, 150));
+  if (answer.fail) return send({ type: "status", status: "failed", message: answer.fail });
+  send({ type: "text", text: answer.text ?? "" });
+  send({ type: "status", status: "completed" });
+};
 
 let details: Profile = emptyProfile;
 /** Whole numbers, as Credential Manager would hold them. */
@@ -335,7 +365,66 @@ export const mock = {
   idNumbersKept: () => ({ ...idNumbers }),
 
   getSettings: async () => settings,
-  saveSettings: async (next: Settings) => void (settings = next),
+  /** The apps and sites belong to the core, as in the app: a page's copy never replaces them. */
+  saveSettings: async (next: Settings) => void (settings = { ...next, fill: { ...next.fill, places: settings.fill.places } }),
+
+  async hereStart(request: HereRequest) {
+    hereCalls.push(`start ${JSON.stringify(request)}`);
+    return nextHere();
+  },
+  async hereRetry() {
+    hereCalls.push("retry");
+    return nextHere();
+  },
+  async hereRewrite(how: string) {
+    hereCalls.push(`rewrite ${how}`);
+    return nextHere();
+  },
+  async hereUndo() {
+    hereCalls.push("undo");
+    if (undoRefused) throw undoRefused;
+  },
+  hereCopy: async () => void hereCalls.push("copy"),
+  hereStop: async () => {
+    hereCalls.push("stop");
+    hereOutcomes.unshift({ outcome: "stopped" });
+    releaseHere();
+  },
+  hereDone: async () => void hereCalls.push("done"),
+  /** The window in front, when a box has the cursor. */
+  hereOffer: async () => (hereOffered ? 4242 : null),
+  async fillPlaceSet(place: FillPlace) {
+    const known = settings.fill.places.some((p) => p.id === place.id);
+    const places = known ? settings.fill.places.map((p) => (p.id === place.id ? { ...place, alwaysAsk: p.alwaysAsk || place.alwaysAsk } : p)) : [...settings.fill.places, place];
+    settings = { ...settings, fill: { ...settings.fill, places } };
+    return settings;
+  },
+  async fillPlaceForget(id: string) {
+    settings = { ...settings, fill: { ...settings.fill, places: settings.fill.places.filter((p) => p.id !== id) } };
+    return settings;
+  },
+  onHereKey: (handler: () => void) => void (hereKey = handler),
+  onHereStart: (handler: (start: { instruction: string }) => void) => void (hereAsked = handler),
+  onHereEnded: (handler: () => void) => void (hereEnded = handler),
+  /** As the core does when Ctrl Alt F is pressed. */
+  pressHereKey: () => hereKey?.(),
+  /** As the core does when the assistant calls write_here. */
+  askToWriteHere: (instruction: string) => hereAsked?.({ instruction }),
+  /** The user types in the box after the reply went in. */
+  typeInTheBox: () => hereEnded?.(),
+  hereNext: (...outcomes: HereOutcome[]) => void hereOutcomes.push(...outcomes),
+  hereCalls: () => [...hereCalls],
+  offerHere: (on: boolean) => void (hereOffered = on),
+  /** Keeps the next runs writing until `releaseHere`. */
+  holdHere: () => void (hereHeld = new Promise((done) => (releaseHere = () => {
+    hereHeld = null;
+    done();
+  }))),
+  releaseHere: () => releaseHere(),
+  refuseUndo: (why: string) => void (undoRefused = why),
+  seedPlaces: (places: FillPlace[]) => void (settings = { ...settings, fill: { ...settings.fill, places } }),
+  /** The stand-in agent's next answer, or the reason it fails. */
+  answerNext: (answer: { text?: string; fail?: string }) => void (nextAnswer = answer),
   listProviders: async () => providers.map((p) => ({ ...p })),
   setProviderKey: async (id: string) => void providers.filter((p) => p.id === id).forEach((p) => (p.hasKey = true)),
   clearProviderKey: async (id: string) => void providers.filter((p) => p.id === id).forEach((p) => (p.hasKey = false)),
@@ -347,7 +436,10 @@ export const mock = {
   discoverLocal: async (): Promise<LocalServer[]> => [],
 
   async streamChat(onEvent: (e: ChatEvent) => void) {
-    for (const word of "This is the browser stand-in for a real provider.".split(" ")) {
+    const answer = nextAnswer;
+    nextAnswer = null;
+    if (answer?.fail) return onEvent({ type: "error", kind: "auth", message: answer.fail });
+    for (const word of (answer?.text ?? "This is the browser stand-in for a real provider.").split(" ")) {
       await sleep(30);
       onEvent({ type: "delta", text: `${word} ` });
     }
@@ -360,6 +452,8 @@ export const mock = {
     { id: "codex", name: "Codex CLI", installed: false, path: null, version: null, capabilities: { approvals: true, resume: true, usage: true, progress: false } },
   ],
 
+  /** Any item in My Day, as a connected account or Claude would leave it. */
+  addEvent: (id: string, title: string, kind: string, over: Partial<ContextEvent> = {}) => void (events = [...events, sampleEvent(id, title, kind, over)]),
   /** A flight departing soon, for the live activity tests. */
   addFlight: (minutesAway: number) => {
     const at = Date.now() + minutesAway * 60_000;
@@ -773,6 +867,7 @@ export const mock = {
       await sleep(20);
       send({ type: "started", nativeId: "stand-in", model: "stand-in-model" });
       send({ type: "status", status: "running" });
+      if (nextAnswer) return answerWith(send);
       if (request.prompt.startsWith("chat:")) {
         await sleep(30);
         send({ type: "text", text: "Hello from the stand-in agent." });
@@ -811,6 +906,7 @@ export const mock = {
     if (!known.has(sessionId)) throw new Error("No session with that id.");
     emit({ sessionId, event: { type: "status", status: "running" } });
     await sleep(30);
+    if (nextAnswer) return answerWith((event) => emit({ sessionId, event }));
     emit({ sessionId, event: { type: "text", text: `Follow-up received: ${text}` } });
     emit({ sessionId, event: { type: "status", status: "completed" } });
   },
@@ -825,4 +921,91 @@ export const mock = {
       emit = () => {};
     };
   },
+
+  // ── Cards you can act on ──
+  // What counts as a card is the core's, tested in cards.rs. This keeps the board's three, and Not now,
+  // Dismiss and the drafts, as the core would.
+  cardsState: async (): Promise<CardsState> => ({ cards: shownCards(), failures: cardFailures, checking: cardsHeld !== null, checkedAt: cardsCheckedAt }),
+  async cardsCheck(morning: boolean) {
+    cardChecks += 1;
+    if (cardsHeld) await new Promise<void>((done) => (cardsHeld = done));
+    cardsHeld = null;
+    cardList = nextCards.map((card) => cardList.find((was) => was.id === card.id) ?? card);
+    cardFailures = nextFailures;
+    cardsCheckedAt = Date.now();
+    cardsChanged();
+    const today = new Date().toDateString();
+    const due = morning && settings.myDay.summary && shownCards().length > 0 && summaryOn !== today;
+    if (due) summaryOn = today;
+    return due;
+  },
+  cardsHide: async (id: string, until: number) => {
+    cardList = cardList.map((card) => (card.id === id ? { ...card, hiddenUntil: until } : card));
+    cardsChanged();
+  },
+  cardsDismiss: async (id: string, gone: boolean) => {
+    if (gone) dismissedCards.add(id);
+    else dismissedCards.delete(id);
+    cardsChanged();
+  },
+  async cardsDraft(id: string) {
+    await sleep(30);
+    cardList = cardList.map((card) => (card.id === id && card.kind === "reply" ? { ...card, draft: CARL_DRAFT } : card));
+    cardsChanged();
+    return CARL_DRAFT;
+  },
+  cardsSetDraft: async (id: string, text: string) => {
+    cardList = cardList.map((card) => (card.id === id && card.kind === "reply" ? { ...card, draft: text } : card));
+    cardsChanged();
+  },
+  onCardsChanged: (handler: () => void) => void (cardsChanged = handler),
+  onCardsDue: (handler: () => void) => void (cardsDue = handler),
+  /** The board's three cards, as a check left them. */
+  seedCards: (kinds: Card["kind"][] = ["reply", "renewal", "trip"]) => {
+    cardList = BOARD_CARDS.filter((card) => kinds.includes(card.kind)).map((card) => structuredClone(card));
+    cardsCheckedAt = Date.now();
+    cardsChanged();
+  },
+  /** What the next check finds. */
+  nextCheck: (kinds: Card["kind"][], failures: CardsState["failures"] = []) => {
+    nextCards = BOARD_CARDS.filter((card) => kinds.includes(card.kind));
+    nextFailures = failures;
+  },
+  /** As the core does the first time the PC is in use after 6 am. */
+  cardsDue: () => cardsDue(),
+  /** As the core does when a card put off with Not now is back. */
+  tellCards: () => cardsChanged(),
+  cardChecks: () => cardChecks,
+  /** Holds the next check open until `releaseCards`. */
+  holdCards: () => void (cardsHeld = () => {}),
+  releaseCards: () => cardsHeld?.(),
+};
+
+const CARL_DRAFT = "Hi Carl,\nSorry for the slow reply. I'll send the October invoice today, so you have it well before Friday's close.\nThanks,\nRavi";
+/** The board's three, in India's time, as on Friday 6 November 2026. */
+const BOARD_CARDS: Card[] = [
+  { kind: "reply", id: "reply:19d4", seen: "2026-11-03T10:12:00+05:30", link: "https://mail.google.com/mail/#all/19d4", hiddenUntil: null, who: "Carl Mendes", address: "carl@brightline.example", subject: "October invoice", asked: "the October invoice", draft: CARL_DRAFT },
+  { kind: "renewal", id: "renewal:netflix:2026-11-07", seen: "2026-10-07T08:00:00+05:30", link: "https://mail.google.com/mail/#all/18a1", hiddenUntil: null, service: "Netflix", amount: "₹649", on: "2026-11-07", period: "month", trial: false, receipt: true },
+  {
+    kind: "trip", id: "trip:e7:2026-11-10", seen: "2026-11-10T14:00:00+05:30", link: "https://calendar.google.com/calendar/event?eid=e7", hiddenUntil: null,
+    event: "Pune office visit", starts: "2026-11-10T14:00:00+05:30", location: "Pune office, Baner, Pune", place: "the Pune office", title: "Book a train to Pune?",
+    step: "Take a morning train from Mumbai that gets in before noon, which leaves time before your 2 pm.", site: { name: "IRCTC", url: "https://www.irctc.co.in/" }, planned: true,
+  },
+];
+let cardList: Card[] = [];
+let nextCards: Card[] = BOARD_CARDS;
+let nextFailures: CardsState["failures"] = [];
+let cardFailures: CardsState["failures"] = [];
+let cardsCheckedAt: number | null = null;
+let cardChecks = 0;
+let cardsHeld: (() => void) | null = null;
+let summaryOn = "";
+const dismissedCards = new Set<string>();
+let cardsChanged = () => {};
+let cardsDue = () => {};
+/** As the core shows them: not dismissed, not put off, of a kind that is on. */
+const shownCards = () => {
+  const on = settings.myDay;
+  const wanted = { reply: on.replies, renewal: on.renewals, trip: on.trips };
+  return cardList.filter((card) => !dismissedCards.has(card.id) && (card.hiddenUntil === null || card.hiddenUntil <= Date.now()) && wanted[card.kind]);
 };

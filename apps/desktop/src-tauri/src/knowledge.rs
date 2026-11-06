@@ -410,7 +410,7 @@ pub fn knowledge_open(k: State<'_, Knowledge>, path: String) -> Result<(), Strin
 }
 
 /// How long since the last key press or mouse move anywhere. A question Windows answers, so no hook is needed.
-fn idle_for() -> Duration {
+pub(crate) fn idle_for() -> Duration {
     use windows::Win32::System::SystemInformation::GetTickCount;
     use windows::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINFO};
     let mut info = LASTINPUTINFO { cbSize: std::mem::size_of::<LASTINPUTINFO>() as u32, dwTime: 0 };

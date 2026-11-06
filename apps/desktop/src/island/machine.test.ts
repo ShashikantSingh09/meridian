@@ -54,6 +54,15 @@ describe("a recording", () => {
   });
 });
 
+describe("the morning line", () => {
+  it("is a pill, and opens into the board's card with a row a thing under the pointer", () => {
+    const base = { hovered: false, rows: 0, approval: false, cards: 3 };
+    expect(geometryFor("notification", base)).toMatchObject({ w: 330, h: 46 });
+    expect(geometryFor("notification", { ...base, hovered: true })).toMatchObject({ w: 430, h: 176 });
+    expect(geometryFor("notification", { ...base, hovered: true, cards: 1 })).toMatchObject({ w: 430, h: 120 });
+  });
+});
+
 describe("volume, brightness and the battery", () => {
   it("shows at once, but never over something that needs an answer", () => {
     expect(deriveView({ ...base, level: true })).toBe("level");

@@ -146,6 +146,18 @@ const paths: Record<string, ReactNode> = {
       <path d="M10 8v4M10 14.5v.5" />
     </>
   ),
+  renew: (
+    <>
+      <path d="M15.5 8A6 6 0 0 0 4.6 6.2M4.5 12a6 6 0 0 0 10.9 1.8" />
+      <path d="M15.8 3.8V8h-4.2M4.2 16.2V12h4.2" />
+    </>
+  ),
+  train: (
+    <>
+      <rect x="5" y="2.5" width="10" height="12" rx="3" />
+      <path d="M5 9.5h10M7.5 17.5l1.5-3M12.5 17.5 11 14.5" />
+    </>
+  ),
 };
 
 export type IconName = keyof typeof paths;

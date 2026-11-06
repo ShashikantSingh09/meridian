@@ -2531,6 +2531,7 @@ dependencies = [
  "ai-core",
  "base64 0.22.1",
  "chrono",
+ "fill",
  "getrandom 0.3.4",
  "keyring",
  "knowledge",

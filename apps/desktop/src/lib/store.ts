@@ -12,6 +12,7 @@ import type {
   Approval,
   AuthStatus,
   Capture,
+  CardsState,
   ChatMessage,
   ModelInfo,
   Category,
@@ -38,6 +39,8 @@ import type {
 } from "./types";
 import type { Mood } from "../island/faces";
 import type { VoiceState } from "./voice";
+import type { HereState } from "./here";
+import type { AskState } from "./ask";
 import type { RepairResult, Row } from "./repair";
 import { lastMessage, limitName, mergeTodo, resetLabel } from "./sessions";
 import { applyTheme } from "./theme";
@@ -45,7 +48,7 @@ import { defaultSettings } from "./types";
 import { whatsNew, type NewThing } from "./whats-new";
 
 export type Tab = "home" | "chat" | "agents" | "media" | "day" | "notes" | "knowledge" | "inbox" | "settings";
-export type SettingsSection = "general" | "themes" | "island" | "assistant" | "voice" | "wake" | "fill" | "details" | "screen" | "updates" | "models" | "providers" | "agents" | "privacy" | "about";
+export type SettingsSection = "general" | "themes" | "island" | "assistant" | "voice" | "wake" | "fill" | "details" | "myday" | "screen" | "updates" | "models" | "providers" | "agents" | "privacy" | "about";
 
 export interface LogEntry {
   kind: "user" | "text" | "activity" | "system" | "diff" | "output";
@@ -228,6 +231,18 @@ export interface AppState {
   draftFiles: string[];
   /** Test and repair: each check as it stands, when the run began, and the last whole result. */
   repair: { rows: Row[]; at: number; last: RepairResult | null };
+  /** The cards at the top of My Day, as the core last said. */
+  cards: CardsState;
+  /** The card a line on the island opened, so My Day brings it into view. */
+  cardFocus: string | null;
+  /** A card's draft, handed over by Open in Gmail for Write here to put in the reply box. */
+  offeredDraft: { text: string; at: number } | null;
+  /** Write here, while the island shows it. */
+  here: HereState | null;
+  /** A question asked on the island, from typing it to its answer. */
+  ask: AskState | null;
+  /** The window whose box Meridian may write in had the cursor, as last looked when the pointer came onto the island. */
+  hereOffer: number | null;
 }
 
 const LOG_LIMIT = 500;
@@ -314,6 +329,12 @@ let state: AppState = {
   draft: "",
   draftFiles: [],
   repair: { rows: [], at: 0, last: null },
+  cards: { cards: [], failures: [], checking: false, checkedAt: null },
+  cardFocus: null,
+  offeredDraft: null,
+  here: null,
+  ask: null,
+  hereOffer: null,
 };
 
 const listeners = new Set<() => void>();
@@ -459,7 +480,13 @@ export const showNote = (selectedNote: string | null) => set({ selectedNote });
 export const setKnowledge = (knowledge: KnowledgeState) => set({ knowledge });
 export const showPage = (knowledgePage: string | null) => set({ knowledgePage });
 export const setSettingsSection = (settingsSection: SettingsSection) => set({ settingsSection });
+export const setCards = (cards: CardsState) => set({ cards });
+export const setCardFocus = (cardFocus: string | null) => set({ cardFocus });
+export const setOfferedDraft = (offeredDraft: AppState["offeredDraft"]) => set({ offeredDraft });
 export const setRepair = (patch: Partial<AppState["repair"]>) => set({ repair: { ...state.repair, ...patch } });
+export const setHere = (here: HereState | null) => set({ here });
+export const setAsk = (ask: AskState | null) => set({ ask });
+export const setHereOffer = (hereOffer: number | null) => set({ hereOffer });
 export const openSettings = (settingsSection: SettingsSection) => set({ tab: "settings", settingsSection });
 
 let hoverTimer: ReturnType<typeof setTimeout> | undefined;
@@ -593,6 +620,12 @@ function applyAppearance(s: Settings) {
   document.documentElement.dataset.align = s.islandAlign;
 }
 
+/** Settings the core changed or handed back, such as the list of apps and sites. */
+export function settingsFromCore(settings: Settings) {
+  applyAppearance(settings);
+  set({ settings });
+}
+
 export async function updateSettings(patch: Partial<Settings>) {
   const settings = { ...state.settings, ...patch };
   set({ settings });
@@ -653,8 +686,12 @@ function patchLastMessage(fn: (text: string) => string) {
 
 /** Told to the AI on a spoken turn, and kept out of what the user sees. */
 const SPOKEN = "\n\n(This is a spoken conversation. Reply in one or two short, plain sentences, with no lists or formatting. After doing something, say only the outcome, such as Done or Chrome is closed. Never mention commands, tools or the steps you took.)";
+/** Told to the AI when the answer to a question asked on the island goes into the box that had the cursor. */
+const INTO_BOX = "\n\n(Your reply will be written into the text box the user is typing in, in place of being shown to them. Reply with only the words to put there, as plain text with no formatting, and do not call write_here.)";
+/** What the user said, without what was told to the AI beside it. */
+const unnoted = (text: string) => text.replace(SPOKEN, "").replace(INTO_BOX, "");
 
-export async function sendChat(text: string, images: string[] = [], spoken = false) {
+export async function sendChat(text: string, images: string[] = [], spoken = false, intoBox = false) {
   const provider = usableProvider();
   if (!provider) {
     pushError({ title: "No AI provider ready", body: "Add a key or start a local server in Settings, AI models." });
@@ -682,6 +719,7 @@ export async function sendChat(text: string, images: string[] = [], spoken = fal
     ? [{ role: "system", content: state.settings.systemPrompt }]
     : [];
   if (spoken) system.push({ role: "system", content: SPOKEN.trim() });
+  if (intoBox) system.push({ role: "system", content: INTO_BOX.trim() });
   set({
     chatPending: true,
     chat: {
@@ -778,10 +816,10 @@ export function pickEngine() {
   if (next) selectEngine(next);
 }
 
-/** Asks whichever AI Chat is on. */
-export function sendToEngine(text: string, images: string[] = []) {
+/** Asks whichever AI Chat is on. `intoBox` says the answer goes into the box that had the cursor. */
+export function sendToEngine(text: string, images: string[] = [], intoBox = false) {
   pickEngine();
-  return state.agentChat.agent ? sendAgentChat(text, images) : sendChat(text, images);
+  return state.agentChat.agent ? sendAgentChat(text, images, false, intoBox) : sendChat(text, images, false, intoBox);
 }
 
 const LIMITS_KEY = "meridian.limits";
@@ -838,10 +876,10 @@ export const newAgentConversation = () => set({ agentChat: { ...state.agentChat,
 export const selectAgentConversation = (sessionId: string) =>
   set({ agentChat: { ...state.agentChat, sessionId } });
 
-export async function sendAgentChat(said: string, images: string[] = [], spoken = false) {
+export async function sendAgentChat(said: string, images: string[] = [], spoken = false, intoBox = false) {
   const { agent, mode, cwd, sessionId } = state.agentChat;
   if (!agent) return;
-  const text = spoken ? said + SPOKEN : said;
+  const text = (spoken ? said + SPOKEN : said) + (intoBox ? INTO_BOX : "");
   const earlier = state.sessions.find((s) => s.id === sessionId);
   // History saved before ids were kept cannot be resumed, so that chat starts afresh.
   if (earlier && !(earlier.restored && !earlier.nativeId)) return sendToSession(earlier.id, text, images);
@@ -1043,7 +1081,7 @@ export async function startSession(
       agent: agent?.name ?? request.agent,
       surface,
       mode,
-      title: request.prompt.replace(SPOKEN, "").slice(0, 48),
+      title: unnoted(request.prompt).slice(0, 48),
       project: mode === "general" ? "General" : projectName(request.cwd),
       cwd: request.cwd,
       prompt: request.prompt,
@@ -1054,7 +1092,7 @@ export async function startSession(
       endedAt: null,
       approval: null,
       usage: null,
-      log: [{ kind: "user", text: request.prompt.replace(SPOKEN, "") }],
+      log: [{ kind: "user", text: unnoted(request.prompt) }],
       queued: [],
     };
     set({ sessions: [session, ...state.sessions] });
@@ -1152,7 +1190,7 @@ export async function sendToSession(id: string, text: string, images: string[] =
   // Running from this moment, or a spoken follow-up reads the last turn's end as this one's.
   patchSession(id, (s) => {
     const next = ENDED.includes(s.status) ? { ...s, ...newTurn(s), status: "running" as const } : s;
-    return { ...next, log: appendLog(next, "user", text.replace(SPOKEN, "")) };
+    return { ...next, log: appendLog(next, "user", unnoted(text)) };
   });
   try {
     // A conversation from before a restart exists only here until the app is told about it.
@@ -1912,6 +1950,20 @@ export const PREVIEWS: Preview[] = [
     }),
   },
   { name: "notification", apply: () => ({ ...clear, notices: [{ id: "pn", tone: "success", title: "Claude Code finished", body: "dock-agent · 14 files changed" }] }) },
+  {
+    name: "morning summary",
+    apply: () => ({
+      ...clear,
+      notices: [{
+        id: "pmorning", tone: "info", title: "3 things need you today", body: "Fri, 6 Nov",
+        cards: [
+          { id: "p1", kind: "reply", title: "Reply to Carl", meta: "waiting 3 days" },
+          { id: "p2", kind: "renewal", title: "Netflix renews tomorrow", meta: "₹649" },
+          { id: "p3", kind: "trip", title: "Book a train to Pune?", meta: "Tue" },
+        ],
+      }],
+    }),
+  },
   { name: "contextual", apply: () => ({ ...clear, suggestions: [{ id: "ps", title: "Looks like a Terraform configuration issue", body: "Error: Invalid reference on main.tf line 12" }] }) },
   {
     name: "multitask",
@@ -2040,10 +2092,7 @@ export async function boot() {
     bridge.onIslandPlaced((islandPlace) => set({ islandPlace })),
     bridge.onReminders(onReminders),
     bridge.onActivityChanged(() => void refreshActivity()),
-    bridge.onSettingsChanged((changed) => {
-      applyAppearance(changed);
-      set({ settings: changed });
-    }),
+    bridge.onSettingsChanged(settingsFromCore),
     bridge.onScreenSuggestion(onScreenSuggestion),
     bridge.onCaptureRequest(() => {
       openPanel("chat");

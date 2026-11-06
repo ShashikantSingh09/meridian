@@ -64,12 +64,12 @@ test.describe("the column", () => {
     expect(groups).toEqual([
       ["General", "Themes", "Island"],
       ["Assistant", "Voice", "Wake words"],
-      ["Fill in the page", "Your details"],
+      ["Fill in the page", "My day", "Your details"],
       ["Screen", "Privacy"],
       ["AI models", "Providers", "Coding agents"],
       ["Updates", "About"],
     ]);
-    await expect(page.locator(".settings-icon")).toHaveCount(15);
+    await expect(page.locator(".settings-icon")).toHaveCount(16);
   });
 
   test("searching narrows it by what each page holds, and Enter goes to the first match", async ({ page }) => {
@@ -86,7 +86,7 @@ test.describe("the column", () => {
     // Escape clears the box first, and only then closes the panel.
     await search.press("Escape");
     await expect(search).toHaveValue("");
-    await expect(page.locator(".settings-tab")).toHaveCount(15);
+    await expect(page.locator(".settings-tab")).toHaveCount(16);
     await expect(page.locator(".island")).toHaveAttribute("data-view", "expanded");
   });
 });
@@ -371,7 +371,8 @@ test("pages that changed shape keep what they held", async ({ page }) => {
   await expect(page.getByText("No telemetry.")).toBeVisible();
   await nav(page, "About");
   await expect(page.getByText("Look at the screen")).toBeVisible();
-  await expect(page.locator(".keys kbd")).toHaveCount(9);
+  // Open the island, Look, Talk and Write here, each Ctrl Alt and a key.
+  await expect(page.locator(".keys kbd")).toHaveCount(12);
   await nav(page, "Coding agents");
   await expect(page.locator(".settings-body .brand")).toHaveCount(2);
 });

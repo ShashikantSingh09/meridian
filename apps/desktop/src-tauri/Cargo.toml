@@ -18,6 +18,7 @@ agent-adapters = { path = "../../../crates/agent-adapters" }
 ai-core = { path = "../../../crates/ai-core" }
 base64 = "0.22"
 chrono = "0.4"
+fill = { path = "../../../crates/fill" }
 getrandom = "0.3"
 knowledge = { path = "../../../crates/knowledge" }
 mcp = { path = "../../../crates/mcp" }

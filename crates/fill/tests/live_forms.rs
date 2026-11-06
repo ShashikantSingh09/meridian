@@ -145,6 +145,19 @@ fn write_here_pastes_a_reply_and_keeps_the_clipboard() {
     // Also check by hand: Win+V does not list "Hi Asha".
 }
 
+/// Click in the Message box at the bottom. Writes a reply, then selects it, as Write here does.
+#[test]
+#[ignore = "pastes into the window in front; run by hand against tests/fill/forms.html"]
+fn the_reply_written_here_is_left_selected() {
+    let mut uia = after_click("in the Message box");
+    let field = uia.focused().expect("the Message box");
+    let reply = "Hi Asha,\n\nThanks, see you at 4.";
+    write(&mut uia, &field, reply, Mode::Here).expect("write");
+    uia.select(field.id, reply).expect("selected");
+    // Check by hand: the reply shows selected, and typing a letter replaces it.
+    assert!(page_text(&mut uia).contains("see you at 4"));
+}
+
 /// Click in "पूरा नाम (हिंदी में)". Types Devanagari with SendInput, then reads it back.
 #[test]
 #[ignore = "types into the window in front; run by hand against tests/fill/forms.html"]

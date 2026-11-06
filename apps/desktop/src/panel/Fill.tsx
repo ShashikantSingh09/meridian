@@ -1,14 +1,15 @@
-// Settings › Fill in the page: Write here, Fill this form and Finish this for me. Only kept for now;
-// the fill engine reads them. Rows under a switch that is off are dimmed and cannot be used.
+// Settings › Fill in the page: Write here, Fill this form and Finish this for me. Rows under a switch
+// that is off are dimmed and cannot be used.
 
 import { Brand } from "../lib/brands";
+import { forgetPlace, setPlace } from "../lib/here";
 import { Icon } from "../lib/icons";
-import { isReady, setSettingsSection, updateSettings, useApp } from "../lib/store";
+import { isReady, pushError, setSettingsSection, updateSettings, useApp } from "../lib/store";
 import type { FillPlace, FillSettings } from "../lib/types";
 import { Menu } from "./Menu";
 
 /** `off` holds it off, as local-only mode does. `inert` dims it under a switch that is off. */
-function Switch({ label, hint, on, set, off, inert }: { label: React.ReactNode; hint: string; on: boolean; set: (on: boolean) => void; off?: boolean; inert?: boolean }) {
+export function Switch({ label, hint, on, set, off, inert }: { label: React.ReactNode; hint: string; on: boolean; set: (on: boolean) => void; off?: boolean; inert?: boolean }) {
   return (
     <label className="setting toggle" inert={inert}>
       <span className="stacked grow">
@@ -48,7 +49,11 @@ export function FillSection() {
   const providers = useApp((s) => s.providers);
   const localOnline = useApp((s) => s.localOnline);
   const change = (patch: Partial<FillSettings>) => void updateSettings({ fill: { ...fill, ...patch } });
-  const changePlace = (id: string, patch: Partial<FillPlace>) => change({ places: fill.places.map((p) => (p.id === id ? { ...p, ...patch } : p)) });
+  // The list belongs to the core, which the island adds to, so each change goes to it on its own.
+  const changePlace = (id: string, patch: Partial<FillPlace>) => {
+    const known = fill.places.find((p) => p.id === id);
+    if (known) void setPlace({ ...known, ...patch }).catch((err) => pushError({ title: "Not saved", body: String(err) }));
+  };
   const finishing = fill.finish && !localOnly;
 
   const engines = [...agents.filter((a) => a.installed), ...providers.filter((p) => isReady(p, localOnline))];
@@ -72,7 +77,7 @@ export function FillSection() {
         empty="Asks every time"
         onPick={(value) => changePlace(p.id, { fill: value as FillPlace["fill"], finish: value === "allowed" && p.finish })}
       />
-      <button className="ghost wake-remove" aria-label={`Forget ${p.name}`} title="Forget, so it asks again" onClick={() => change({ places: fill.places.filter((x) => x.id !== p.id) })}>
+      <button className="ghost wake-remove" aria-label={`Forget ${p.name}`} title="Forget, so it asks again" onClick={() => void forgetPlace(p.id).catch((err) => pushError({ title: "Not saved", body: String(err) }))}>
         <Icon name="close" size={13} />
       </button>
     </div>

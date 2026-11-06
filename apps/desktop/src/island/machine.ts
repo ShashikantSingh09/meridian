@@ -17,7 +17,9 @@ export type IslandView =
   | "media"
   | "live"
   | "error" | "level" | "voice"
-  | "note";
+  | "note"
+  | "here"
+  | "ask";
 
 export interface SessionSummary {
   id: string;
@@ -57,6 +59,16 @@ export interface Notice {
   note?: string;
   /** A new version can be installed, so clicking opens Updates. */
   update?: boolean;
+  /** The morning line: what needs the user today, a line each, shown when the pointer is on it. */
+  cards?: CardLine[];
+}
+
+/** One card, as the morning line lists it. A line only opens the card in My Day. */
+export interface CardLine {
+  id: string;
+  kind: "reply" | "renewal" | "trip";
+  title: string;
+  meta: string;
 }
 
 export interface Suggestion {
@@ -98,6 +110,10 @@ export interface Snapshot {
   recording?: boolean;
   /** A recorded call is being written up. */
   writingNote?: boolean;
+  /** Write here is reading, writing, or saying how it went. */
+  here?: boolean;
+  /** A question asked on the island, from typing it to its answer. */
+  asking?: boolean;
 }
 
 const ACTIVE: ReadonlySet<SessionStatus> = new Set(["starting", "running", "waiting"]);
@@ -122,6 +138,9 @@ export function deriveView(s: Snapshot): IslandView {
   if (s.listening) return "listening";
   if (s.capturing) return "screen";
   if (waitingApproval(s.sessions)) return "working";
+  // Started by the user a moment ago, and the reply going into their box is what they are waiting for.
+  if (s.here) return "here";
+  if (s.asking) return "ask";
   if (s.voice) return "voice";
   if (s.errors.length > 0) return "error";
   if (s.notices.length > 0) return "notification";
@@ -181,9 +200,21 @@ const SIZES: Record<IslandView, Geometry> = {
   voice: { w: 440, h: 96, r: 26 },
   error: { w: 392, h: 58, r: 21 },
   note: { w: 190, ...BAR },
+  here: { w: 300, ...BAR },
+  ask: { w: 440, h: 92, r: 24 },
 };
 
-const IDLE_HOVER: Geometry = { w: 380, h: 118, r: 26 };
+/** Write here's line with Undo, Shorter and Warmer, a line on why not, and a card that needs a click. */
+const HERE_WRITTEN: Geometry = { w: 450, ...BAR };
+const HERE_LINE: Geometry = { w: 380, ...BAR };
+const HERE_CARD: Geometry = { w: 430, h: 128, r: 24 };
+/** The question while it is answered, and the answer: a line per line of it, three at most. */
+const ASK_THINKING: Geometry = { w: 330, ...BAR };
+const ASK_ANSWER = (lines: number): Geometry => ({ w: 440, h: 61 + lines * 20, r: 24 });
+const ASK_FAILED: Geometry = { w: 440, h: 118, r: 24 };
+
+/** The greeting, the chips, and a row to ask from and to Write here. */
+const IDLE_HOVER: Geometry = { w: 380, h: 164, r: 26 };
 const GREETING: Geometry = { w: 224, h: 40, r: 17 };
 const LIVE_OPEN: Geometry = { w: 408, h: 148, r: 28 };
 const LIVE_OPEN_SHORT: Geometry = { w: 408, h: 122, r: 28 };
@@ -230,6 +261,10 @@ const NOTE_STOP: Geometry = { w: 262, ...BAR };
 const NOTE_WRITING: Geometry = { w: 250, ...BAR };
 const NOTE_READY: Geometry = { w: 372, ...BAR };
 const NOTE_FAILED: Geometry = { w: 330, ...BAR };
+/** The morning line, and the card it opens into under the pointer: its heading and buttons, plus a row a card. */
+const MORNING: Geometry = { w: 330, ...BAR };
+const MORNING_OPEN: Geometry = { w: 430, h: 92, r: 24 };
+const MORNING_ROW = 28;
 
 export interface GeometryContext {
   hovered: boolean;
@@ -272,6 +307,12 @@ export interface GeometryContext {
   noteReady?: boolean;
   /** The error on show is a note that could not be written. */
   noteFailed?: boolean;
+  /** Lines in the morning line on show. */
+  cards?: number;
+  /** Where Write here is up to. */
+  here?: string;
+  /** Where a question asked on the island is up to, and how many lines its answer takes. */
+  ask?: { phase: string; lines: number };
 }
 
 export function geometryFor(view: IslandView, ctx: GeometryContext): Geometry {
@@ -294,6 +335,13 @@ export function geometryFor(view: IslandView, ctx: GeometryContext): Geometry {
   if (view === "working" && ctx.hovered && ctx.todos) return { w: 324, h: TODO_BASE + Math.min(ctx.todos, TODO_MAX_ROWS) * TODO_ROW, r: 22 };
   if (view === "working" && ctx.hovered) return { ...STAGES, h: STAGES.h + logBox(Math.min(ctx.steps ?? 0, STAGE_ROWS)) };
   if (view === "note") return ctx.noteWriting ? NOTE_WRITING : ctx.hovered ? NOTE_STOP : SIZES.note;
+  if (view === "notification" && ctx.cards) return ctx.hovered ? { ...MORNING_OPEN, h: MORNING_OPEN.h + ctx.cards * MORNING_ROW } : MORNING;
+  if (view === "here") return ctx.here === "written" ? HERE_WRITTEN : ctx.here === "line" ? HERE_LINE : ctx.here === "writing" ? SIZES.here : HERE_CARD;
+  if (view === "ask") {
+    if (ctx.ask?.phase === "thinking") return ASK_THINKING;
+    if (ctx.ask?.phase === "answer") return ASK_ANSWER(ctx.ask.lines);
+    if (ctx.ask?.phase === "failed") return ASK_FAILED;
+  }
   if (view === "notification" && ctx.noteReady) return NOTE_READY;
   if (view === "error" && ctx.noteFailed) return NOTE_FAILED;
   if (view === "notification" && ctx.finished && ctx.steps) return { ...FINISHED, h: FINISHED_LOG + logBox(Math.min(ctx.steps, FINISHED_ROWS)) };
@@ -339,6 +387,9 @@ export function stateToken(view: IslandView, s: Snapshot): string {
       return s.live[0]?.tone ?? "--state-working";
     case "error":
       return "--state-error";
+    case "here":
+    case "ask":
+      return "--state-thinking";
     default:
       return "--state-idle";
   }

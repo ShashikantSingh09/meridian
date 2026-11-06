@@ -1,5 +1,23 @@
 # Development ledger
 
+## 2026-11-06: Write here, answers into the box, and cards in My Day (phase 2)
+
+Built by two builds in parallel, then merged. See D74 and D75. Open in Gmail now hands its draft to Write here, and drafts are written
+ahead only on the Claude plan or an AI on this PC.
+
+### Proved
+
+Rust: every crate passes, including 15 Write here tests, 24 card tests and the write-ahead rule. Vitest 244 and Playwright 262 pass on the
+merged tree, including the draft going from Open in Gmail into Write here. In a test copy of the real app: the morning line and its three
+lines, the hover card's Ask field, Write here refusing while off (the line was too long for the island and is shorter now), My Day, and
+Write here in About's shortcuts.
+
+### Not proved
+
+- Write here in real windows: reading and writing through UI Automation, the selection after writing, Ctrl Alt F, Esc while a reply is
+  on its way. `crates/fill/tests/live_forms.rs` has the by-hand tests.
+- Real Gmail and Calendar card checks, the morning trigger after 6 am, and the quality of drafts and plans.
+
 ## 2026-11-06: Fill in the page and Sentient upgrades, phase 1
 
 Built from the approved boards by six builds in parallel, then merged and tested together. See D73. The fill engine crate, Your details

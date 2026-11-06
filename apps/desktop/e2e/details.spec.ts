@@ -201,16 +201,16 @@ test.describe("Fill in the page", () => {
   });
 
   test("apps and sites show how each was answered, banks ask every time, and the never-list is fixed", async ({ page }) => {
-    await setFill(page, {
-      finish: true,
-      places: [
-        { id: "mail.google.com", name: "Gmail", fill: "allowed", finish: false, alwaysAsk: false },
-        { id: "slack.exe", name: "Slack", fill: "allowed", finish: false, alwaysAsk: false },
-        { id: "expenses.northwind.in", name: "Northwind Expenses", fill: "allowed", finish: true, alwaysAsk: false },
-        { id: "ms-teams.exe", name: "Microsoft Teams", fill: "never", finish: false, alwaysAsk: false },
-        { id: "onlinesbi.sbi", name: "onlinesbi.sbi", fill: "ask", finish: false, alwaysAsk: true },
-      ],
-    });
+    const answered = [
+      { id: "mail.google.com", name: "Gmail", fill: "allowed", finish: false, alwaysAsk: false },
+      { id: "slack.exe", name: "Slack", fill: "allowed", finish: false, alwaysAsk: false },
+      { id: "expenses.northwind.in", name: "Northwind Expenses", fill: "allowed", finish: true, alwaysAsk: false },
+      { id: "ms-teams.exe", name: "Microsoft Teams", fill: "never", finish: false, alwaysAsk: false },
+      { id: "onlinesbi.sbi", name: "onlinesbi.sbi", fill: "ask", finish: false, alwaysAsk: true },
+    ];
+    // The list belongs to the core, as the island's answers put it there.
+    await page.evaluate((p) => (window as never as { __mock: { seedPlaces(p: object[]): void } }).__mock.seedPlaces(p), answered);
+    await setFill(page, { finish: true, places: answered });
     const places = page.locator(".fill-places");
     await expect(places.locator(".fill-place")).toHaveCount(5);
     await expect(places.getByText("mail.google.com")).toBeVisible();

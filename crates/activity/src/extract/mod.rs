@@ -12,6 +12,7 @@ use serde_json::{Map, Value};
 use crate::event::{ContextEvent, EventKind, EventSource, EventStatus, EventTime, Priority, SourceRef, SuggestedAction};
 
 pub(crate) mod dates;
+pub use dates::parse_loose;
 mod heuristics;
 mod ical;
 mod jsonld;

@@ -275,6 +275,8 @@ export interface Settings {
   fill: FillSettings;
   /** What Knowledge learns from, and when it updates. Every source is off until turned on. */
   knowledge: KnowledgePreferences;
+  /** Which cards My Day shows, and the morning line on the island. */
+  myDay: MyDaySettings;
 }
 
 /** An app or site, as answered the first time Meridian filled in it. */
@@ -302,12 +304,75 @@ export interface FillSettings {
   sources: { details: boolean; knowledge: boolean; mail: boolean; notes: boolean; files: boolean; clipboard: boolean; picture: boolean };
 }
 
+/** How one Write here ended, as the core says. No message holds what a box held. */
+export type HereOutcome =
+  | { outcome: "written" }
+  | { outcome: "line"; text: string }
+  /** Asks first, naming the place. With `every` it asks every time, else this is the first time. */
+  | { outcome: "ask"; key: string; id: string | null; name: string; every: string | null }
+  | { outcome: "off"; id: string; name: string }
+  | { outcome: "local"; ai: string }
+  | { outcome: "failed"; why: string }
+  | { outcome: "moved"; title: string }
+  | { outcome: "stopped" };
+
+/** What to write: words the user asked for, or words already written. A yes for one place, once. */
+export interface HereRequest {
+  instruction: string | null;
+  text: string | null;
+  allow: string | null;
+  /** The window whose box had the cursor when a question was asked on the island. The answer goes only there. */
+  window: number | null;
+}
+
 export interface KnowledgePreferences {
   notes: boolean;
   gmail: boolean;
   calendar: boolean;
   chats: boolean;
   when: "idle" | "manual";
+}
+
+/** Which cards My Day shows, and the morning line on the island. */
+export interface MyDaySettings {
+  replies: boolean;
+  renewals: boolean;
+  trips: boolean;
+  summary: boolean;
+}
+
+export type CardKind = "reply" | "renewal" | "trip";
+
+interface CardBase {
+  /** The thing it is about, so the same card is found again however often it is read. */
+  id: string;
+  /** When what it was built from happened: the mail's arrival, or the event's start, in RFC 3339. */
+  seen: string;
+  /** The mail in Gmail, or the event in Google Calendar. */
+  link: string | null;
+  /** Not now: hidden until then, in ms. */
+  hiddenUntil: number | null;
+}
+
+/** A card at the top of My Day. The core decides what counts as one. */
+export type Card = CardBase &
+  (
+    | { kind: "reply"; who: string; address: string; subject: string; asked: string; draft: string | null }
+    | { kind: "renewal"; service: string; amount: string | null; on: string; period: "week" | "month" | "year" | null; trial: boolean; receipt: boolean }
+    | { kind: "trip"; event: string; starts: string; location: string; place: string; title: string; step: string; site: { name: string; url: string }; planned: boolean }
+  );
+
+/** A source that could not be read. `why` follows "because", and is empty when it is not known. */
+export interface CardFailure {
+  source: "gmail" | "calendar";
+  why: string;
+}
+
+export interface CardsState {
+  cards: Card[];
+  failures: CardFailure[];
+  checking: boolean;
+  checkedAt: number | null;
 }
 
 export type KnowledgeKind = "person" | "project" | "promise" | "place";
@@ -674,4 +739,5 @@ export const defaultSettings: Settings = {
     sources: { details: true, knowledge: true, mail: true, notes: true, files: true, clipboard: true, picture: false },
   },
   knowledge: { notes: false, gmail: false, calendar: false, chats: false, when: "idle" },
+  myDay: { replies: true, renewals: true, trips: true, summary: true },
 };

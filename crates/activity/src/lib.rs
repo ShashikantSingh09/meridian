@@ -19,7 +19,7 @@ pub use accounts::{CalendarChange, Profile, Provider, Session, TokenStore};
 pub use event::{
     Category, ContextEvent, EventKind, EventSource, EventStatus, EventTime, Priority, SourceRef, SuggestedAction,
 };
-pub use extract::{extract, extract_with, Message};
+pub use extract::{extract, extract_with, parse_loose, Message};
 pub use notify::{
     decide, decide_island, CategoryPreferences, Decision, Disposition, Hold, IslandItem, InterruptionContext,
     LogEntry, Preferences, QuietHours, Reminder, Stage,

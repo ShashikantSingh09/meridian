@@ -56,7 +56,7 @@ pub(crate) fn parse_iso(text: &str) -> Option<EventTime> {
 }
 
 /// The date, and time if any, written somewhere in a line of mail.
-pub(crate) fn parse_loose(line: &str) -> Option<EventTime> {
+pub fn parse_loose(line: &str) -> Option<EventTime> {
     let patterns = PATTERNS.as_ref()?;
     if let Some(found) = patterns.iso.find(line) {
         return parse_iso(&found.as_str().replacen(' ', "T", 1));

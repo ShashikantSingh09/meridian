@@ -490,6 +490,38 @@ side by side in the real window before it counts as done.
 Apple-style glass, themes, limits and models, the assistant's name and personality, and wake words are on the canvas and held for review.
 Wake words would reverse the part of D51 that left them out, and only because the owner asked for them.
 
+## D75. Cards you can act on, and a morning line
+
+My Day now opens on what needs the user: replies people are waiting on, renewals and trial ends in the next three days, and trips with
+nothing booked. Each kind has its own switch under Settings › My day, all on as the board drew them. Once a day, the first time the PC is
+in use after 6 am, Meridian reads Gmail and Calendar through the user's Claude account in reading-only runs, and the island says how many
+things need them. It says nothing when nothing does, and nothing in local-only mode or while monitoring is paused.
+
+A card's buttons only open, remind, copy, or hand a draft to Write here. Nothing is sent, bought or booked. Open in Gmail opens the
+thread; the draft waits a minute for Ctrl Alt F or the island's Write here, which puts it in as it is, and the user presses Send.
+Drafts and trip plans are written ahead without a click only on the Claude plan or an AI on this PC. With a pay-per-use key, a draft is
+written when its card is opened. A dismissed card is remembered for 60 days.
+
+**Gave up.** Plans never name a train, flight or time, because nothing reads timetables. Train bookings are not read into My Day, so a
+trip card leaves only when booking mail arrives.
+
+## D74. Write here, and answers that go where the user is typing
+
+Ctrl Alt F, the island's Write here button, or asking the assistant writes a reply into the box the user is in. It is a registered
+shortcut, never a hook, and only while Write here is on. Before it reads anything, the run checks that Write here is on, settles the AI
+(local-only switches to the AI on this PC), checks the capture exclusions, and asks the engine's access rules. A new app asks Never, Once
+or Always; banks, tax and government sites ask every time; terminals and the rest are never used. Up to 6,000 characters of the page
+before the box go to the AI as other people's words, never as instructions. The reply lands selected, the island offers Undo, Shorter and
+Warmer, and nothing is ever sent. Undo lasts five minutes on the same page. Esc stops a run; it is registered only while a reply is on its
+way and always let go.
+
+The assistant's `write_here` runs when the user asks in their own words, and waits for a click on the island once it has read mail, the
+calendar, notes or Knowledge. A question asked on the island is answered on the island, or, when a box the user may write in had the cursor
+in the window in front, written into that box with the same checks and Undo. The apps and sites list now belongs to the core, so a page's
+stale copy of the settings cannot overwrite it.
+
+**Gave up.** The soft light on the cursor, which needs an overlay window at the caret. The 20-second limit for Claude Code may prove tight.
+
 ## D73. Fill in the page, Your details, Knowledge and the Sentient upgrades: phase 1
 
 The owner approved the Fill in the page and Sentient OS boards on 2026-11-06, with every proposed answer, and asked for all the phases to

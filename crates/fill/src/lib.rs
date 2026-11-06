@@ -31,7 +31,7 @@ pub use model::{site_from_address, Bounds, Field, FieldKind, Target, MAX_VALUE, 
 pub use policy::{access, is_browser, refusal, Access, Refusal};
 pub use undo::{Undone, UndoLog};
 #[cfg(windows)]
-pub use win::Uia;
+pub use win::{copy, Uia};
 pub use write::{write, yes_no, Method, Mode, Need, Written, Writer};
 
 /// Messages are shown to the user as they are, and never hold a box's value.

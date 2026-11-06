@@ -11,9 +11,11 @@ use tauri::{App, AppHandle, Emitter, Manager, WindowEvent};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
 mod actions;
+mod cards;
 mod commands;
 mod details;
 mod following;
+mod here;
 mod hush;
 mod island;
 mod knowledge;
@@ -157,6 +159,8 @@ fn setup(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     app.manage(notetaker::state(app)?);
     app.manage(style::state(app)?);
     app.manage(knowledge::state(app)?);
+    app.manage(cards::state(app)?);
+    app.manage(here::state(app)?);
     let path = settings::path(&handle).ok_or("no config directory")?;
     let settings = settings::load(&path);
     let placement = settings.clone();
@@ -205,6 +209,8 @@ fn setup(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     following::watch_running(&handle);
     wake::spawn(handle.clone());
     knowledge::spawn(handle.clone());
+    cards::spawn(handle.clone());
+    here::sync_key(&handle, &placement);
     life::spawn(handle);
 
     build_tray(app)?;
@@ -358,6 +364,22 @@ pub fn run() {
             knowledge::knowledge_save,
             knowledge::knowledge_tick,
             knowledge::knowledge_open,
+            cards::cards_state,
+            cards::cards_check,
+            cards::cards_hide,
+            cards::cards_dismiss,
+            cards::cards_draft,
+            cards::cards_set_draft,
+            here::here_start,
+            here::here_retry,
+            here::here_rewrite,
+            here::here_undo,
+            here::here_copy,
+            here::here_stop,
+            here::here_done,
+            here::here_offer,
+            here::fill_place_set,
+            here::fill_place_forget,
         ])
         .setup(setup)
         .run(tauri::generate_context!())

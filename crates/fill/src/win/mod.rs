@@ -117,8 +117,12 @@ impl Uia {
     }
 
     /// One round trip brings back every property a box needs, instead of one per property.
-    fn cache(&self) -> Result<IUIAutomationCacheRequest, FillError> {
+    /// Without `values`, what the box holds is left unread.
+    fn cache(&self, values: bool) -> Result<IUIAutomationCacheRequest, FillError> {
         let cache = unsafe { self.automation.CreateCacheRequest() }?;
+        if values {
+            unsafe { cache.AddProperty(UIA_ValueValuePropertyId) }?;
+        }
         for property in [
             UIA_NamePropertyId,
             UIA_ControlTypePropertyId,
@@ -133,7 +137,6 @@ impl Uia {
             UIA_AriaPropertiesPropertyId,
             UIA_NativeWindowHandlePropertyId,
             UIA_IsTextPatternAvailablePropertyId,
-            UIA_ValueValuePropertyId,
             UIA_ValueIsReadOnlyPropertyId,
             UIA_ToggleToggleStatePropertyId,
             UIA_SelectionItemIsSelectedPropertyId,
@@ -354,20 +357,7 @@ impl Reader for Uia {
     }
 
     fn focused(&mut self) -> Result<Field, FillError> {
-        self.window()?;
-        self.boxes.clear();
-        self.focused = None;
-        let cache = self.cache()?;
-        let element = unsafe { self.automation.GetFocusedElementBuildCache(&cache) }.map_err(|_| FillError::NoBox)?;
-        // The focus lives in the window in front, so it is still ours if that has not changed.
-        self.window()?;
-        let field = self.describe(&element, 0, true)?.ok_or(FillError::NoBox)?;
-        if matches!(field.kind, FieldKind::Button | FieldKind::File | FieldKind::List | FieldKind::Checkbox | FieldKind::Radio) {
-            return Err(FillError::NoBox);
-        }
-        self.boxes.push((element.clone(), field.kind));
-        self.focused = Some(element);
-        Ok(field)
+        self.focused_with(true)
     }
 
     fn fields(&mut self) -> Result<Vec<Field>, FillError> {
@@ -397,7 +387,7 @@ impl Reader for Uia {
         let on_screen = self.equals(UIA_IsOffscreenPropertyId, false.into())?;
         let shown = unsafe { self.automation.CreateAndCondition(&enabled, &on_screen) }?;
         let wanted = unsafe { self.automation.CreateAndCondition(&controls, &shown) }?;
-        let found = unsafe { scope.FindAllBuildCache(TreeScope_Descendants, &wanted, &self.cache()?) }?;
+        let found = unsafe { scope.FindAllBuildCache(TreeScope_Descendants, &wanted, &self.cache(true)?) }?;
 
         let mut fields = Vec::new();
         for index in 0..unsafe { found.Length() }? {
@@ -424,6 +414,31 @@ impl Reader for Uia {
             return self.text_before(&pattern, limit.min(MAX_READ as usize) as i32);
         }
         self.names(&root, limit)
+    }
+}
+
+impl Uia {
+    /// The box with the cursor, read without what it holds: enough to tell whether Write here
+    /// could start there, as the island's button needs to know.
+    pub fn peek_focused(&mut self) -> Result<Field, FillError> {
+        self.focused_with(false)
+    }
+
+    fn focused_with(&mut self, values: bool) -> Result<Field, FillError> {
+        self.window()?;
+        self.boxes.clear();
+        self.focused = None;
+        let cache = self.cache(values)?;
+        let element = unsafe { self.automation.GetFocusedElementBuildCache(&cache) }.map_err(|_| FillError::NoBox)?;
+        // The focus lives in the window in front, so it is still ours if that has not changed.
+        self.window()?;
+        let field = self.describe(&element, 0, true)?.ok_or(FillError::NoBox)?;
+        if matches!(field.kind, FieldKind::Button | FieldKind::File | FieldKind::List | FieldKind::Checkbox | FieldKind::Radio) {
+            return Err(FillError::NoBox);
+        }
+        self.boxes.push((element.clone(), field.kind));
+        self.focused = Some(element);
+        Ok(field)
     }
 }
 
@@ -578,4 +593,36 @@ impl Writer for Uia {
         self.keys_ready(id)?;
         input::undo_keys()
     }
+
+    /// Found from the end, so the words just written come before an older copy above them. Line
+    /// by line, because editors keep line breaks their own way. No key is sent.
+    fn select(&mut self, id: u32, text: &str) -> Result<(), FillError> {
+        let (element, _) = self.entry(id)?;
+        let lines: Vec<&str> = text.lines().map(str::trim).filter(|line| !line.is_empty()).collect();
+        let (Some(first), Some(last)) = (lines.first(), lines.last()) else { return Ok(()) };
+        unsafe {
+            let pattern: IUIAutomationTextPattern = match element.GetCurrentPatternAs(UIA_TextPatternId) {
+                Ok(pattern) => pattern,
+                Err(_) => self.document_around(&element).ok_or(FillError::NoBox)?.GetCurrentPatternAs(UIA_TextPatternId)?,
+            };
+            let all = pattern.DocumentRange()?;
+            let end = all.FindText(&BSTR::from(*last), true, false)?;
+            let span = if lines.len() == 1 {
+                end
+            } else {
+                let above = all.Clone()?;
+                above.MoveEndpointByRange(TextPatternRangeEndpoint_End, &end, TextPatternRangeEndpoint_Start)?;
+                let start = above.FindText(&BSTR::from(*first), true, false)?;
+                start.MoveEndpointByRange(TextPatternRangeEndpoint_End, &end, TextPatternRangeEndpoint_End)?;
+                start
+            };
+            span.Select()?;
+        }
+        Ok(())
+    }
+}
+
+/// Puts text on the clipboard as an ordinary copy, when the user asks for one.
+pub fn copy(text: &str) -> Result<(), FillError> {
+    input::copy(text)
 }

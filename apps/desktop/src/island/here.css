@@ -1,0 +1,146 @@
+/* Write here and asking from the island, from the Write here and Island upgrades boards. */
+
+.here-pill {
+  gap: 10px;
+}
+
+/* A soft bar of light that runs while the words are on their way. Still, with reduced motion. */
+.here-progress {
+  position: relative;
+  flex: none;
+  width: 56px;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.14);
+  overflow: hidden;
+}
+
+.here-progress i {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 30%;
+  border-radius: 2px;
+  background: #fff;
+  animation: here-shimmer 1.4s ease-in-out infinite;
+}
+
+[data-reduced] .here-progress i {
+  left: 35%;
+  animation: none;
+}
+
+@keyframes here-shimmer {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(340%); }
+}
+
+.here-b {
+  flex: none;
+  height: 28px;
+  padding: 0 11px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.12);
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+  white-space: nowrap;
+}
+
+.here-b:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.here-b[data-main] {
+  background: #f5f5f7;
+  color: #000;
+}
+
+.here-b[data-main]:hover {
+  background: #fff;
+}
+
+.here-card {
+  gap: 9px;
+}
+
+.here-body {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.72);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* The row under the greeting when the pointer is on the island. */
+.peek-ask {
+  gap: 8px;
+}
+
+.peek-field {
+  min-width: 0;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  border-radius: 17px;
+  background: rgba(255, 255, 255, 0.1);
+  font-size: 13px;
+  color: rgba(240, 240, 248, 0.6);
+  text-align: left;
+}
+
+.peek-field:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.ask-typing {
+  gap: 8px;
+  justify-content: center;
+}
+
+.ask-typing .answer-box {
+  flex: 1;
+}
+
+.ask-hint {
+  font-size: 11.5px;
+  color: rgba(240, 240, 248, 0.6);
+  text-align: center;
+}
+
+.ask-question {
+  min-width: 0;
+  color: rgba(240, 240, 248, 0.76);
+}
+
+.ask-card {
+  gap: 9px;
+}
+
+.ask-answer-row {
+  align-items: flex-start;
+}
+
+.ask-answer {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 500;
+  line-height: 20px;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* The island shows the first three lines. The whole answer is in Chat. */
+.ask-answer[data-long] {
+  -webkit-mask-image: linear-gradient(#000 60%, transparent);
+  mask-image: linear-gradient(#000 60%, transparent);
+}

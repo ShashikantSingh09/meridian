@@ -35,6 +35,8 @@ import { bridge } from "./lib/bridge";
 import { watchTheme } from "./lib/theme";
 import { refreshNotes, wireNotes } from "./lib/notes";
 import { wireKnowledge } from "./lib/knowledge";
+import { wireCards } from "./lib/cards";
+import { startWriteHere, wireHere } from "./lib/here";
 import { endConversation, say, startVoice, wireVoice } from "./lib/voice";
 
 // A file or link dropped on the island would otherwise load in its place, and every page here can
@@ -46,6 +48,8 @@ createRoot(document.getElementById("root")!).render(<Island />);
 wireVoice();
 wireNotes();
 wireKnowledge();
+wireCards();
+wireHere();
 watchTheme(() => getState().settings);
 
 void boot();
@@ -81,6 +85,7 @@ if (import.meta.env.DEV) Object.assign(window, {
     refreshNotes,
     setHovered,
     updateSettings,
+    startWriteHere,
   },
   __mock: mock,
 });

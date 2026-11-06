@@ -433,7 +433,6 @@ pub fn state(app: &tauri::App) -> tauri::Result<Style> {
 
 /// How the user writes, as a short instruction block, for Write here and the drafts on cards. None
 /// until it is learned. Chat answers never use it.
-#[allow(dead_code)] // ponytail: Write here and card drafts call this when they land.
 pub fn instructions(app: &AppHandle) -> Option<String> {
     load(&app.state::<Style>().path).map(|profile| profile.block())
 }

@@ -36,9 +36,11 @@ import {
 } from "../lib/store";
 import { actionOf, asking, changedFiles, limitName, clock, lastMessage, needsFirst, planSteps, spent, stageLine, stepLog, stepsOf, thisTurn, todoStep, todoWindow, turnStart, worked, type LoggedStep } from "../lib/sessions";
 import { Face, type Mood } from "./faces";
+import { AskRow } from "./here";
 import type { LineSegment } from "./line";
 import { focusActivity } from "./live";
-import { activeSessions, FINISHED_ROWS, MULTITASK_MAX_ROWS, STAGE_ROWS, TODO_MAX_ROWS, waitingApproval, waitingCount } from "./machine";
+import { activeSessions, FINISHED_ROWS, MULTITASK_MAX_ROWS, STAGE_ROWS, TODO_MAX_ROWS, waitingApproval, waitingCount, type Notice } from "./machine";
+import { KINDS, openCard } from "../lib/cards";
 import { AgentMark, Bars, Transport } from "./marks";
 import { MeridianLine } from "./MeridianLine";
 import { Progress } from "./Progress";
@@ -180,6 +182,7 @@ function Peek({ reduced }: { reduced: boolean }) {
           <span className="peek-chip-body truncate">{active.length === 0 ? "Click to open" : active.map((s) => s.project).join(", ")}</span>
         </div>
       </div>
+      <AskRow />
     </div>
   );
 }
@@ -701,10 +704,51 @@ export const hostOf = (url: string | null) => {
   }
 };
 
-export function NotificationView({ reduced }: { reduced: boolean }) {
+/** The morning line: one line, and the cards when the pointer is on it. A line opens its card in My
+ *  Day, and nothing is approved from here. */
+function MorningView({ notice, hovered, reduced }: { notice: Notice; hovered: boolean; reduced: boolean }) {
+  if (!hovered) {
+    return (
+      <div className="row pad-pill">
+        <span className="notice-face">
+          <Mine mood="notice" reduced={reduced} />
+        </span>
+        <button className="grow text-button label truncate" onClick={() => openCard(null)}>{notice.title}</button>
+        <button className="ghost" onClick={() => openCard(null)}>See</button>
+      </div>
+    );
+  }
+  return (
+    <div className="stack pad-card morning">
+      <div className="row">
+        <Mine mood="notice" reduced={reduced} />
+        <span className="grow label truncate">{notice.title}</span>
+        <span className="meta">{notice.body}</span>
+      </div>
+      <ul className="morning-lines" aria-label="What needs you">
+        {notice.cards?.map((line) => (
+          <li key={line.id}>
+            <button className="morning-line" onClick={() => openCard(line.id)}>
+              <span className="morning-square" style={{ background: KINDS[line.kind].tone }}><Icon name={KINDS[line.kind].icon} size={12} /></span>
+              <span className="grow truncate">{line.title}</span>
+              <span className="meta">{line.meta}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
+      <div className="row end">
+        <button className="ghost" onClick={() => dismissNotice(notice.id)}>Close</button>
+        <button className="solid" onClick={() => openCard(null)}>Open My Day</button>
+      </div>
+    </div>
+  );
+}
+
+export function NotificationView({ reduced, hovered = false }: { reduced: boolean; hovered?: boolean }) {
   const notice = useApp((s) => s.notices[0]);
   const sessions = useApp((s) => s.sessions);
   if (!notice) return null;
+  if (notice.cards) return <MorningView notice={notice} hovered={hovered} reduced={reduced} />;
   // Anything else is news, so the face glances at it as it arrives.
   const mood: Mood = notice.tone === "success" ? "done" : notice.tone === "urgent" ? "needs" : "notice";
   const ended = notice.finished && sessions.find((s) => s.id === notice.sessionId);

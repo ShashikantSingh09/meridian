@@ -3,6 +3,7 @@ import { DetailsSection } from "./Details";
 import { showDevices } from "./Devices";
 import { FillSection } from "./Fill";
 import { FollowSwitch } from "./Follow";
+import { MyDaySection } from "./MyDay";
 import { Markdown } from "./Markdown";
 import { Menu } from "./Menu";
 import { RepairPage, RepairRow } from "./Repair";
@@ -498,7 +499,7 @@ function About() {
   );
 }
 
-const SHORTCUTS = [["Open the island", "Space"], ["Look at the screen", "S"], ["Talk", "V"]] as const;
+const SHORTCUTS = [["Open the island", "Space"], ["Look at the screen", "S"], ["Talk", "V"], ["Write here", "F"]] as const;
 
 interface Section {
   id: SettingsSection;
@@ -523,6 +524,7 @@ const SECTIONS: Section[][] = [
   ],
   [
     { id: "fill", label: "Fill in the page", icon: "pen", tone: "#32ade6", page: FillSection, terms: "write here fill this form finish this for me experimental ctrl alt f key island buttons apps sites allowed never banks sources knowledge clipboard picture" },
+    { id: "myday", label: "My day", icon: "calendar", tone: "#e5484d", page: MyDaySection, terms: "cards needs you replies waiting renewals subscriptions free trials trips travel booking morning summary island gmail calendar" },
     { id: "details", label: "Your details", icon: "person", tone: "#a2845e", page: DetailsSection, terms: "name hindi birth email phone address pin code city state work company job title employee linkedin id numbers pan aadhaar passport profile" },
   ],
   [

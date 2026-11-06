@@ -12,6 +12,7 @@ import type {
   AgentInfo,
   AuthStatus,
   Capture,
+  CardsState,
   Category,
   Charge,
   ChatEvent,
@@ -20,6 +21,9 @@ import type {
   ContextEvent,
   Digest,
   EventTime,
+  FillPlace,
+  HereOutcome,
+  HereRequest,
   HooksHealth,
   Integration,
   IslandPlace,
@@ -457,6 +461,28 @@ export const bridge = {
     return listen<string>("island-open-tab", (e) => handler(e.payload)).then((un) => un);
   },
 
+  // Cards you can act on, at the top of My Day. Gmail and the calendar are read through Claude, read-only.
+  cardsState: () => (native ? invoke<CardsState>("cards_state") : mock.cardsState()),
+  /** Reads the sources that are on, then writes drafts and plans with the AI Chat is on. True when the morning line should show. */
+  cardsCheck: (engine: { agent?: string; provider?: string; model?: string }, morning: boolean) =>
+    native ? invoke<boolean>("cards_check", { agent: engine.agent ?? null, provider: engine.provider ?? null, model: engine.model ?? null, morning }) : mock.cardsCheck(morning),
+  /** Not now: hidden until `until`, in ms. */
+  cardsHide: (id: string, until: number) => (native ? invoke<void>("cards_hide", { id, until }) : mock.cardsHide(id, until)),
+  /** Dismiss, or Undo with `dismissed` false. */
+  cardsDismiss: (id: string, dismissed: boolean) => (native ? invoke<void>("cards_dismiss", { id, dismissed }) : mock.cardsDismiss(id, dismissed)),
+  cardsDraft: (id: string, engine: { agent?: string; provider?: string; model?: string }) =>
+    native ? invoke<string>("cards_draft", { id, agent: engine.agent ?? null, provider: engine.provider ?? null, model: engine.model ?? null }) : mock.cardsDraft(id),
+  cardsSetDraft: (id: string, text: string) => (native ? invoke<void>("cards_set_draft", { id, text }) : mock.cardsSetDraft(id, text)),
+  onCardsChanged(handler: () => void) {
+    if (!native) return Promise.resolve(mock.onCardsChanged(handler));
+    return listen("cards-changed", handler).then(() => {});
+  },
+  /** The first time the PC is in use after 6 am, once a day. */
+  onCardsDue(handler: () => void) {
+    if (!native) return Promise.resolve(mock.onCardsDue(handler));
+    return listen("cards-due", handler).then(() => {});
+  },
+
   // Your details. Kept on this PC by the core, and never given to the AI.
   detailsGet: () => (native ? invoke<Profile>("details_get") : mock.detailsGet()),
   /** Gives back the profile as kept, trimmed, or the first thing that is wrong. */
@@ -468,4 +494,37 @@ export const bridge = {
   detailsIdShow: (kind: IdKind) => (native ? invoke<string>("details_id_show", { kind }) : mock.detailsIdShow(kind)),
   /** An empty number removes it. */
   detailsIdSet: (kind: IdKind, number: string) => (native ? invoke<void>("details_id_set", { kind, number }) : mock.detailsIdSet(kind, number)),
+
+  // Write here. The core reads the box and writes in it; these say what happened.
+  hereStart: (request: HereRequest) => (native ? invoke<HereOutcome>("here_start", { request }) : mock.hereStart(request)),
+  /** Asks once more with the same thread, for the same box. */
+  hereRetry: () => (native ? invoke<HereOutcome>("here_retry") : mock.hereRetry()),
+  hereRewrite: (how: "shorter" | "warmer") => (native ? invoke<HereOutcome>("here_rewrite", { how }) : mock.hereRewrite(how)),
+  /** Puts back what was in the box, or says why it cannot. */
+  hereUndo: () => (native ? invoke<void>("here_undo") : mock.hereUndo()),
+  /** The reply that could not go in, onto the clipboard. */
+  hereCopy: () => (native ? invoke<void>("here_copy") : mock.hereCopy()),
+  hereStop: () => (native ? invoke<void>("here_stop") : mock.hereStop()),
+  /** The island's line has gone, so the core lets the box go. */
+  hereDone: () => (native ? invoke<void>("here_done") : mock.hereDone()),
+  /** The window in front, when a box Meridian may write in has the cursor there. Nothing a box holds is read. */
+  hereOffer: () => (native ? invoke<number | null>("here_offer") : mock.hereOffer()),
+  /** The list of apps and sites belongs to the core. Each change comes back as the whole settings. */
+  fillPlaceSet: (place: FillPlace) => (native ? invoke<Settings>("fill_place_set", { place }) : mock.fillPlaceSet(place)),
+  fillPlaceForget: (id: string) => (native ? invoke<Settings>("fill_place_forget", { id }) : mock.fillPlaceForget(id)),
+  /** Ctrl Alt F was pressed. */
+  onHereKey(handler: () => void) {
+    if (!native) return Promise.resolve(mock.onHereKey(handler));
+    return listen("here-key", handler).then(() => {});
+  },
+  /** The assistant was asked to write in the box. */
+  onHereStart(handler: (start: { instruction: string }) => void) {
+    if (!native) return Promise.resolve(mock.onHereStart(handler));
+    return listen<{ instruction: string }>("here-start", (e) => handler(e.payload)).then(() => {});
+  },
+  /** The user typed in the box, or left it, so the line that offered Undo goes. */
+  onHereEnded(handler: () => void) {
+    if (!native) return Promise.resolve(mock.onHereEnded(handler));
+    return listen("here-ended", handler).then(() => {});
+  },
 };

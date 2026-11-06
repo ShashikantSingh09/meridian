@@ -31,6 +31,9 @@ import {
   VoiceView,
   WorkingView,
 } from "./views";
+import { AskView, HereView } from "./here";
+import { answerLines, type AskState } from "../lib/ask";
+import type { HereState } from "../lib/here";
 import "./stages.css";
 
 /** A press that moves this far, in CSS pixels, is a drag and not a click. */
@@ -65,13 +68,15 @@ function useSnapshot(): Snapshot {
   const voice = useApp((s) => s.voice !== null);
   const recording = useApp((s) => s.notes.recording !== null);
   const writingNote = useApp((s) => s.notes.working.length > 0);
+  const here = useApp((s) => s.here !== null);
+  const asking = useApp((s) => s.ask !== null);
   return useMemo(
-    () => ({ panelOpen, listening, capturing, mediaPlaying, chatPending, sessions, notices, suggestions, errors, live, level, voice, recording, writingNote }),
-    [panelOpen, listening, capturing, mediaPlaying, chatPending, sessions, notices, suggestions, errors, live, level, voice, recording, writingNote],
+    () => ({ panelOpen, listening, capturing, mediaPlaying, chatPending, sessions, notices, suggestions, errors, live, level, voice, recording, writingNote, here, asking }),
+    [panelOpen, listening, capturing, mediaPlaying, chatPending, sessions, notices, suggestions, errors, live, level, voice, recording, writingNote, here, asking],
   );
 }
 
-function CompactContent({ view, reduced, hovered, sliver, mediaOpen }: { view: IslandView; reduced: boolean; hovered: boolean; sliver: boolean; mediaOpen: boolean }) {
+function CompactContent({ view, reduced, hovered, sliver, mediaOpen, here, ask }: { view: IslandView; reduced: boolean; hovered: boolean; sliver: boolean; mediaOpen: boolean; here: HereState | null; ask: AskState | null }) {
   switch (view) {
     case "listening":
       return <ListeningView reduced={reduced} />;
@@ -82,7 +87,7 @@ function CompactContent({ view, reduced, hovered, sliver, mediaOpen }: { view: I
     case "multitask":
       return <MultitaskView />;
     case "notification":
-      return <NotificationView reduced={reduced} />;
+      return <NotificationView reduced={reduced} hovered={hovered} />;
     case "contextual":
       return <ContextualView reduced={reduced} />;
     case "screen":
@@ -99,6 +104,10 @@ function CompactContent({ view, reduced, hovered, sliver, mediaOpen }: { view: I
       return <ErrorView reduced={reduced} />;
     case "note":
       return <NoteView hovered={hovered} reduced={reduced} />;
+    case "here":
+      return <HereView here={here} reduced={reduced} />;
+    case "ask":
+      return <AskView ask={ask} reduced={reduced} />;
     default:
       return <IdleView reduced={reduced} hovered={hovered} sliver={sliver} />;
   }
@@ -127,6 +136,11 @@ export function Island() {
   const usage = useApp((s) => s.settings.showUsage && planUse(s) !== null);
   const voiceLong = useApp((s) => ((s.voice?.words.length ?? 0) + (s.voice?.ahead.length ?? 0)) > VOICE_LINE);
   const stagesOpen = useApp((s) => s.stagesOpen);
+  const here = useApp((s) => s.here);
+  const ask = useApp((s) => s.ask);
+  const hereStep = here?.step;
+  const askPhase = ask?.phase;
+  const askLines = answerLines(ask?.answer ?? "");
   const finished = useApp((s) => {
     const notice = s.notices[0];
     const session = notice?.finished ? s.sessions.find((x) => x.id === notice.sessionId) : undefined;
@@ -177,6 +191,9 @@ export function Island() {
     noteWriting: !snapshot.recording,
     noteReady: snapshot.notices[0]?.note !== undefined,
     noteFailed: snapshot.errors[0]?.note !== undefined,
+    cards: snapshot.notices[0]?.cards?.length,
+    here: hereStep,
+    ask: askPhase ? { phase: askPhase, lines: askLines } : undefined,
   });
 
   const width = useMotionValue(reduced ? target.w : BIRTH.w);
@@ -287,8 +304,10 @@ export function Island() {
   }, [lit, reduced, view, lapMs, lapEvery]);
   const glow = view === "media" ? artTint ?? "#ff7a9c" : `var(${stateToken(view, snapshot)})`;
   // A waiting request looks the same either way, and swapping it would lose the answers so far.
-  const opensOnHover = view === "idle" || view === "live" || view === "note" || (view === "working" && waiting === null);
-  const contentKey = expanded ? "panel" : view + (opened && opensOnHover ? "-hover" : "") + (view === "media" && playerOpen ? "-open" : "");
+  const opensOnHover = view === "idle" || view === "live" || view === "note" || (view === "working" && waiting === null) || (view === "notification" && snapshot.notices[0]?.cards !== undefined);
+  const contentKey = expanded
+    ? "panel"
+    : view + (opened && opensOnHover ? "-hover" : "") + (view === "media" && playerOpen ? "-open" : "") + (view === "here" ? `-${hereStep}` : view === "ask" ? `-${askPhase}` : "");
 
   return (
     <motion.div
@@ -337,7 +356,7 @@ export function Island() {
         <span className="island-tint" aria-hidden="true" />
         <AnimatePresence initial={false}>
           <motion.div key={contentKey} className="island-content" style={{ width: target.w, height: target.h, transformOrigin: place === "up" ? "50% 100%" : "50% 0" }} initial={enter.initial} animate={enter.animate} exit={enter.exit}>
-            {expanded ? <Panel /> : <CompactContent view={view} reduced={reduced} hovered={opened} sliver={sliver} mediaOpen={playerOpen} />}
+            {expanded ? <Panel /> : <CompactContent view={view} reduced={reduced} hovered={opened} sliver={sliver} mediaOpen={playerOpen} here={here} ask={ask} />}
           </motion.div>
         </AnimatePresence>
         {!expanded && <ClosingLine view={view} />}

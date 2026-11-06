@@ -135,6 +135,9 @@ pub fn settings_save(app: AppHandle, core: State<'_, Core>, mut settings: Settin
         let current = core.settings.lock().unwrap();
         // Only a drag moves the island, so the page's copy of where it went is never the newer one.
         settings.island_spots = current.island_spots.clone();
+        // The same for the apps and sites: the island adds them, and the page changes them through
+        // `fill_place_set`, so an older copy here never undoes an answer.
+        settings.fill.places = current.fill.places.clone();
         // Choosing a side again puts it back on the top edge there.
         if current.island_align != settings.island_align {
             if let Some(key) = win.as_ref().and_then(|win| island::monitor_key(&app, win, &settings.island_monitor)) {
@@ -144,6 +147,7 @@ pub fn settings_save(app: AppHandle, core: State<'_, Core>, mut settings: Settin
     }
     settings::save(&path, &settings).map_err(stringify)?;
     core.sessions.set_assistant(crate::actions::setup(&core.tools_url, &settings));
+    crate::here::sync_key(&app, &settings);
     let placed = settings.clone();
     let previous = std::mem::replace(&mut *core.settings.lock().unwrap(), settings);
     if previous.island_monitor != placed.island_monitor || previous.island_align != placed.island_align || previous.island_spots != placed.island_spots {

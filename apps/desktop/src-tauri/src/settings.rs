@@ -89,6 +89,26 @@ impl Default for Fill {
     }
 }
 
+/// The cards at the top of My Day, and the morning line on the island. Each kind can be turned off.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct MyDay {
+    /// People waiting 2 days or more on a reply.
+    pub replies: bool,
+    /// Renewals and free trials, from receipts in Gmail.
+    pub renewals: bool,
+    /// Trips on the calendar with nothing booked.
+    pub trips: bool,
+    /// One line on the island, the first time the PC is used after 6 am.
+    pub summary: bool,
+}
+
+impl Default for MyDay {
+    fn default() -> Self {
+        Self { replies: true, renewals: true, trips: true, summary: true }
+    }
+}
+
 /// Where the island was dragged to on one display, as shares of the display's work area.
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
 pub struct Spot {
@@ -195,6 +215,8 @@ pub struct Settings {
     pub fill: Fill,
     /// What Knowledge learns from, and when it updates. Every source is off until turned on.
     pub knowledge: ::knowledge::Preferences,
+    /// Which cards My Day shows, and the morning line on the island.
+    pub my_day: MyDay,
 }
 
 impl Default for Settings {
@@ -261,6 +283,7 @@ impl Default for Settings {
             wake_pause_locked: true,
             fill: Fill::default(),
             knowledge: ::knowledge::Preferences::default(),
+            my_day: MyDay::default(),
         }
     }
 }
