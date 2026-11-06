@@ -34,14 +34,24 @@ export const instant = { duration: 0 } as const;
 // motion. Old content leaves in 90 ms, before
 // new content arrives, so two lines of text never overlap. Everything follows the Animation
 // speed setting. No filters here: a blur re-rasters the text on every frame of a morph.
-export const contentEnter = (shape: SpringName, speed: number, up = false) => {
-  const delay = (0.3 * springDuration[shape]) / speed;
+export const contentEnter = (shape: SpringName, speed: number, up = false, after = 0.3 * springDuration[shape]) => {
+  const delay = after / speed;
   const settle = { ...scaled(spring.snap, speed), delay };
   return {
     initial: { opacity: 0, scale: 0.985, y: up ? 2 : -2 },
     animate: { opacity: 1, scale: 1, y: 0, transition: { opacity: { duration: 0.24 / speed, delay, ease: [0.16, 1, 0.3, 1] }, scale: settle, y: settle } },
     exit: { opacity: 0, scale: 0.97, transition: { duration: 0.09 / speed, ease: [0.4, 0, 1, 1] } },
   } as const;
+};
+
+/** Closing goes back the way it came. The words leave in the first 90 ms while the shape holds still,
+ *  then it pulls up into its resting pill, height first so it reads as rising, and is there by 300 ms,
+ *  when the clock comes back. The shrink spring, only quicker, so it still never bounces. Being critically
+ *  damped, it settles about 1.35 of its duration after it starts: height by 250 ms, width by 300. */
+export const CLOSE_REST = 0.3;
+export const closing = (speed: number) => {
+  const pull = (seconds: number, delay: number) => ({ ...scaled(spring.shrink, (springDuration.shrink / seconds) * speed), delay: delay / speed });
+  return { height: pull(0.12, 0.09), width: pull(0.14, 0.11) };
 };
 
 export const contentEnterReduced = {

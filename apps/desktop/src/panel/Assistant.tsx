@@ -4,6 +4,7 @@
 import { faceById } from "../island/faces";
 import { Icon } from "../lib/icons";
 import { setSettingsSection, updateSettings, useApp } from "../lib/store";
+import { SoundsLikeYou } from "./SoundsLikeYou";
 import { SPEAKERS } from "./Voice";
 
 const STYLES = [
@@ -20,6 +21,7 @@ export function AssistantSection() {
   const own = useApp((s) => s.settings.assistantPersonality);
   const provider = useApp((s) => s.settings.voiceProvider);
   const face = useApp((s) => s.settings.face);
+  const suggestions = useApp((s) => s.settings.homeSuggestions);
 
   const sample = STYLES.find((s) => s.id === style)?.sample;
   const greeting = you.trim();
@@ -66,6 +68,16 @@ export function AssistantSection() {
       <div className="stack card-block">
         <span className="meta">How {name.trim() || "Meridian"} sounds</span>
         <p className="preview-line">{line}</p>
+      </div>
+      <SoundsLikeYou />
+      <div className="stack">
+        <label className="setting toggle">
+          <span className="stacked grow">
+            <span className="label">Suggestions on Home</span>
+            <span className="meta">A few things to ask under the Ask box, picked on this PC from what is going on. Picking one only fills the box.</span>
+          </span>
+          <input type="checkbox" role="switch" checked={suggestions} onChange={(e) => void updateSettings({ homeSuggestions: e.target.checked })} />
+        </label>
       </div>
       <div className="stack">
         <button className="setting link-row" onClick={() => setSettingsSection("voice")}>

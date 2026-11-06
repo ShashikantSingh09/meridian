@@ -872,3 +872,295 @@
   display: flex;
   gap: 4px;
 }
+
+/* ── Your details and Fill in the page ───────────────────────────────── */
+
+/* Rows under a switch that is off. */
+.settings [inert] {
+  opacity: 0.45;
+}
+
+.settings .hindi {
+  font-family: "Nirmala UI", "Noto Sans Devanagari", var(--font-ui);
+}
+
+.settings-body .stack.details-start {
+  align-items: center;
+  gap: 9px;
+  padding: 26px 32px 24px;
+  text-align: center;
+}
+
+.details-start h3 {
+  font-size: 16px;
+  line-height: 1.35;
+}
+
+.details-start .solid {
+  margin-top: 4px;
+}
+
+.details-eyes {
+  display: flex;
+  gap: 9px;
+}
+
+.details-eyes i {
+  display: block;
+  width: 12px;
+  height: 19px;
+  border-radius: 7px;
+  background: var(--ink-1);
+}
+
+.settings-body .stack > .setting.details-head {
+  min-height: 44px;
+}
+
+.settings-body .stack > .setting.details-row {
+  align-items: flex-start;
+  gap: 12px;
+  min-height: 0;
+  padding: 8px 0;
+}
+
+.details-row .ghost {
+  height: 26px;
+  margin: -2px 0;
+}
+
+.details-key {
+  flex: none;
+  width: 118px;
+  line-height: 1.5;
+  color: var(--ink-2);
+}
+
+.details-value {
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.details-number {
+  font-variant-numeric: tabular-nums;
+}
+
+.details-add {
+  padding: 0;
+  line-height: 1.5;
+  text-align: left;
+  color: var(--ink-3);
+}
+
+.details-add:hover:not(:disabled) {
+  color: var(--ink-1);
+}
+
+.settings-body .stack.details-edit {
+  gap: 9px;
+  padding: 10px 14px 12px;
+}
+
+.details-fields {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.settings input[aria-invalid="true"] {
+  box-shadow: inset 0 0 0 1.5px var(--tint-red);
+}
+
+.details-info {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 9px 11px;
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--tint-blue) 14%, transparent);
+  font-size: var(--text-sm);
+  line-height: 1.45;
+}
+
+.details-info svg {
+  flex: none;
+  margin-top: 1px;
+  color: var(--tint-blue);
+}
+
+.settings-body .stack > .details-info {
+  margin: 6px 0 12px;
+}
+
+.settings .ghost.details-delete {
+  background: none;
+  color: var(--tint-red);
+}
+
+.settings-body .stack.details-confirm {
+  gap: 10px;
+  padding: 12px 14px;
+}
+
+.fill-group {
+  padding: 12px 0 4px;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.fill-never {
+  padding: 0 0 10px;
+  line-height: 1.5;
+}
+
+.settings-body .stack > .setting.fill-place {
+  min-height: 44px;
+  gap: 10px;
+}
+
+.fill-experimental,
+.fill-state {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.fill-experimental {
+  height: 18px;
+  margin-left: 6px;
+  padding: 0 8px;
+  vertical-align: 1px;
+  background: color-mix(in srgb, #bf5af2 20%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, #bf5af2 55%, transparent);
+  color: color-mix(in srgb, #bf5af2 55%, var(--ink-1));
+}
+
+.fill-state {
+  height: 22px;
+  padding: 0 9px;
+  background: var(--well-hover);
+  color: var(--ink-2);
+}
+
+.settings .chip.fill-finish {
+  height: 24px;
+  padding: 0 10px;
+  font-size: var(--text-xs);
+  text-transform: none;
+}
+
+.settings .chip.fill-finish[aria-pressed="true"] {
+  background: color-mix(in srgb, #bf5af2 22%, transparent);
+  color: color-mix(in srgb, #bf5af2 55%, var(--ink-1));
+}
+
+/* ── Test and repair ─────────────────────────────────────────────────── */
+
+.repair-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.repair-head .crumb {
+  align-self: flex-start;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.repair-mark {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  box-sizing: border-box;
+  border-radius: 9px;
+  font-size: 12px;
+  font-weight: 800;
+  color: #000;
+}
+
+.repair-mark[data-tone="fine"] {
+  background: var(--state-success);
+}
+
+.repair-mark[data-tone="needs"] {
+  background: var(--state-waiting);
+}
+
+.repair-mark[data-tone="wait"] {
+  border: 1.5px solid var(--hairline);
+}
+
+.repair-mark[data-tone="busy"] {
+  border: 2px solid var(--state-listening);
+  border-left-color: transparent;
+  animation: mark-spin 1s linear infinite;
+}
+
+.settings-body .stack > .repair-row {
+  gap: 10px;
+  min-height: 44px;
+}
+
+.settings-body .stack > .repair-row + .repair-row,
+.settings-body .stack > .setting + .repair-link {
+  border-top: 1px solid var(--hairline);
+}
+
+.repair-row[data-state="waiting"],
+.repair-row[data-state="stopped"] {
+  opacity: 0.5;
+}
+
+.repair-name {
+  flex: none;
+  width: 136px;
+}
+
+.repair-row[data-state="needs"] .repair-line {
+  color: var(--tint-amber);
+}
+
+.repair-row[data-state="fixed"] .repair-line {
+  color: var(--tint-green);
+}
+
+.settings-body .stack > .repair-row:has(.repair-help) {
+  align-items: flex-start;
+  padding: 12px 0;
+}
+
+.repair-help {
+  gap: 8px;
+  font-size: var(--text-sm);
+}
+
+.repair-help ol {
+  margin: 0;
+  padding-left: 18px;
+  line-height: 1.5;
+  color: var(--ink-1);
+}
+
+.repair-copied {
+  align-self: flex-start;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 14px 7px 9px;
+  border-radius: 17px;
+  background: var(--well-hover);
+  font-size: var(--text-sm);
+  color: var(--ink-1);
+}
+
+.repair-link {
+  gap: 8px;
+}

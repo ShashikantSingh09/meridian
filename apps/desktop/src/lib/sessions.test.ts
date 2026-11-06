@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { actionOf, ago, blocksOf, changedFiles, clock, doing, endFacts, groupSessions, kindOf, lastMessage, limitName, limitStop, memoryUsed, mergeTodo, modelName, needsFirst, planSteps, recentLines, resetLabel, spent, stageLine, stagesOf, stepsOf, testsResult, thisTurn, tileState, todoStep, todoWindow, turnStart } from "./sessions";
+import { actionOf, ago, blocksOf, changedFiles, clock, doing, endFacts, groupSessions, kindOf, lastMessage, limitName, limitStop, memoryUsed, mergeTodo, modelName, needsFirst, planSteps, recentLines, resetLabel, spent, stageLine, stepLog, stepsOf, testsResult, thisTurn, tileState, todoStep, todoWindow, turnStart, worked } from "./sessions";
 import type { LogEntry, SessionDetail } from "./store";
 
 const NOW = new Date(2026, 9, 31, 17, 0).getTime();
@@ -160,37 +160,6 @@ describe("the steps of a session", () => {
   });
 });
 
-describe("the stages", () => {
-  const stages = (log: LogEntry[], over: Partial<SessionDetail> = {}) => stagesOf(session({ status: "running", log, ...over }));
-
-  it("shows nothing as under way before anything has happened", () => {
-    expect(stages([]).map((s) => [s.name, s.state, s.note])).toEqual([["Read", "next", ""], ["Edit", "next", ""], ["Run", "next", ""], ["Done", "next", ""]]);
-  });
-
-  it("says what happened in each, counting each file once", () => {
-    const result = stages([did("Reading a.ts"), did("Reading a.ts"), did("Reading b.ts"), did("Editing a.ts")]);
-    expect(result[0]).toEqual({ name: "Read", state: "done", note: "2 files" });
-    expect(result[1]).toEqual({ name: "Edit", state: "now", note: "1 file" });
-    expect(result[2]).toEqual({ name: "Run", state: "next", note: "" });
-  });
-
-  it("calls a search a search until something has been opened", () => {
-    expect(stages([did("Searching foo"), did("Searching bar")])[0]!.note).toBe("2 searches");
-    expect(stages([did("Searching foo"), did("Reading a.ts")])[0]!.note).toBe("1 file");
-  });
-
-  it("follows the agent back when it goes back to reading", () => {
-    const result = stages([did("Editing a.ts"), did("$ npm test"), did("Reading a.ts")]);
-    expect(result.map((s) => s.state)).toEqual(["now", "done", "done", "next"]);
-    expect(result[2]!.note).toBe("1 command");
-  });
-
-  it("is done only when the session says so", () => {
-    expect(stages([did("Editing a.ts")], { status: "completed" }).map((s) => s.state)).toEqual(["next", "done", "next", "done"]);
-    expect(stages([did("Editing a.ts")], { status: "failed" }).map((s) => s.state)).toEqual(["next", "done", "next", "next"]);
-  });
-});
-
 describe("the agent's own list", () => {
   const list = (...statuses: string[]) => statuses.map((status, i) => ({ id: String(i), text: `t${i}`, status }));
 
@@ -280,9 +249,9 @@ describe("how a session ended", () => {
     expect(clock(42_900)).toBe("0:42");
     expect(clock(252_000)).toBe("4:12");
     expect(clock(-5)).toBe("0:00");
-    expect(spent(52_000)).toBe("52s");
-    expect(spent(252_000)).toBe("4m 12s");
-    expect(spent(3_780_000)).toBe("1h 3m");
+    expect(spent(52_000)).toBe("52 s");
+    expect(spent(252_000)).toBe("4 min 12 s");
+    expect(spent(3_780_000)).toBe("1 h 3 min");
   });
 });
 
@@ -316,5 +285,64 @@ describe("many at once", () => {
   it("counts the steps of a plan from its list", () => {
     expect(planSteps("## Plan\n\n1. One\n2. Two\n- Three\n\nThis is prose.")).toBe(3);
     expect(planSteps("Just words.")).toBe(0);
+  });
+});
+
+describe("how long it worked", () => {
+  const S = 1000;
+  const start = NOW - 200 * S;
+  const at = (seconds: number) => start + seconds * S;
+  const said = (text: string, seconds: number): LogEntry => ({ kind: "text", text, at: at(seconds) });
+  const out = (text: string, lines: string[], seconds: number, failed = false): LogEntry => ({ kind: "output", text, lines, failed, at: at(seconds) });
+  const board = [
+    did("Reading cart.ts", at(3)), did("Reading total.ts", at(9)), did("Reading cart.ts", at(12)), did("Reading tax.ts", at(15)), did("Reading money.ts", at(16)),
+    did("Editing cart.ts", at(18)), edit("cart.ts", 2, 1, at(18)),
+    did("$ npm test", at(59)), out("npm test", ["Tests  2 failed | 46 passed (48)"], 120, true),
+    did("Editing total.ts", at(124)), edit("total.ts", 1, 1, at(124)),
+    did("$ npm test", at(146)), out("npm test", ["Tests  48 passed (48)"], 180),
+    said("The cart total is fixed.", 185),
+  ];
+  const ended = session({ startedAt: start, endedAt: at(192), log: board });
+
+  it("puts each step in plain words, with how long it took, adding up to the whole", () => {
+    const log = stepLog(ended, NOW);
+    expect(log.map((s) => s.text)).toEqual([
+      "Read cart.ts and 3 other files",
+      "Changed cart.ts, 2 lines",
+      "Ran npm test: 2 failed",
+      "Changed total.ts, 1 line",
+      "Ran npm test: all 48 passed",
+      "Wrote a summary",
+    ]);
+    expect(log.map((s) => clock(s.ms!))).toEqual(["0:18", "0:41", "1:05", "0:22", "0:39", "0:07"]);
+    expect(log.reduce((n, s) => n + s.ms!, 0)).toBe(worked(ended, NOW));
+    expect(spent(worked(ended, NOW))).toBe("3 min 12 s");
+    expect(log.some((s) => s.now)).toBe(false);
+  });
+
+  it("says what the step under way is doing, and counts its time live", () => {
+    const running = session({ status: "running", startedAt: start, endedAt: null, log: board.slice(0, 8) });
+    const log = stepLog(running, at(100));
+    expect(log.map((s) => s.text)).toEqual(["Read cart.ts and 3 other files", "Changed cart.ts, 2 lines", "Running npm test"]);
+    expect(log.map((s) => s.now)).toEqual([false, false, true]);
+    expect(log[2]!.ms).toBe(41 * S);
+    expect(stepLog(running, at(110))[2]!.ms).toBe(51 * S);
+    expect(worked(running, at(100))).toBe(100 * S);
+  });
+
+  it("keeps edits to different files apart, and words that were not steps out", () => {
+    const log = [did("Editing a.ts", at(1)), did("Editing a.ts", at(2)), did("Retrying the API, attempt 2", at(3)), did("Editing b.ts", at(4)), did("Searching todo", at(5)), did("Tool: Open app", at(6)), did("AskUserQuestion", at(7))];
+    expect(stepLog(session({ startedAt: start, endedAt: at(8), log }), NOW).map((s) => s.text)).toEqual(["Changed a.ts", "Changed b.ts", "Searched for todo", "Used Open app", "Asked you a question"]);
+  });
+
+  it("leaves a terminal's last words in the step before, since they took no time it can see", () => {
+    const log = [did("$ npm test", at(1)), said("Done.", 10)];
+    expect(stepLog(session({ startedAt: start, endedAt: at(10), log }), NOW).map((s) => [s.text, s.ms])).toEqual([["Ran npm test", 10 * S]]);
+  });
+
+  it("has nothing to list for a turn with no steps, and no times for history kept without them", () => {
+    expect(stepLog(session({ log: [said("Hello.", 1)] }), NOW)).toEqual([]);
+    const old = stepLog(session({ log: [did("Reading a.ts"), did("Editing a.ts")] }), NOW);
+    expect(old.map((s) => s.ms)).toEqual([null, null]);
   });
 });

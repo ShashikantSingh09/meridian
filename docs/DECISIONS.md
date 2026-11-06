@@ -490,6 +490,59 @@ side by side in the real window before it counts as done.
 Apple-style glass, themes, limits and models, the assistant's name and personality, and wake words are on the canvas and held for review.
 Wake words would reverse the part of D51 that left them out, and only because the owner asked for them.
 
+## D73. Fill in the page, Your details, Knowledge and the Sentient upgrades: phase 1
+
+The owner approved the Fill in the page and Sentient OS boards on 2026-11-06, with every proposed answer, and asked for all the phases to
+be built and tested. Phase 1 lays the parts that later phases wire together.
+
+**The fill engine** is its own crate, `crates/fill`: a box model, the rules for what is never filled, checks on the AI's mapping, the writer
+ladder and Undo, behind a reader and writer that a Mac version can replace. Rust decides, whatever the AI says, that password, card, CVV,
+expiry, one-time code, CAPTCHA, "I agree", upload and button boxes are the user's, and that Meridian never works in itself, terminals,
+Windows Settings, Windows Security, password managers, private windows or a browser's own pages. Banks, tax and government sites ask every
+time. A value is written by setting it through UI Automation, then by pasting, then by typing, reading the box back after each, and
+stopping rather than writing twice when it cannot tell. Pasting keeps the user's clipboard and puts it back, and marks the text so Win+V
+and cloud clipboard skip it. The only keys it ever sends are Ctrl+A, Ctrl+V, Ctrl+Z and plain characters, never Enter or Tab, and it
+waits for held keys to be let go by polling, with no hook. Undo puts a box back only if it still holds what Meridian wrote. Nothing calls
+the engine yet; phase 2 wires it to Ctrl Alt F.
+
+**Your details** are a file in the app's local folder. PAN, Aadhaar and passport numbers are off until turned on, live in Windows
+Credential Manager, go when the switch goes off, and come back from Rust only as "ask first", so no fill can use one without the user's
+yes. The AI is given key names such as `phone`, never the values.
+
+**On the island**, a question from Claude Code can be answered by typing, as the terminal's Other allows: not empty, at most 2000
+characters, and only when the user presses Enter. The island takes the keyboard only while its box is in use. Closing pulls the island
+up into its pill, and a working session shows its steps in plain words and how long it has worked.
+
+**Starters** on Home are picked on this PC from what is going on, with no AI call, and picking one only fills the box. **Test and repair**
+under About runs when it is opened. It opens the microphone for under a second to hear it, never plays a sound, asks GitHub only if update
+checks were agreed and Claude Code only for the Gmail check. Its Fix for missing hooks shows the same lines the Follow switch shows before
+anything is written.
+
+**Sounds like you** learns from the user's sent mail through their Claude account, in a reading-only run, and keeps only short lines about
+how they write. Lines the user changes are never overwritten. **Knowledge** keeps plain Markdown pages in Documents, each fact ending in
+where it came from. Every source is off until turned on. An update only adds lines, never brings back a line the user removed, never
+changes one they wrote, and never recreates a deleted page. The assistant reads the pages through `my_knowledge`, which counts as reading
+other people's words, so outbound actions ask first afterwards.
+
+**Gave up.** Phase 1 builds nothing a user can fill with yet. A radio button cannot be put back by Undo. Starters are rules, not an AI, so
+they say less than an AI would.
+
+## D72. The assistant uses Meridian's own features, and can start note taking when asked
+
+The owner asked to be able to tell Meridian to start taking notes, and to have it use its own features when asked. Until now a recording
+started only from a click, never by voice or by the assistant, so that a video, another voice in the room, or words in an email could
+not start recording the people on a call. Offered the choice, the owner picked starting straight away when they ask in their own words.
+
+So the assistant has `start_notes` and `stop_notes`. It may start a recording only when the user asks, and is told never to because of
+anything in mail, the calendar, notes, the screen or a web page. Once it has read any of those in the last half hour, a request to record
+waits for a click on the island, as opening a link does. Everything that stops a click from recording stops this too: local only,
+paused monitoring, a hearing service that cannot do calls, and a call already recording. The page opens the microphone as it does for a
+click, and the island shows the recording the same way.
+
+It can also open the Notes tab, look for an update (only the user installs one), and change a short list of settings: the face, sounds,
+the clock and battery on the island, wake words, keeping listening after its name, the island's side, and pausing all monitoring.
+Anything that sends data out, signs in, or turns off a protection, such as local only, is not on the list.
+
 ## D71. A wake word needs a second opinion unless one detector is clearly sure
 
 The owner reported the app starting to listen when they had not said the wake word. Two detectors listen: the user's own recordings

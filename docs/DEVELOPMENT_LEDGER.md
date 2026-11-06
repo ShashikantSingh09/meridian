@@ -1,5 +1,43 @@
 # Development ledger
 
+## 2026-11-06: Fill in the page and Sentient upgrades, phase 1
+
+Built from the approved boards by six builds in parallel, then merged and tested together. See D73. The fill engine crate, Your details
+and Settings › Fill in the page, the island's typed answers, step log and pull-back close, starters on Home, Test and repair, Sounds like
+you, and the Knowledge tab with `my_knowledge`.
+
+### Proved
+
+Rust: every crate's tests pass, including 52 for the fill engine (refusals, access, mapping checks, the ladder on a fake writer, Undo),
+15 for Your details, 12 for Sounds like you, 16 for Knowledge and the typed-answer checks in the watcher. Vitest 224 and Playwright 219
+pass on the merged tree. In the real app (a test copy, its own identifier and an empty Claude settings folder), the island's question,
+working and finished cards, Home, Knowledge, Settings › Fill in the page, Your details, Privacy, Assistant and About drew as the boards
+show, with no console errors.
+
+### Not proved
+
+- The fill engine against real windows: 6 tests in `crates/fill/tests/live_forms.rs` are run by hand on `tests/fill/forms.html`.
+- Typing into the island's answer box in the real app, with a real Claude Code question.
+- Sounds like you and Knowledge against real Gmail, Calendar and AI; their time and cost per run.
+- Test and repair's microphone, speech and hooks checks in the real app. It was not opened there, because it opens the microphone.
+- Knowledge's idle update on a real charger.
+
+## 2026-11-06: Asking Meridian to take notes, and its own settings
+
+The owner chose option A: a recording starts when they ask the assistant, by voice or in chat. See D72. The core checks everything
+that would stop a recording before it says yes, then asks the page to start, so the microphone opens the way a click opens it.
+
+### Proved
+
+Unit tests: only the listed settings change, with readable answers, and nothing outside the list; the assistant is offered note taking
+and the Notes tab, and told not to record because of what it read. In the browser build, a request from the assistant records the same
+way a click does, and the island shows it.
+
+### Not proved
+
+- A spoken "take notes" in the real app, and the click it waits for after reading mail.
+
+
 ## 2026-11-05: The eyes as they were in 0.5
 
 The owner said the eye animation looked odd, and that it was right up to 0.5. See D70, last paragraph. The 0.5.1 styles and timers

@@ -13,6 +13,82 @@ pub struct WakeWord {
     pub on: bool,
 }
 
+/// An app or site, as the user answered the first time Meridian filled in it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Place {
+    /// The app's process name or the site's address, like slack.exe or mail.google.com.
+    pub id: String,
+    pub name: String,
+    /// "allowed", "ask" for every time, or "never".
+    pub fill: String,
+    /// Finish this for me may work here too. It needs its own yes, per app.
+    #[serde(default)]
+    pub finish: bool,
+    /// A bank, tax or government site. It asks every time, whatever else is set.
+    #[serde(default)]
+    pub always_ask: bool,
+}
+
+/// What a fill may take values from. The page itself and what the user just said are always used.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Sources {
+    /// Put in by Meridian from Your details, never sent to the AI.
+    pub details: bool,
+    pub knowledge: bool,
+    /// Gmail and Calendar, only when the user asks.
+    pub mail: bool,
+    pub notes: bool,
+    /// Files the user names, read on this PC.
+    pub files: bool,
+    /// Only when the user says "from my clipboard".
+    pub clipboard: bool,
+    /// A picture of the window. Off: Write here reads the window's text only.
+    pub picture: bool,
+}
+
+impl Default for Sources {
+    fn default() -> Self {
+        Self { details: true, knowledge: true, mail: true, notes: true, files: true, clipboard: true, picture: false }
+    }
+}
+
+/// Write here, Fill this form and Finish this for me. Only kept here so far: the fill engine reads them.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Fill {
+    /// Write here and Fill this form. Off until turned on.
+    pub on: bool,
+    /// "ctrl-alt-f", or "off" to start them only by voice or from the island.
+    pub key: String,
+    /// Write here and Fill this form on the island, when the pointer is on it.
+    pub buttons: bool,
+    /// The engine that decides what goes where. It never sees Your details.
+    pub ai: String,
+    /// Finish this for me. Experimental, and off until turned on with its own switch.
+    pub finish: bool,
+    /// Finish this for me runs on the user's Claude plan through Claude Code, and nothing else.
+    pub finish_ai: String,
+    pub places: Vec<Place>,
+    pub sources: Sources,
+}
+
+impl Default for Fill {
+    fn default() -> Self {
+        Self {
+            on: false,
+            key: "ctrl-alt-f".into(),
+            buttons: true,
+            ai: "claude-code".into(),
+            finish: false,
+            finish_ai: "claude-code".into(),
+            places: Vec::new(),
+            sources: Sources::default(),
+        }
+    }
+}
+
 /// Where the island was dragged to on one display, as shares of the display's work area.
 #[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
 pub struct Spot {
@@ -103,6 +179,8 @@ pub struct Settings {
     pub assistant_calls_you: String,
     /// "calm", "cheerful", "direct", "playful" or "own".
     pub assistant_style: String,
+    /// A few things to ask, under Home's ask box.
+    pub home_suggestions: bool,
     /// Keeps the microphone open for wake words, heard only on this PC. Off until turned on.
     pub wake_enabled: bool,
     pub wake_words: Vec<WakeWord>,
@@ -114,6 +192,9 @@ pub struct Settings {
     pub wake_listen: String,
     pub wake_pause_calls: bool,
     pub wake_pause_locked: bool,
+    pub fill: Fill,
+    /// What Knowledge learns from, and when it updates. Every source is off until turned on.
+    pub knowledge: ::knowledge::Preferences,
 }
 
 impl Default for Settings {
@@ -170,6 +251,7 @@ impl Default for Settings {
             custom_themes: Vec::new(),
             assistant_calls_you: String::new(),
             assistant_style: "calm".into(),
+            home_suggestions: true,
             wake_enabled: false,
             wake_words: vec![WakeWord { text: "Hey Meridian".into(), on: true }, WakeWord { text: "Okay Meridian".into(), on: false }],
             wake_sensitivity: "balanced".into(),
@@ -177,6 +259,8 @@ impl Default for Settings {
             wake_listen: "always".into(),
             wake_pause_calls: true,
             wake_pause_locked: true,
+            fill: Fill::default(),
+            knowledge: ::knowledge::Preferences::default(),
         }
     }
 }
@@ -193,8 +277,8 @@ pub fn load(path: &Path) -> Settings {
     })
 }
 
-/// Writes through a temporary file so a crash cannot leave half a settings file.
-pub fn save(path: &Path, settings: &Settings) -> std::io::Result<()> {
+/// Writes through a temporary file so a crash cannot leave half a file. Your details are saved this way too.
+pub fn save(path: &Path, settings: &impl Serialize) -> std::io::Result<()> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
@@ -241,5 +325,26 @@ mod tests {
         let settings = load(&path);
         assert_eq!(settings.motion, "full");
         assert!(settings.ambient);
+    }
+
+    #[test]
+    fn filling_starts_off_with_ctrl_alt_f_and_no_picture_of_the_window() {
+        let fill = Settings::default().fill;
+        assert!(!fill.on && !fill.finish);
+        assert_eq!(fill.key, "ctrl-alt-f");
+        assert_eq!(fill.finish_ai, "claude-code");
+        assert!(fill.places.is_empty());
+        assert!(fill.sources.details && fill.sources.knowledge && !fill.sources.picture);
+    }
+
+    #[test]
+    fn a_settings_file_from_before_filling_gets_the_fill_defaults() {
+        let path = scratch("before-fill");
+        std::fs::write(&path, r#"{"motion":"full","fill":{"on":true,"places":[{"id":"slack.exe","name":"Slack","fill":"allowed"}]}}"#).unwrap();
+        let fill = load(&path).fill;
+        assert!(fill.on && fill.buttons);
+        assert_eq!(fill.places[0].name, "Slack");
+        assert!(!fill.places[0].finish && !fill.places[0].always_ask);
+        assert!(!fill.sources.picture);
     }
 }

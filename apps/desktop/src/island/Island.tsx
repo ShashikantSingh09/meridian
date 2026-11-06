@@ -3,11 +3,11 @@
 // interrupted transition keeps its velocity instead of restarting, and nothing
 // inside re-renders per frame.
 
-import { contentEnter, contentEnterReduced, instant, scaled, spring, type SpringName } from "@meridian/design-system/motion";
+import { CLOSE_REST, closing, contentEnter, contentEnterReduced, instant, scaled, spring, type SpringName } from "@meridian/design-system/motion";
 import { AnimatePresence, animate, motion, useMotionValue, useTransform } from "motion/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { bridge } from "../lib/bridge";
-import { lastMessage } from "../lib/sessions";
+import { lastMessage, stepLog } from "../lib/sessions";
 import { feel, openPanel, planUse, reportView, togglePanel, useApp } from "../lib/store";
 import { Panel } from "../panel/Panel";
 import { useReduced } from "./faces";
@@ -132,6 +132,12 @@ export function Island() {
     const session = notice?.finished ? s.sessions.find((x) => x.id === notice.sessionId) : undefined;
     return session ? (lastMessage(session) ? "message" : "brief") : undefined;
   });
+  // The steps of the session on show, finished or at work, for the room its step log needs.
+  const steps = useApp((s) => {
+    const notice = s.notices[0];
+    const session = notice?.finished ? s.sessions.find((x) => x.id === notice.sessionId) : waitingApproval(s.sessions) ?? activeSessions(s.sessions)[0];
+    return session ? stepLog(session, Date.now()).length : 0;
+  });
   const view = deriveView(snapshot);
   const waiting = waitingApproval(snapshot.sessions);
   const active = activeSessions(snapshot.sessions);
@@ -153,6 +159,7 @@ export function Island() {
     rows: active.length,
     todos: active[0]?.todos?.length,
     finished,
+    steps,
     stopped: snapshot.sessions.some((s) => s.id === snapshot.errors[0]?.sessionId),
     approval: waiting !== null,
     asking: waiting?.approval,
@@ -207,8 +214,16 @@ export function Island() {
 
   // Which spring moves the shape, so the content can wait for it.
   const shapeSpring: SpringName = target.w * target.h > width.get() * height.get() ? "grow" : hovered ? "snap" : "shrink";
+  // A card or the panel closing goes back up into the resting pill, floating or not, instead of fading where it is.
+  const resting = view === "idle" && !opened;
+  const pullsBack = resting && target.w * target.h < width.get() * height.get();
   useEffect(() => {
     const grows = target.w * target.h > width.get() * height.get();
+    if (!reduced && !grows && resting) {
+      const pull = closing(speed);
+      const controls = [animate(width, target.w, pull.width), animate(height, target.h, pull.height), animate(radius, target.r, pull.height)];
+      return () => controls.forEach((c) => c.stop());
+    }
     const transition = reduced ? instant : scaled(grows ? spring.grow : hovered ? spring.snap : spring.shrink, speed);
     const controls = [
       animate(width, target.w, transition),
@@ -216,9 +231,9 @@ export function Island() {
       animate(radius, target.r, transition),
     ];
     return () => controls.forEach((c) => c.stop());
-  }, [target.w, target.h, target.r, reduced, hovered, speed, width, height, radius]);
+  }, [target.w, target.h, target.r, reduced, hovered, resting, speed, width, height, radius]);
 
-  const enter = reduced ? contentEnterReduced : contentEnter(shapeSpring, speed, place === "up");
+  const enter = reduced ? contentEnterReduced : contentEnter(shapeSpring, speed, place === "up", pullsBack ? CLOSE_REST : undefined);
   const expanded = view === "expanded";
 
   // Press and move to drag it anywhere. Less than a few pixels is still a click.

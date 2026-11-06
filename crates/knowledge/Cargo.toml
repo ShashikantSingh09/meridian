@@ -1,0 +1,11 @@
+[package]
+name = "knowledge"
+description = "Pages about the people, projects, promises and places in the user's life, kept as plain Markdown files."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+sha2 = "0.10"

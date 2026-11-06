@@ -64,11 +64,12 @@ test.describe("the column", () => {
     expect(groups).toEqual([
       ["General", "Themes", "Island"],
       ["Assistant", "Voice", "Wake words"],
+      ["Fill in the page", "Your details"],
       ["Screen", "Privacy"],
       ["AI models", "Providers", "Coding agents"],
       ["Updates", "About"],
     ]);
-    await expect(page.locator(".settings-icon")).toHaveCount(13);
+    await expect(page.locator(".settings-icon")).toHaveCount(15);
   });
 
   test("searching narrows it by what each page holds, and Enter goes to the first match", async ({ page }) => {
@@ -85,7 +86,7 @@ test.describe("the column", () => {
     // Escape clears the box first, and only then closes the panel.
     await search.press("Escape");
     await expect(search).toHaveValue("");
-    await expect(page.locator(".settings-tab")).toHaveCount(13);
+    await expect(page.locator(".settings-tab")).toHaveCount(15);
     await expect(page.locator(".island")).toHaveAttribute("data-view", "expanded");
   });
 });

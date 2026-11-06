@@ -102,6 +102,7 @@ const LABELS: [prefix: string, kind: StepKind, word: string][] = [
   ["Editing ", "edit", "Editing"],
   ["Writing ", "edit", "Writing"],
   ["Subagent: ", "other", "Subagent"],
+  ["Checking what I know about ", "read", "Checking what I know about"],
   ["Tool: ", "other", "Using"],
 ];
 const VERBS: Record<StepKind, string> = { read: "Read", edit: "Edit", run: "Run", other: "Step" };
@@ -180,37 +181,7 @@ export const stepsOf = (log: LogEntry[]) => blocksOf(log).flatMap((block) => ("s
 export const turnStart = (s: SessionDetail) => s.turnAt ?? s.startedAt;
 export const thisTurn = (s: SessionDetail) => (s.turnAt ? s.log.filter((entry) => (entry.at ?? 0) >= s.turnAt!) : s.log);
 
-export interface Stage {
-  name: string;
-  state: "done" | "now" | "next";
-  note: string;
-}
-
 const count = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
-
-/** Read, Edit, Run and Done, as far as the log shows. Work is not a straight line, so the stage
- *  now is whichever the latest step belongs to, and going back to read makes Edit done again. */
-export function stagesOf(s: SessionDetail): Stage[] {
-  const steps = stepsOf(thisTurn(s));
-  const live = LIVE.includes(s.status);
-  const latest = steps.filter((step) => step.kind !== "other").pop()?.kind;
-  const stage = (kind: StepKind, name: string, note: (mine: Step[]) => string): Stage => {
-    const mine = steps.filter((step) => step.kind === kind);
-    return { name, state: live && latest === kind ? "now" : mine.length > 0 ? "done" : "next", note: mine.length > 0 ? note(mine) : "" };
-  };
-  const files = (mine: Step[]) => count(new Set(mine.map((step) => step.what)).size, "file");
-  // A search is not a file, so one only says so when nothing has been opened yet.
-  const opened = (mine: Step[]) => {
-    const read = mine.filter((step) => step.word === "Reading");
-    return read.length > 0 ? files(read) : count(mine.length, "search", "searches");
-  };
-  return [
-    stage("read", "Read", opened),
-    stage("edit", "Edit", files),
-    stage("run", "Run", (mine) => count(mine.length, "command")),
-    { name: "Done", state: s.status === "completed" ? "done" : "next", note: "" },
-  ];
-}
 
 /** Which line of the agent's own list it is on. */
 export function todoStep(todos: Todo[]): string {
@@ -290,13 +261,108 @@ export function clock(ms: number): string {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 }
 
-/** How long something took, the way it is said. */
+/** How long something took, the way it is said: 3 min 12 s. */
 export function spent(ms: number): string {
-  const seconds = Math.max(0, Math.round(ms / 1000));
-  if (seconds < 60) return `${seconds}s`;
+  const seconds = Math.max(0, Math.floor(ms / 1000));
+  if (seconds < 60) return `${seconds} s`;
   const minutes = Math.floor(seconds / 60);
-  return minutes < 60 ? `${minutes}m ${seconds % 60}s` : `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+  return minutes < 60 ? `${minutes} min ${seconds % 60} s` : `${Math.floor(minutes / 60)} h ${minutes % 60} min`;
 }
+
+// ── How long it worked ──────────────────────────────────────────────────────
+
+export interface LoggedStep {
+  text: string;
+  /** How long it took, or has taken so far for the one under way. Null for history kept before times were. */
+  ms: number | null;
+  /** Under way now. */
+  now: boolean;
+}
+
+/** The end of a command's output that says how its tests went. */
+const FAILED_COUNT = /\b(\d+) (?:tests? )?(?:failed|failing)\b/i;
+const PASSED_COUNT = /\b(\d+) (?:tests? )?(?:passed|passing)\b/i;
+
+function ranWords(step: Step): string {
+  const printed = step.output?.join("\n") ?? "";
+  const failed = Number(printed.match(FAILED_COUNT)?.[1] ?? 0);
+  const passed = Number(printed.match(PASSED_COUNT)?.[1] ?? 0);
+  if (TEST_COMMAND.test(step.what) && failed > 0) return `: ${failed} failed`;
+  if (TEST_COMMAND.test(step.what) && passed > 0 && !step.failed) return `: all ${passed} passed`;
+  return step.failed ? ": it failed" : "";
+}
+
+const lineCount = (lines?: number) => (lines ? `, ${count(lines, "line")}` : "");
+const TOOL_WORDS: Record<string, [now: string, done: string]> = {
+  AskUserQuestion: ["Asking you a question", "Asked you a question"],
+  ExitPlanMode: ["Showing you a plan", "Showed you a plan"],
+};
+
+/** One step in plain words: what it is doing while it runs, and what it did once done. */
+function stepWords(steps: Step[], now: boolean): string {
+  const step = steps[0]!;
+  const what = step.what;
+  switch (step.word) {
+    case "Reading": {
+      const files = [...new Set(steps.map((s) => s.what))];
+      const rest = files.length > 1 ? ` and ${count(files.length - 1, "other file")}` : "";
+      return `${now ? "Reading" : "Read"} ${files[0]}${rest}`;
+    }
+    case "Editing":
+      return `${now ? "Editing" : "Changed"} ${what}${lineCount(steps.reduce((n, s) => n + (s.lines ?? 0), 0))}`;
+    case "Writing":
+      return `${now ? "Writing" : "Wrote"} ${what}${lineCount(step.lines)}`;
+    case "Running":
+      return now ? `Running ${what}` : `Ran ${what}${ranWords(step)}`;
+    case "Searching":
+      return `${now ? "Searching for" : "Searched for"} ${what}`;
+    case "Searching the web":
+      return `${now ? "Searching the web" : "Searched the web"}${what ? ` for ${what}` : ""}`;
+    case "Fetching":
+      return `${now ? "Fetching" : "Fetched"} ${what}`;
+    case "Subagent":
+      return `${now ? "Working with a helper" : "Worked with a helper"}: ${what}`;
+    default: {
+      const own = TOOL_WORDS[what];
+      return own ? own[now ? 0 : 1] : `${now ? "Using" : "Used"} ${what}`;
+    }
+  }
+}
+
+/** Reads in a row are one step, and so are edits in a row to the same file. */
+const runOf = (step: Step) => (step.word === "Reading" ? "read" : step.word === "Editing" ? `edit:${step.what}` : null);
+
+/** What the latest turn did, step by step in plain words, with how long each took. A step lasts until the
+ *  next one starts, and the first counts from the turn's start, so the times add up to the whole. Once it
+ *  has ended, its last words are a step of their own. */
+export function stepLog(s: SessionDetail, now: number): LoggedStep[] {
+  const turn = thisTurn(s);
+  const groups: Step[][] = [];
+  for (const step of stepsOf(turn)) {
+    const last = groups[groups.length - 1];
+    if (last && runOf(step) !== null && runOf(step) === runOf(last[0]!)) last.push(step);
+    else groups.push([step]);
+  }
+  if (groups.length === 0) return [];
+  const live = LIVE.includes(s.status);
+  const end = live ? now : s.endedAt ?? now;
+  const lastAt = groups[groups.length - 1]![0]!.at;
+  const said = live ? undefined : turn.find((e) => e.kind === "text" && e.text.trim() && e.at !== undefined && lastAt !== undefined && e.at >= lastAt)?.at;
+  // ponytail: a terminal's last words come with its Stop, so they took no time we can see. They stay in the step before.
+  const summary = said !== undefined && end - said >= 1000 ? said : undefined;
+  const starts = groups.map((g, i) => (i === 0 ? turnStart(s) : g[0]!.at));
+  const log = groups.map((group, i): LoggedStep => {
+    const start = starts[i];
+    const until = i + 1 < groups.length ? starts[i + 1] : summary ?? end;
+    const under = live && i === groups.length - 1;
+    const ms = start === undefined || until === undefined ? null : Math.max(0, until - start);
+    return { text: stepWords(group, under), ms, now: under };
+  });
+  return summary === undefined ? log : [...log, { text: "Wrote a summary", ms: end - summary, now: false }];
+}
+
+/** The time a turn has taken, so far or in all. */
+export const worked = (s: SessionDetail, now: number) => (LIVE.includes(s.status) ? now : s.endedAt ?? now) - turnStart(s);
 
 const needsYou = (s: SessionDetail) => s.approval !== null || s.status === "waiting";
 

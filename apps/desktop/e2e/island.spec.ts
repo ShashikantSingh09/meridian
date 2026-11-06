@@ -42,7 +42,7 @@ test("every compact state renders its own content and stays on screen", async ({
     ["to-do list", "working", "Step 3 of 5"],
     ["approval", "working", "Allow"],
     ["notification", "notification", "Claude Code finished"],
-    ["finished", "notification", "dock-agent is done"],
+    ["finished", "notification", "Worked for"],
     ["stopped", "error", "dock-agent stopped"],
     ["contextual", "contextual", "Suggest fix"],
     ["multitask", "multitask", "billing-api"],
@@ -546,12 +546,11 @@ test.describe("what an agent is doing", () => {
   test("the stage card opens on the pointer, says what happened, and closes behind it", async ({ page }) => {
     await preview(page, "working");
     await hover(page, true);
-    await expect(page.locator(".stage-bar")).toHaveCount(4);
-    await expect(page.locator('.stage-bar[data-state="done"]')).toContainText("4 files");
-    await expect(page.locator('.stage-bar[data-state="now"]')).toContainText("2 files");
-    await expect(page.locator(".stage-card")).toContainText("Fix the island flicker");
-    await expect(page.locator(".stage-steps .step-row").last()).toContainText("views.tsx, 2 lines");
-    await fits(page, ".stage-steps .step-row");
+    await expect(page.locator(".stage-card")).toContainText("Claude Code · dock-agent");
+    await expect(page.locator(".step-log-row")).toHaveCount(3);
+    await expect(page.locator(".step-log-row").first()).toContainText("Read src/island/machine.ts and 3 other files");
+    await expect(page.locator(".step-log-row").last()).toContainText("Editing src/island/views.tsx, 2 lines");
+    await fits(page, ".stage-actions");
     await hover(page, false);
     await expect(page.locator(".stage-card")).toHaveCount(0);
   });
@@ -566,7 +565,7 @@ test.describe("what an agent is doing", () => {
   test("the agent's own list replaces the stages, and only while there is one", async ({ page }) => {
     await watch(page);
     await hover(page, true);
-    await expect(page.locator(".stage-bars")).toBeVisible();
+    await expect(page.locator(".step-log")).toBeVisible();
     await send(page, { type: "todos", items: [
       { id: "0", text: "Fix the resize", status: "completed" },
       { id: "1", text: "Add a test", status: "in_progress" },
@@ -574,13 +573,13 @@ test.describe("what an agent is doing", () => {
     ] });
     await expect(page.locator(".stage-count")).toHaveText("Step 2 of 3");
     await expect(page.locator(".todo-line")).toHaveCount(3);
-    await expect(page.locator(".stage-bars")).toHaveCount(0);
+    await expect(page.locator(".step-log")).toHaveCount(0);
     await fits(page, ".todo-line");
     await hover(page, false);
     await expect(island(page)).toContainText("Step 2 of 3");
     await send(page, { type: "todos", items: [] });
     await hover(page, true);
-    await expect(page.locator(".stage-bars")).toBeVisible();
+    await expect(page.locator(".step-log")).toBeVisible();
   });
 
   test("a long list stays on the island", async ({ page }) => {
@@ -594,17 +593,18 @@ test.describe("what an agent is doing", () => {
     await fits(page, ".todo-line");
   });
 
-  test("a finished session shows its real last words and what came of it", async ({ page }) => {
+  test("a finished session shows each step it took and what came of it", async ({ page }) => {
     await watch(page);
     await send(page, { type: "activity", label: "Editing src/cart.ts" });
     await send(page, { type: "diff", path: "cart.ts", removed: ["a"], added: ["b"], linesRemoved: 1, linesAdded: 1 });
+    await send(page, { type: "activity", label: "$ npm test" });
     await send(page, { type: "output", command: "npm test", lines: ["Tests  12 passed (12)"], failed: false });
     await send(page, { type: "text", text: "The cart now keeps its total." });
     await send(page, { type: "status", status: "completed" });
     await expect(island(page)).toHaveAttribute("data-view", "notification");
-    await expect(island(page)).toContainText("shop is done");
-    await expect(island(page)).toContainText("The cart now keeps its total.");
-    await expect(island(page)).toContainText("1 file changed, tests passed");
+    await expect(island(page)).toContainText("Claude Code · shop");
+    await expect(island(page)).toContainText("Worked for");
+    await expect(page.locator(".step-log-row")).toContainText(["Changed src/cart.ts, 1 line", "Ran npm test: all 12 passed"]);
     await fits(page, ".stage-actions");
     await island(page).getByRole("button", { name: "See what changed" }).click();
     await expect(island(page)).toHaveAttribute("data-view", "expanded");
@@ -615,16 +615,16 @@ test.describe("what an agent is doing", () => {
   test("a session with nothing to quote or compare still ends cleanly", async ({ page }) => {
     await watch(page);
     await send(page, { type: "status", status: "completed" });
-    await expect(island(page)).toContainText("shop is done");
+    await expect(island(page)).toContainText("Worked for");
     await expect(island(page).getByRole("button", { name: "Open" })).toBeVisible();
     await expect(island(page).getByRole("button", { name: "See what changed" })).toHaveCount(0);
     await fits(page, ".stage-actions");
-    await island(page).getByRole("button", { name: "Dismiss" }).click();
+    await island(page).getByRole("button", { name: "Close" }).click();
     await expect(island(page)).toHaveAttribute("data-view", "idle");
   });
 
-  test("a long last message stops short of the buttons", async ({ page }) => {
-    await watch(page);
+  test("with no steps to show, a long last message stops short of the buttons", async ({ page }) => {
+    await send(page, { type: "watched", agent: "Claude Code", cwd: "C:\\Projects\\shop", title: "Fix the checkout", pid: 4242 });
     await send(page, { type: "text", text: "It went on and on. ".repeat(60) });
     await send(page, { type: "status", status: "completed" });
     await expect(island(page)).toContainText("It went on and on.");

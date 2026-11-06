@@ -1,8 +1,11 @@
 import { AssistantSection } from "./Assistant";
+import { DetailsSection } from "./Details";
 import { showDevices } from "./Devices";
+import { FillSection } from "./Fill";
 import { FollowSwitch } from "./Follow";
 import { Markdown } from "./Markdown";
 import { Menu } from "./Menu";
+import { RepairPage, RepairRow } from "./Repair";
 import { ScreenSection } from "./Screen";
 import { ThemesSection } from "./Themes";
 import { VoiceSection } from "./Voice";
@@ -237,17 +240,30 @@ function AgentsSection() {
 }
 
 function Privacy() {
+  const providers = useApp((s) => s.providers);
+  const localOnline = useApp((s) => s.localOnline);
+  const local = providers.find((p) => p.kind === "local" && localOnline.includes(p.id)) ?? providers.find((p) => p.kind === "local");
+  const onThisPc = `${local?.name ?? "The AI"} on this PC`;
   return (
     <section className="stack-lg">
       <h1>Privacy</h1>
       <div className="stack">
         <Toggle name="monitoringPaused" label="Pause all monitoring" hint="Stops contextual awareness and background fetching at once. Also in the tray menu." />
       </div>
+      <div className="stack">
+        <Toggle name="localOnly" label="Local-only mode" hint="Nothing leaves this PC." />
+        <p className="fill-group">While it is on</p>
+        <div className="setting"><span className="label grow">Write here</span><span className="meta">{onThisPc}</span></div>
+        <div className="setting"><span className="label grow">Fill this form</span><span className="meta">{onThisPc}</span></div>
+        <div className="setting"><span className="label grow">Finish this for me</span><span className="fill-state">Off</span></div>
+        <div className="setting"><span className="label grow">Gmail and Calendar as a source</span><span className="fill-state">Off</span></div>
+        <p className="details-info"><Icon name="bulb" size={14} />Replies from the AI on this PC are plainer. Filling forms works about the same, because Your details are put in by Meridian either way.</p>
+      </div>
       <h2>What stays true</h2>
       <div className="stack">
         <Fact text="Your screen is read only as set under Screen, always on this PC, and shared only from a preview you approve." />
         <Fact text="Keystrokes and the clipboard are never read." />
-        <Fact text="The microphone opens only while the listening view is on screen, for wake words if you turn them on, or while Microphone and headphones is open under Voice. Nothing is recorded." />
+        <Fact text="The microphone opens only while the listening view is on screen, for wake words if you turn them on, or while Microphone and headphones is open under Voice, or for a moment while Test and repair checks it. Nothing is recorded." />
         <Fact text="The island shows a dot for as long as it is listening for wake words." />
         <Fact text="Chat goes only to the engine you pick. Providers are read with read-only tools, and what they return stays on this PC." />
         <Fact text="Gmail and Google Calendar connected through your Claude account are read only when you ask, or when My Day opens, at most every half hour. What is read goes through Claude." />
@@ -454,6 +470,8 @@ function WakeSection() {
 
 function About() {
   const version = useApp((s) => s.version);
+  const [repairing, setRepairing] = useState(false);
+  if (repairing) return <RepairPage onBack={() => setRepairing(false)} />;
   return (
     <section className="stack-lg">
       <h1>About Meridian</h1>
@@ -464,6 +482,7 @@ function About() {
           </span>
           <button className="ghost" onClick={() => void bridge.openLogs()}>Open logs</button>
         </div>
+        <RepairRow onOpen={() => setRepairing(true)} />
       </div>
       <h2>Keyboard shortcuts</h2>
       <div className="stack">
@@ -498,13 +517,17 @@ const SECTIONS: Section[][] = [
     { id: "island", label: "Island", icon: "window", tone: "#ff9f0a", page: IslandSection, terms: "face eyes mood position display monitor animation speed motion clock time music meeting hide idle ambient breathing preview" },
   ],
   [
-    { id: "assistant", label: "Assistant", icon: "chat", tone: "#34b7a7", page: AssistantSection, terms: "name calls you personality calm cheerful direct playful own words manner" },
+    { id: "assistant", label: "Assistant", icon: "chat", tone: "#34b7a7", page: AssistantSection, terms: "name calls you personality calm cheerful direct playful own words manner suggestions home starters sounds like you style writing gmail sent drafts" },
     { id: "voice", label: "Voice", icon: "mic", tone: "#ff375f", page: VoiceSection, terms: "speak hearing interrupt elevenlabs openai cartesia deepgram kokoro piper key microphone headphones speakers output headset device" },
     { id: "wake", label: "Wake words", icon: "bell", tone: "#d6336c", page: WakeSection, terms: "hey name listen sensitivity pause calls locked microphone charger" },
   ],
   [
+    { id: "fill", label: "Fill in the page", icon: "pen", tone: "#32ade6", page: FillSection, terms: "write here fill this form finish this for me experimental ctrl alt f key island buttons apps sites allowed never banks sources knowledge clipboard picture" },
+    { id: "details", label: "Your details", icon: "person", tone: "#a2845e", page: DetailsSection, terms: "name hindi birth email phone address pin code city state work company job title employee linkedin id numbers pan aadhaar passport profile" },
+  ],
+  [
     { id: "screen", label: "Screen", icon: "screen", tone: "#5e5ce6", page: ScreenSection, terms: "look capture awareness errors exclusions never capture password" },
-    { id: "privacy", label: "Privacy", icon: "lock", tone: "#0a84ff", page: Privacy, terms: "monitoring pause telemetry history clear microphone data" },
+    { id: "privacy", label: "Privacy", icon: "lock", tone: "#0a84ff", page: Privacy, terms: "monitoring pause telemetry history clear microphone data local-only offline" },
   ],
   [
     { id: "models", label: "AI models", icon: "bulb", tone: "#bf5af2", page: Providers, terms: "claude chatgpt openrouter ollama lm studio api key sign in local server" },
@@ -513,7 +536,7 @@ const SECTIONS: Section[][] = [
   ],
   [
     { id: "updates", label: "Updates", icon: "retry", tone: "#30b35a", page: UpdatesSection, terms: "version install check new" },
-    { id: "about", label: "About", icon: "lines", tone: "#8e8e93", page: About, terms: "version logs keyboard shortcuts font license" },
+    { id: "about", label: "About", icon: "lines", tone: "#8e8e93", page: About, terms: "version logs keyboard shortcuts font license test repair check problem fix report" },
   ],
 ];
 

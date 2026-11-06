@@ -29,6 +29,15 @@ test.describe("Notes", () => {
     await expect(page.getByRole("button", { name: "Record", exact: true })).toBeVisible();
   });
 
+  test("asked of the assistant, it records the same way a click does, and the island shows it", async ({ page }) => {
+    await openNotes(page);
+    await page.evaluate(() => (window as never as { __mock: { askForNotes(): void } }).__mock.askForNotes());
+    await expect(page.getByRole("button", { name: "Stop", exact: true })).toBeVisible();
+    await expect(page.locator(".note-state")).toContainText("Recording");
+    await page.keyboard.press("Escape");
+    await expect(page.locator(".island")).toHaveAttribute("data-view", "note");
+  });
+
   test("hearing on this PC cannot do this, and says where to change it", async ({ page }) => {
     await openNotes(page, "local");
     await expect(page.getByRole("heading", { name: "Notes need ElevenLabs or Deepgram" })).toBeVisible();
@@ -190,7 +199,8 @@ test("the dock is round, sits where the board puts it, and has Notes", async ({ 
   await expect(dock).toHaveCSS("padding", "5px");
   await expect(dock).toHaveCSS("border-radius", "27px");
   await expect(dock.locator(".dock-pill")).toHaveCSS("border-radius", "22px");
-  await expect(dock.getByRole("button")).toHaveCount(8);
+  // Knowledge, a book between Notes and Notifications, is the ninth.
+  await expect(dock.getByRole("button")).toHaveCount(9);
   await expect(page.locator(".wake-dot")).toHaveCount(0);
 });
 

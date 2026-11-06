@@ -197,6 +197,11 @@ impl NoteTaker {
         }
     }
 
+    /// Finished notes, newest first, for Knowledge to read.
+    pub fn ready(&self) -> Vec<Note> {
+        self.notes.lock().unwrap().iter().filter(|note| note.status == Status::Ready).cloned().collect()
+    }
+
     /// What the assistant is given when asked about a call: what there is, and the best match in full.
     pub fn about(&self, words: &str) -> String {
         let notes: Vec<Note> = self.notes.lock().unwrap().iter().filter(|note| note.status == Status::Ready).cloned().collect();
@@ -384,7 +389,8 @@ pub fn notes_resume(app: AppHandle, taker: State<'_, NoteTaker>) {
     }
 }
 
-fn start(app: &AppHandle, core: &Core, taker: &NoteTaker) -> Result<String, String> {
+/// Everything that stops a recording from starting, checked before the microphone is asked for.
+pub fn can_start(core: &Core, taker: &NoteTaker) -> Result<(), String> {
     let settings = core.settings.lock().unwrap().clone();
     refuse_if_local(core)?;
     if settings.monitoring_paused {
@@ -394,6 +400,14 @@ fn start(app: &AppHandle, core: &Core, taker: &NoteTaker) -> Result<String, Stri
         return Err(NEEDS_SERVICE.into());
     }
     hearing::cloud_key(core, &settings.voice_hearing)?;
+    if taker.recording.lock().unwrap().is_some() {
+        return Err("A call is already recording.".into());
+    }
+    Ok(())
+}
+
+fn start(app: &AppHandle, core: &Core, taker: &NoteTaker) -> Result<String, String> {
+    can_start(core, taker)?;
     let mut slot = taker.recording.lock().unwrap();
     if slot.is_some() {
         return Err("A call is already recording.".into());
@@ -487,18 +501,36 @@ pub fn notes_retry(app: AppHandle, taker: State<'_, NoteTaker>, id: String) -> R
 }
 
 /// Asks an AI model from Providers, the same way Chat does.
-async fn ask_provider(core: &Core, provider: &str, model: String, request: String) -> Result<String, String> {
+async fn ask_provider(core: &Core, provider: &str, model: String, system: &str, request: String, cancel: &CancellationToken) -> Result<String, String> {
     let client = crate::commands::provider(core, provider)?;
     let message = |role, content: String| Message { role, content, images: Vec::new() };
-    let chat = ChatRequest { model, messages: vec![message(Role::System, SUMMARY_INSTRUCTIONS.to_string()), message(Role::User, request)] };
+    let chat = ChatRequest { model, messages: vec![message(Role::System, system.to_string()), message(Role::User, request)] };
     let (mut reply, mut failed) = (String::new(), None);
     let mut sink = |event: ChatEvent| match event {
         ChatEvent::Delta { text } => reply.push_str(&text),
         ChatEvent::Error { message, .. } => failed = Some(message),
         _ => {}
     };
-    ai_core::run_chat(client.as_ref(), &chat, &mut sink, &CancellationToken::new()).await;
+    ai_core::run_chat(client.as_ref(), &chat, &mut sink, cancel).await;
     failed.map_or(Ok(reply), Err)
+}
+
+/// Asks the engine Chat is on, which the page names: Claude Code in a run with no tools, or a model
+/// from Providers. Local-only mode is held here and in `commands::provider`.
+pub(crate) async fn ask_chosen(core: &Core, agent: Option<&str>, provider: Option<String>, model: Option<String>, system: &str, request: String, cancel: &CancellationToken) -> Result<String, String> {
+    match (agent, provider, model) {
+        (Some("claude-code"), _, _) => {
+            refuse_if_local(core)?;
+            tokio::select! {
+                reply = once::ask(system, &request, SUMMARY_MODEL, MOST_SUMMARY_USD, SUMMARY_TIMEOUT) => reply,
+                // Dropping the run ends its process.
+                () = cancel.cancelled() => Err("Stopped.".to_string()),
+            }
+        }
+        (Some(_), _, _) => Err("Codex cannot do this yet. Pick Claude Code or an AI model in Chat.".to_string()),
+        (None, Some(provider), Some(model)) => ask_provider(core, &provider, model, system, request, cancel).await,
+        _ => Err("No AI is ready. Add one in Settings, AI models.".to_string()),
+    }
 }
 
 /// Writes the summary with the engine Chat is on, which the page names.
@@ -512,15 +544,7 @@ pub async fn notes_summarize(app: AppHandle, id: String, agent: Option<String>, 
     }
     let request = summary_request(&note);
     taker.set_working(&app, &id, true);
-    let reply = match (agent.as_deref(), provider, model) {
-        (Some("claude-code"), _, _) => match refuse_if_local(&core) {
-            Ok(()) => once::ask(SUMMARY_INSTRUCTIONS, &request, SUMMARY_MODEL, MOST_SUMMARY_USD, SUMMARY_TIMEOUT).await,
-            Err(why) => Err(why),
-        },
-        (Some(_), _, _) => Err("Codex cannot write summaries yet. Pick Claude Code or an AI model in Chat.".to_string()),
-        (None, Some(provider), Some(model)) => ask_provider(&core, &provider, model, request).await,
-        _ => Err("No AI is ready to write the summary.".to_string()),
-    };
+    let reply = ask_chosen(&core, agent.as_deref(), provider, model, SUMMARY_INSTRUCTIONS, request, &CancellationToken::new()).await;
     taker.set_working(&app, &id, false);
     let reply = reply?;
     taker.change(&app, &id, |note| apply_summary(note, &reply))

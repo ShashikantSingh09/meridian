@@ -121,6 +121,31 @@ const paths: Record<string, ReactNode> = {
       <path d="m9.4 10.6 6.8-6.8M13 7l2.2 2.2" />
     </>
   ),
+  pen: <path d="M12.6 4.4a1.8 1.8 0 0 1 2.6 2.6L7.4 14.8l-3.4.9.9-3.4ZM11.2 5.8l2.6 2.6" />,
+  person: (
+    <>
+      <circle cx="10" cy="7" r="3.2" />
+      <path d="M4.2 16.5c.9-2.9 3.1-4.4 5.8-4.4s4.9 1.5 5.8 4.4" />
+    </>
+  ),
+  book: (
+    <>
+      <path d="M10 5.5C8.5 4.3 6.3 4 3.5 4.2v11c2.8-.2 5 .1 6.5 1.3 1.5-1.2 3.7-1.5 6.5-1.3v-11c-2.8-.2-5 .1-6.5 1.3Z" />
+      <path d="M10 5.5v11" />
+    </>
+  ),
+  mail: (
+    <>
+      <rect x="2.5" y="4.5" width="15" height="11" rx="2" />
+      <path d="m3 5.5 7 5.5 7-5.5" />
+    </>
+  ),
+  warn: (
+    <>
+      <path d="M10 3l8 14H2z" />
+      <path d="M10 8v4M10 14.5v.5" />
+    </>
+  ),
 };
 
 export type IconName = keyof typeof paths;

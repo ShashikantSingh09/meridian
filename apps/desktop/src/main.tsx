@@ -34,6 +34,7 @@ import {
 import { bridge } from "./lib/bridge";
 import { watchTheme } from "./lib/theme";
 import { refreshNotes, wireNotes } from "./lib/notes";
+import { wireKnowledge } from "./lib/knowledge";
 import { endConversation, say, startVoice, wireVoice } from "./lib/voice";
 
 // A file or link dropped on the island would otherwise load in its place, and every page here can
@@ -44,6 +45,7 @@ createRoot(document.getElementById("root")!).render(<Island />);
 
 wireVoice();
 wireNotes();
+wireKnowledge();
 watchTheme(() => getState().settings);
 
 void boot();

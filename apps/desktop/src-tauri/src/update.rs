@@ -80,7 +80,7 @@ pub struct UpdateStatus {
     /// The release notes, for What's new.
     notes: String,
     published: Option<String>,
-    message: String,
+    pub(crate) message: String,
 }
 
 /// How this copy got onto the PC, which decides what can update it.

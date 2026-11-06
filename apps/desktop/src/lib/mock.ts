@@ -4,6 +4,13 @@
 import type {
   Charge,
   IslandPlace,
+  KnowledgeHit,
+  KnowledgeKind,
+  KnowledgeLine,
+  KnowledgePage,
+  KnowledgeSourceStatus,
+  KnowledgeState,
+  KnowledgeStatus,
   AgentEnvelope,
   AgentEvent,
   AgentId,
@@ -33,8 +40,109 @@ import type {
   WakeStatus,
 } from "./types";
 import { defaultSettings } from "./types";
+import { emptyProfile, idProblem, problem, tidyId, type IdKind, type IdNumbers, type Profile } from "./details";
+
+let details: Profile = emptyProfile;
+/** Whole numbers, as Credential Manager would hold them. */
+let idNumbers: Partial<Record<IdKind, string>> = {};
+const maskId = (kind: IdKind, n: string) => {
+  const shown = kind === "pan" ? 5 : 4;
+  return kind === "aadhaar" ? `•••• •••• ${n.slice(-4)}` : `${"•".repeat(n.length - shown)}${n.slice(-shown)}`;
+};
+import type { StyleLine, StyleProfile } from "./style";
 
 const caps = { streaming: true, tools: true, vision: false, modelDiscovery: true, usage: true };
+
+// ── Knowledge ───────────────────────────────────────────────────────────────
+// The pages as files, read by a small stand-in for the core's reader. The rules about what an
+// update may change are tested in crates/knowledge, not here.
+
+const KINDS: Record<string, KnowledgeKind> = { People: "person", Projects: "project", Promises: "promise", Places: "place" };
+const DEF = /^\[([^\]]+)\]: (\S+)$/;
+const SAMPLE_PAGES: Record<string, string> = {
+  "People/Asha Rao.md": "# Asha Rao\nDesign lead at Northwind. Works with you on the shop relaunch.\n\n## Now\n- The launch moves to 18 Nov. Checkout testing needs another week. (call on 4 Nov)\n- Wants the hero photos in 4:5, not square. (mail from Asha, 3 Nov)\n\n## Good to know\n- Would rather have a quick call than a long email. (mail from Asha, 28 Oct)\n- Works from Bengaluru. (meeting on 2 Nov)\n\n## Linked\n- Shop relaunch\n- Northwind\n- Pune office\n\n[call on 4 Nov]: meridian:note/call-4-nov\n[mail from Asha, 3 Nov]: https://mail.google.com/mail/u/0/#all/18c2\n[mail from Asha, 28 Oct]: https://mail.google.com/mail/u/0/#all/17a9\n[meeting on 2 Nov]: https://calendar.google.com/calendar/r\n",
+  "People/Carl Mendes.md": "# Carl Mendes\nAccounts at Brightline.\n\n## Now\n- Asked whether the October invoice went out. (mail from Carl, 3 Nov)\n\n[mail from Carl, 3 Nov]: https://mail.google.com/mail/u/0/#all/19d4\n",
+  "People/Dr. Mehta.md": "# Dr. Mehta\nDentist. Next visit on 21 Nov.\n",
+  "Projects/Shop relaunch.md": "# Shop relaunch\nLaunch on 18 Nov.\n\n## Now\n- Checkout testing needs another week. (call on 4 Nov)\n\n[call on 4 Nov]: meridian:note/call-4-nov\n",
+  "Projects/October invoices.md": "# October invoices\n3 open, 1 paid.\n",
+  "Promises/Send Carl the October invoice.md": "# Send Carl the October invoice\n- [ ] You: send Carl the October invoice, by Fri 6 Nov (mail from Carl, 3 Nov)\n\n## Linked\n- Carl Mendes\n- October invoices\n\n[mail from Carl, 3 Nov]: https://mail.google.com/mail/u/0/#all/19d4\n",
+  "Promises/Share the new deck.md": "# Share the new deck\n- [ ] Asha: share the new deck, by Mon 9 Nov (call on 4 Nov)\n\n## Linked\n- Asha Rao\n\n[call on 4 Nov]: meridian:note/call-4-nov\n",
+  "Promises/Send the hero photos.md": "# Send the hero photos\n- [ ] You: send the hero photos, by Fri 6 Nov (mail from Asha, 3 Nov)\n\n## Linked\n- Asha Rao\n\n[mail from Asha, 3 Nov]: https://mail.google.com/mail/u/0/#all/18c2\n",
+  "Promises/Book the review room.md": "# Book the review room\n- [x] You: book the review room (chat, 2 Nov)\n\n## Linked\n- Asha Rao\n\n[chat, 2 Nov]: meridian:chat\n",
+  "Places/Pune office.md": "# Pune office\nBaner. 2 visits.\n",
+};
+let pageTexts: Record<string, string> = {};
+let knowledgeStatus: KnowledgeStatus = { running: false, done: 0, total: 0, now: "", sources: [], failed: null };
+let knowledgeUpdatedAt: number | null = null;
+let knowledgeChanged = () => {};
+let knowledgeIdle = () => {};
+let knowledgeHeld: (() => void) | null = null;
+const knowledgeRuns: { chats: number; idle: boolean }[] = [];
+const knowledgeOpened: string[] = [];
+const openedUrls: string[] = [];
+
+function promiseWords(line: KnowledgeLine | undefined) {
+  if (!line) return "";
+  if (line.done) return "Done";
+  const who = line.text.split(": ")[0];
+  const by = line.text.split(", by ")[1];
+  return [who, by && `by ${by}`].filter(Boolean).join(" · ");
+}
+
+function parsePage(path: string, text: string): KnowledgePage {
+  const lines = text.split("\n");
+  const sources = lines.map((l) => DEF.exec(l.trim())).filter((m) => m !== null).map((m) => ({ label: m[1]!, target: m[2]! }));
+  let title = path.split("/")[1]!.replace(/\.md$/, "");
+  let titled = false;
+  const about: string[] = [];
+  const sections: KnowledgePage["sections"] = [{ heading: "", lines: [] }];
+  const linked: string[] = [];
+  lines.forEach((line, at) => {
+    if (!line.trim() || DEF.test(line.trim())) return;
+    if (!titled && line.startsWith("# ")) return void ((title = line.slice(2).trim()), (titled = true));
+    if (line.startsWith("## ")) return void sections.push({ heading: line.slice(3).trim(), lines: [] });
+    const current = sections[sections.length - 1]!;
+    if (current.heading === "Linked") return void linked.push(line.replace(/^[-*]\s*/, "").trim());
+    const bullet = /^[-*] (\[( |x)\] )?(.*?)(?: \(([^()]+)\))?$/.exec(line);
+    if (bullet) {
+      const label = bullet[4];
+      const source = sources.find((s) => s.label === label) ?? null;
+      const yours = label === "you";
+      const text = yours || source ? bullet[3]! : `${bullet[3]}${label ? ` (${label})` : ""}`;
+      current.lines.push({ at, text, source, yours, done: bullet[1] ? bullet[2] === "x" : null, bullet: true });
+    } else if (sections.length === 1 && current.lines.length === 0) about.push(line.trim());
+    else current.lines.push({ at, text: line.trim(), source: null, yours: false, done: null, bullet: false });
+  });
+  const kind = KINDS[path.split("/")[0]!]!;
+  const kept = sections.filter((s) => s.lines.length > 0);
+  const firstSentence = about.join(" ").split(". ")[0]!.replace(/\.$/, "");
+  const subtitle = kind === "promise" ? promiseWords(kept.flatMap((s) => s.lines).find((l) => l.done !== null)) : firstSentence;
+  return { path, kind, title, about: about.join(" "), subtitle, sections: kept, linked, sources, updated: Date.now() };
+}
+
+const knowledgePages = () => Object.entries(pageTexts).map(([path, text]) => parsePage(path, text)).sort((a, b) => "person project promise place".indexOf(a.kind) - "person project promise place".indexOf(b.kind) || a.title.localeCompare(b.title));
+
+function seedKnowledge() {
+  pageTexts = { ...SAMPLE_PAGES };
+  knowledgeUpdatedAt = new Date(2026, 10, 6, 7, 12).getTime();
+  if (!noteList.notes.some((n) => n.id === "call-4-nov")) {
+    const note: Note = { id: "call-4-nov", title: "Launch date and checkout", titleEdited: true, startedAt: new Date(2026, 10, 4, 15, 0).getTime(), endedAt: new Date(2026, 10, 4, 15, 20).getTime(), status: "ready", ...WRITTEN, summary: "The launch moves to 18 Nov.", keyPoints: [], todos: [], error: null };
+    noteList = { ...noteList, notes: [note, ...noteList.notes] };
+    notesChanged();
+  }
+  knowledgeChanged();
+}
+
+/** As the core would while it reads: some sources done, Gmail signed out, 14 of 52 written. */
+function updatingNow(): KnowledgeStatus {
+  const on = (["notes", "gmail", "calendar", "chats"] as const).filter((id) => settings.knowledge[id]);
+  const sources = on.map((id): KnowledgeSourceStatus => {
+    if (id === "gmail") return { id, state: "skipped", found: 0, why: "Claude Code is signed out, so Gmail could not be read.", signIn: true };
+    if (id === "calendar") return { id, state: "done", found: 6, why: "", signIn: false };
+    return { id, state: "read", found: id === "notes" ? 2 : 3, why: "", signIn: false };
+  });
+  return { running: true, done: 14, total: 52, now: "the call with Asha, 4 Nov", sources, failed: null };
+}
 
 const providers: ProviderInfo[] = [
   { id: "anthropic", name: "Anthropic", kind: "cloud", baseUrl: "https://api.anthropic.com", needsKey: true, hasKey: true, capabilities: { ...caps, vision: true } },
@@ -83,6 +191,7 @@ let heardWords = "";
 const spokenWords: string[] = [];
 let wakeState: ((status: WakeStatus) => void) | null = null;
 const taughtWords = new Set<string>();
+let notesAsked: (() => void) | null = null;
 let wakeHeard: ((heard: { word: string; test: boolean; afterMs: number }) => void) | null = null;
 let updateStatus = { current: "0.3.0", latest: "v0.3.0", available: false, notes: "", published: null as string | null, message: "You are on the latest version." };
 let updateInstalled = false;
@@ -102,9 +211,16 @@ let pushLevel: (level: Level) => void = () => {};
 let charge: Charge | null = null;
 let islandPlaced: (place: IslandPlace) => void = () => {};
 const islandDrags: boolean[] = [];
+const keyboard: boolean[] = [];
 let leaning: ((degrees: number) => void) | null = null;
 let islandResets = 0;
 let watching = false;
+/** Following was turned on, whether or not its hooks are still in Claude Code's settings. */
+let hooksWanted = false;
+let hooksOff: string[] = [];
+let gmailOnClaude = true;
+let connectorsGate: Promise<void> | null = null;
+let releaseConnectors = () => {};
 let lastAnswers: Record<string, string | string[]> | null = null;
 let updateLooks = 0;
 let integrations: Integration[] = [
@@ -160,13 +276,64 @@ const sampleTrack: Track = {
   artwork: null,
 };
 let track = { ...sampleTrack };
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+let styleProfile: StyleProfile | null = null;
+/** A learning run the test drives page by page. */
+let styleRun: { onRead: (read: number) => void; resolve: (profile: StyleProfile) => void; reject: (why: string) => void } | null = null;
+const STYLE_LINES: StyleLine[] = [
+  { key: "greeting", text: "\"Hi\" and their first name. Never \"Dear\".", mine: false },
+  { key: "signoff", text: "\"Thanks,\" then \"Ravi\". Sometimes \"R\". Never \"Regards\".", mine: false },
+  { key: "length", text: "Short. Two to four sentences.", mine: false },
+  { key: "tone", text: "Friendly and direct. Often says sorry. Few exclamation marks.", mine: false },
+  { key: "uses", text: "\"quick one\", \"sounds good\", \"will share by EOD\", \"cheers\"", mine: false },
+  { key: "avoids", text: "\"Kindly\", \"Please find attached\", \"Hope this finds you well\"", mine: false },
+  { key: "languages", text: "English. Mixes in Hindi with family, like \"haan, done\".", mine: false },
+];
+/** Learning again keeps every line the user wrote, as the core does. */
+const learnedStyle = (emails: number): StyleProfile => ({
+  learnedAt: "2026-11-06T09:20:00",
+  emails,
+  lines: STYLE_LINES.map((line) => styleProfile?.lines.find((own) => own.key === line.key && own.mine) ?? line),
+});
+const sleep =(ms: number) => new Promise((r) => setTimeout(r, ms));
 const pendingSecond = (sessionId: string) =>
   (window as never as { __meridian: { getState(): { sessions: { id: string; approval: { id: string } | null }[] } } })
     .__meridian.getState()
     .sessions.find((s) => s.id === sessionId)?.approval?.id === "a2";
 
 export const mock = {
+  detailsGet: async () => details,
+  /** Refuses what the core refuses, and turning ID numbers off removes them, as it does. */
+  async detailsSave(next: Profile) {
+    const wrong = problem("birth", next.birth) ?? problem("email", next.email) ?? problem("phone", next.phone) ?? problem("phone", next.otherPhone) ?? problem("pin", next.address.pin) ?? problem("email", next.work.email);
+    if (wrong) throw wrong;
+    if (details.ids && !next.ids) idNumbers = {};
+    details = structuredClone(next);
+    return details;
+  },
+  detailsDelete: async () => {
+    details = emptyProfile;
+    idNumbers = {};
+  },
+  detailsIds: async (): Promise<IdNumbers> => {
+    const masked = (kind: IdKind) => (details.ids && idNumbers[kind] ? maskId(kind, idNumbers[kind]) : null);
+    return { pan: masked("pan"), aadhaar: masked("aadhaar"), passport: masked("passport") };
+  },
+  detailsIdShow: async (kind: IdKind) => idNumbers[kind] ?? Promise.reject("That number is not kept."),
+  async detailsIdSet(kind: IdKind, number: string) {
+    const n = tidyId(number);
+    if (!n) return void delete idNumbers[kind];
+    if (!details.ids) throw "Turn on ID numbers first.";
+    const wrong = idProblem(kind, n);
+    if (wrong) throw wrong;
+    idNumbers[kind] = n;
+  },
+  /** Starts a test with details already added. */
+  seedDetails: (profile: Profile, ids: Partial<Record<IdKind, string>> = {}) => {
+    details = structuredClone(profile);
+    idNumbers = { ...ids };
+  },
+  idNumbersKept: () => ({ ...idNumbers }),
+
   getSettings: async () => settings,
   saveSettings: async (next: Settings) => void (settings = next),
   listProviders: async () => providers.map((p) => ({ ...p })),
@@ -217,6 +384,9 @@ export const mock = {
   batteryNow: async () => charge,
   /** Sets the laptop's charge, which the island reads on its next look. */
   setCharge: (next: Charge | null) => void (charge = next),
+  setInteractive: async (on: boolean) => void keyboard.push(on),
+  /** Each time the window asked for the keyboard, or gave it back. */
+  keyboard: () => [...keyboard],
   islandDrag: async (start: boolean) => void islandDrags.push(start),
   islandDrags: () => [...islandDrags],
   onLean: (handler: (degrees: number) => void) => {
@@ -269,7 +439,44 @@ export const mock = {
   /** A build with no registered app, so Google is reached through the Claude account. */
   noRegisteredApps: () => void (registered = false),
   builtInClients: async (): Promise<[boolean, boolean]> => [registered, registered],
-  claudeConnectors: async (): Promise<[boolean, boolean]> => [true, false],
+  claudeConnectors: async (): Promise<[boolean, boolean]> => {
+    await connectorsGate;
+    return [gmailOnClaude, false];
+  },
+  setGmailOnClaude: (on: boolean) => void (gmailOnClaude = on),
+  /** Asking Claude Code waits, as a slow start does, until `releaseConnectors`. */
+  holdConnectors: () => void (connectorsGate = new Promise((done) => (releaseConnectors = done))),
+  releaseConnectors: () => {
+    connectorsGate = null;
+    releaseConnectors();
+  },
+  setClaudeGmail: (on: boolean) => void (gmailOnClaude = on),
+  styleGet: async () => styleProfile,
+  styleLearn: (onRead: (read: number) => void) => new Promise<StyleProfile>((resolve, reject) => void (styleRun = { onRead, resolve, reject })),
+  styleStop: async () => {
+    styleRun?.reject("Stopped. Nothing was kept.");
+    styleRun = null;
+  },
+  styleSetLine: async (key: string, text: string) => {
+    if (!styleProfile) throw "There is no profile to change.";
+    styleProfile = { ...styleProfile, lines: styleProfile.lines.map((line) => (line.key === key && line.text !== text.trim() ? { key, text: text.trim(), mine: true } : line)) };
+    return styleProfile;
+  },
+  styleForget: async () => void (styleProfile = null),
+  /** What Gmail would do while it learns: a page read, the end of the sent mail, or a failure. */
+  styleRead: (read: number) => styleRun?.onRead(read),
+  styleFinish: (emails = 100) => {
+    styleProfile = learnedStyle(emails);
+    styleRun?.resolve(styleProfile);
+    styleRun = null;
+  },
+  styleFail: (why: string) => {
+    styleRun?.reject(why);
+    styleRun = null;
+  },
+  /** Starts a test with a profile already learned. */
+  styleLearned: (emails = 100) => void (styleProfile = learnedStyle(emails)),
+  styleSaved: () => styleProfile,
   notesState: async () => ({ ...noteList }),
   onNotesChanged: (handler: () => void) => void (notesChanged = handler),
   onNoteWritten: (handler: (id: string) => void) => void (noteWritten = handler),
@@ -336,6 +543,70 @@ export const mock = {
       ],
     });
   },
+  knowledgeState: async (): Promise<KnowledgeState> => ({ pages: knowledgePages(), status: knowledgeStatus, updatedAt: knowledgeUpdatedAt, folder: "C:\\Users\\sample\\Documents\\Meridian\\Knowledge", calls: noteList.notes.filter((n) => n.status === "ready").length }),
+  onKnowledgeChanged: (handler: () => void) => void (knowledgeChanged = handler),
+  onKnowledgeIdle: (handler: () => void) => void (knowledgeIdle = handler),
+  /** As the core does after 10 minutes with no typing or mouse, on the charger. */
+  idleKnowledge: () => knowledgeIdle(),
+  /** Puts the sample pages in place, as a finished update would. */
+  seedKnowledge,
+  /** The next update stops part way, as in the board, until `finishKnowledge`. */
+  holdKnowledge: () => void (knowledgeHeld = () => {}),
+  finishKnowledge: () => knowledgeHeld?.(),
+  knowledgeRuns: () => knowledgeRuns,
+  knowledgeOpened: () => knowledgeOpened,
+  knowledgeUpdate: async (chats: { text: string; at: number | null }[], idle: boolean) => {
+    if (knowledgeStatus.running) throw new Error("Knowledge is already updating.");
+    knowledgeRuns.push({ chats: chats.length, idle });
+    if (knowledgeHeld) {
+      knowledgeStatus = updatingNow();
+      knowledgeChanged();
+      await new Promise<void>((resolve) => (knowledgeHeld = resolve));
+      knowledgeHeld = null;
+      if (!knowledgeStatus.running) return;
+    }
+    seedKnowledge();
+    knowledgeStatus = { ...updatingNow(), running: false, done: 52, now: "", sources: updatingNow().sources.map((s) => (s.state === "read" ? { ...s, state: "done" } : s)) };
+    knowledgeChanged();
+  },
+  knowledgeStop: async () => {
+    knowledgeStatus = { ...knowledgeStatus, running: false, now: "", failed: "Stopped. It carries on next time." };
+    knowledgeChanged();
+    knowledgeHeld?.();
+  },
+  knowledgeSearch: async (query: string): Promise<KnowledgeHit[]> => {
+    const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+    if (words.length === 0) return [];
+    const textsOf = (p: KnowledgePage) => [p.title, p.about, ...p.sections.flatMap((s) => s.lines.map((l) => l.text)), ...p.linked];
+    return knowledgePages()
+      .filter((p) => words.every((w) => textsOf(p).join("\n").toLowerCase().includes(w)))
+      .map((p) => {
+        const named = words.every((w) => p.title.toLowerCase().includes(w));
+        const from = p.kind === "promise" ? p.sections.flatMap((s) => s.lines).find((l) => l.source)?.source?.label : undefined;
+        const text = textsOf(p).slice(1).find((t) => t.toLowerCase().includes(words[0]!)) ?? "";
+        return { path: p.path, kind: p.kind, title: p.title, snippet: named ? [p.subtitle, from].filter(Boolean).join(" · ") : text, quote: !named, named };
+      })
+      .sort((a, b) => Number(b.named) - Number(a.named))
+      .map(({ named: _, ...hit }) => hit);
+  },
+  knowledgeRead: async (path: string) => pageTexts[path] ?? Promise.reject(new Error("That page is gone.")),
+  /** Marks the lines that are new as the user's, as the core does. */
+  knowledgeSave: async (path: string, text: string, base: string) => {
+    if (pageTexts[path] !== base) throw new Error("This page changed while you were editing it, so nothing was saved.");
+    const before = new Set(base.split("\n"));
+    pageTexts[path] = text.split("\n").map((line) => (/^[-*] /.test(line) && !before.has(line) && !line.endsWith("(you)") ? `${line.replace(/ \([^()]+\)$/, "")} (you)` : line)).join("\n");
+    knowledgeChanged();
+  },
+  knowledgeTick: async (path: string, line: number, done: boolean) => {
+    const lines = pageTexts[path]!.split("\n");
+    lines[line] = lines[line]!.replace(done ? "[ ]" : "[x]", done ? "[x]" : "[ ]");
+    pageTexts[path] = lines.join("\n");
+    knowledgeChanged();
+  },
+  knowledgeOpen: async (path: string) => void knowledgeOpened.push(path),
+  /** Links the app opened in the browser, newest last. */
+  openUrl: async (url: string) => void openedUrls.push(url),
+  openedUrls: () => openedUrls,
   noteMarkdown: async (id: string) => `# ${noteList.notes.find((n) => n.id === id)!.title}\n`,
   noteExport: async (path: string) => ((exportedTo = path), true),
   exportedTo: () => exportedTo,
@@ -398,6 +669,9 @@ export const mock = {
   wakeTeachEnd: async (word: string | null) => void (word && taughtWords.add(word)),
   wakeForget: async (word: string) => void taughtWords.delete(word),
   hearWake: (word: string, test = false, afterMs = 0) => wakeHeard?.({ word, test, afterMs }),
+  onAssistantStartNotes: (handler: () => void) => void (notesAsked = handler),
+  /** As the core does when the user asks the assistant to take notes. */
+  askForNotes: () => notesAsked?.(),
   setPacks: (ids: string[]) => {
     voicePacks.clear();
     ids.forEach((id) => voicePacks.add(id));
@@ -441,7 +715,11 @@ export const mock = {
       { kind: on ? "added" : "removed", text: '  "hooks": { "Stop": [ { "url": "http://127.0.0.1:4823/hook" } ] }' },
     ],
   }),
-  watchSet: async (on: boolean) => void (watching = on),
+  watchSet: async (on: boolean) => void (watching = hooksWanted = on),
+  hooksHealth: async (projects: string[]) => ({ on: watching || hooksWanted, inPlace: watching, offIn: projects.filter((p) => hooksOff.includes(p)) }),
+  /** Following is on, and something has taken its hooks out of Claude Code's settings. */
+  loseHooks: () => void ((hooksWanted = true), (watching = false)),
+  setHooksOff: (projects: string[]) => void (hooksOff = projects),
   async onReminders(handler: (r: Reminder[]) => void) {
     pushReminders = handler;
     return () => {};
@@ -478,6 +756,8 @@ export const mock = {
       { text: "Which one?", options: ["Teal", "Amber"], multi },
       { text: "And then?", options: ["Ship it", "Wait"], multi: false },
     ] } } }),
+  /** The question answered in the terminal itself, before anyone answers it here. */
+  answerInTerminal: (sessionId: string, approvalId = "q1") => emit({ sessionId, event: { type: "approvalResolved", id: approvalId } }),
   publishWatchedPlan: (sessionId: string) =>
     emit({ sessionId, event: { type: "approval", approval: { id: "p1", tool: "ExitPlanMode", summary: "Add a page", plan: "## Add a page\n\n1. Write it\n2. Test it" } } }),
   /** The last answer given to a question, so a test can see what would go back. */
@@ -501,6 +781,8 @@ export const mock = {
         return;
       }
       send({ type: "activity", label: "Reading src/main.rs" });
+      // A prompt saying "quietly" keeps working without asking, so a test can lead it step by step.
+      if (request.prompt.includes("quietly")) return;
       await sleep(60);
       send({ type: "approval", approval: { id: "a1", tool: "Bash", summary: "cargo test --workspace" } });
       // A prompt mentioning "parallel" asks twice at once, as parallel tool calls do.
@@ -513,6 +795,8 @@ export const mock = {
   async answerApproval(sessionId: string, approvalId: string, allow: boolean, answers?: Record<string, string | string[]>) {
     lastAnswers = answers ?? null;
     emit({ sessionId, event: { type: "approvalResolved", id: approvalId } });
+    // A terminal carries on by itself, and says what it does next through its hooks.
+    if (sessionId.startsWith("watch:")) return;
     if (approvalId === "a1" && pendingSecond(sessionId)) return;
     if (!allow) return emit({ sessionId, event: { type: "status", status: "cancelled" } });
     await sleep(40);

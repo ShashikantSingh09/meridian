@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Meridian fill test forms</title>
+<style>
+  :root { color-scheme: light dark; --line: #8884; --warn: #b45309; }
+  body { font: 15px/1.4 system-ui, sans-serif; margin: 16px auto; max-width: 980px; padding: 0 16px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  h2 { font-size: 16px; margin: 16px 0 8px; }
+  p.how { margin: 0 0 12px; color: GrayText; }
+  form { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px; }
+  label, fieldset, .field { display: grid; gap: 2px; }
+  fieldset { border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; margin: 0; }
+  fieldset label, .tick { display: flex; gap: 6px; align-items: center; }
+  input, select, textarea, .editor { font: inherit; padding: 4px 6px; border: 1px solid var(--line); border-radius: 4px; }
+  textarea, .editor { min-height: 56px; }
+  .editor { outline-offset: 1px; white-space: pre-wrap; }
+  .wide { grid-column: 1 / -1; }
+  .yours { color: var(--warn); font-size: 12px; }
+  #seen { border-top: 1px solid var(--line); margin-top: 16px; }
+  #seen p { margin: 2px 0; }
+  #log { margin: 4px 0; padding-left: 20px; }
+  /* Traps a page plants to collect data. Meridian must never read or fill them. */
+  .off-screen { position: absolute; left: -10000px; top: 0; }
+  .tiny { width: 1px; height: 1px; opacity: 0; border: 0; padding: 0; position: absolute; }
+</style>
+</head>
+<body>
+<h1>Meridian fill test forms</h1>
+<p class="how">For checking Write here and Fill this form by hand, and for <code>crates/fill/tests/live_forms.rs</code>.
+Zoom out (Ctrl and minus) until the whole page fits: only boxes on screen are read. Nothing here goes online.</p>
+
+<h2>A job application</h2>
+<form id="apply" autocomplete="off">
+  <label>Full name * <input id="full-name" name="name" required></label>
+  <label>पूरा नाम (हिंदी में) <input id="name-hi" name="name_hi"></label>
+  <label>Email * <input id="email" type="email" placeholder="you@example.com" required></label>
+  <label>मोबाइल नंबर <input id="phone" type="tel" placeholder="+91"></label>
+  <label>LinkedIn <input id="linkedin" placeholder="linkedin.com/in/…"></label>
+  <label>React name (takes changes only through input events) <input id="react-name"></label>
+  <label class="wide">Why do you want to join Kestrel Labs? *
+    <textarea id="why" required></textarea></label>
+  <div class="wide field"><span id="cover-label">Cover note (a rich editor)</span>
+    <div id="cover" class="editor" contenteditable="true" role="textbox" aria-multiline="true"
+         aria-labelledby="cover-label"></div></div>
+  <label>Start date <input id="start" type="date"></label>
+  <label>Notice period
+    <select id="notice"><option value=""></option><option>30 days</option><option>60 days</option><option>90 days</option></select></label>
+  <fieldset><legend>Work mode</legend>
+    <label><input type="radio" name="mode" value="office"> Office</label>
+    <label><input type="radio" name="mode" value="remote"> Remote</label>
+  </fieldset>
+  <label class="tick"><input id="billing" type="checkbox"> Same as billing address</label>
+
+  <label>Create a password * <span class="yours">yours to fill</span>
+    <input id="password" type="password" placeholder="At least 8 characters"></label>
+  <label>Enter OTP <span class="yours">yours to fill</span>
+    <input id="otp" autocomplete="one-time-code" inputmode="numeric"></label>
+  <label>Card number <span class="yours">yours to fill</span> <input id="cc-number"></label>
+  <label>Your CV * <span class="yours">yours to fill</span> <input id="cv" type="file"></label>
+  <label class="tick wide"><input id="agree" type="checkbox" required> I agree to the privacy policy *
+    <span class="yours">yours to tick</span></label>
+
+  <div class="off-screen"><label>Trap phone, off screen <input id="trap-off" name="trap_phone"></label></div>
+  <input id="trap-tiny" class="tiny" aria-label="Trap email, one pixel" name="trap_email">
+  <label style="display: none">Trap, not displayed <input id="trap-none"></label>
+  <label style="visibility: hidden">Trap, invisible <input id="trap-hidden"></label>
+
+  <button class="wide" type="submit">Submit application</button>
+</form>
+
+<h2>A chat box where Enter sends</h2>
+<div id="message-label">Message (a rich editor, like Slack)</div>
+<div id="message" class="editor" contenteditable="true" role="textbox" aria-multiline="true"
+     aria-labelledby="message-label"></div>
+
+<section id="seen" aria-label="What the page saw">
+  <h2>What the page saw</h2>
+  <p id="react-state">React state: (empty)</p>
+  <p id="cover-model">Cover note model: (empty)</p>
+  <p id="message-model">Message model: (empty)</p>
+  <ol id="log"></ol>
+</section>
+
+<script>
+  const log = (text) => {
+    const item = document.createElement('li');
+    item.textContent = `${new Date().toLocaleTimeString()} ${text}`;
+    document.getElementById('log').prepend(item);
+  };
+  const show = (id, label, value) => {
+    document.getElementById(id).textContent = `${label}: ${value || '(empty)'}`;
+  };
+  const nameOf = (el) => el.id || el.name || el.tagName.toLowerCase();
+
+  // A React-style controlled input. React hides the value setter, so a script that
+  // sets .value is ignored, and it puts the box back to its state on every render.
+  // Only a real change with an input event (a person, or UI Automation) gets in.
+  {
+    const box = document.getElementById('react-name');
+    const native = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+    let state = '';
+    let tracked = '';
+    Object.defineProperty(box, 'value', {
+      get() { return native.get.call(this); },
+      set(value) { tracked = String(value); native.set.call(this, value); },
+    });
+    box.addEventListener('input', () => {
+      const value = native.get.call(box);
+      if (value === tracked) return;
+      tracked = value;
+      state = value;
+      show('react-state', 'React state', state);
+    });
+    setInterval(() => {
+      if (native.get.call(box) !== state) {
+        tracked = state;
+        native.set.call(box, state);
+        log('React name put back a change that came without an input event');
+      }
+    }, 100);
+  }
+
+  // A rich editor that keeps its own model, like ProseMirror or Lexical. Changes that
+  // arrive with an input event (typing, paste) update the model. Anything else, such
+  // as a plain innerText write, is undone a moment later.
+  const richEditor = (id, shownId, label) => {
+    const editor = document.getElementById(id);
+    let model = '';
+    let fromInput = false;
+    editor.addEventListener('input', (event) => {
+      fromInput = true;
+      model = editor.innerText;
+      show(shownId, label, model);
+      log(`${label} took ${event.inputType || 'an input event'}`);
+    });
+    new MutationObserver(() => {
+      if (fromInput) { fromInput = false; return; }
+      setTimeout(() => {
+        if (editor.innerText !== model) {
+          editor.innerText = model;
+          log(`${label} put back a change that came without an input event`);
+        }
+      }, 100);
+    }).observe(editor, { childList: true, characterData: true, subtree: true });
+    return editor;
+  };
+  richEditor('cover', 'cover-model', 'Cover note model');
+  const message = richEditor('message', 'message-model', 'Message model');
+
+  // Enter sends here. Meridian must never press it.
+  message.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      log('Enter pressed in Message: this would have sent it');
+    }
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') log(`Enter pressed in ${nameOf(event.target)}`);
+    if (event.key === 'Tab') log(`Tab pressed in ${nameOf(event.target)}`);
+  }, true);
+
+  document.getElementById('apply').addEventListener('submit', (event) => {
+    event.preventDefault();
+    log('Submitted: this must never happen during a fill');
+  });
+  for (const box of document.querySelectorAll('input, select, textarea')) {
+    box.addEventListener('change', () => log(`change in ${nameOf(box)}`));
+    if (box.id.startsWith('trap')) box.addEventListener('input', () => log(`A trap box was filled: ${box.id}`));
+  }
+  document.addEventListener('paste', (event) => log(`paste in ${nameOf(event.target.closest('[id]') || event.target)}`));
+</script>
+</body>
+</html>

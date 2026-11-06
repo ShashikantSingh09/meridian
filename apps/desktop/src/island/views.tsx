@@ -5,7 +5,6 @@ import type { Approval, Level } from "../lib/types";
 import { bridge } from "../lib/bridge";
 import { useEffect, useMemo, useState, useLayoutEffect, useRef } from "react";
 import { Markdown } from "../panel/Markdown";
-import { StepRow } from "../panel/LogLine";
 import { Icon } from "../lib/icons";
 import {
   answerApproval,
@@ -20,6 +19,7 @@ import {
   ignoreSuggestion,
   focusTerminal,
   foldApproval,
+  islandTyping,
   planUse,
   keepRecording,
   knownFolder,
@@ -34,11 +34,11 @@ import {
   useApp,
   type SessionDetail,
 } from "../lib/store";
-import { actionOf, asking, changedFiles, limitName, clock, endFacts, lastMessage, needsFirst, planSteps, spent, stageLine, stagesOf, stepsOf, thisTurn, todoStep, todoWindow, turnStart } from "../lib/sessions";
+import { actionOf, asking, changedFiles, limitName, clock, lastMessage, needsFirst, planSteps, spent, stageLine, stepLog, stepsOf, thisTurn, todoStep, todoWindow, turnStart, worked, type LoggedStep } from "../lib/sessions";
 import { Face, type Mood } from "./faces";
 import type { LineSegment } from "./line";
 import { focusActivity } from "./live";
-import { activeSessions, MULTITASK_MAX_ROWS, TODO_MAX_ROWS, waitingApproval, waitingCount } from "./machine";
+import { activeSessions, FINISHED_ROWS, MULTITASK_MAX_ROWS, STAGE_ROWS, TODO_MAX_ROWS, waitingApproval, waitingCount } from "./machine";
 import { AgentMark, Bars, Transport } from "./marks";
 import { MeridianLine } from "./MeridianLine";
 import { Progress } from "./Progress";
@@ -65,13 +65,37 @@ function Mine({ mood, reduced }: { mood: Mood; reduced: boolean }) {
   return <Face id={id} mood={feeling ?? mood} reduced={reduced} />;
 }
 
-function Elapsed({ since }: { since: number }) {
+/** The time, once a second, for anything that counts up. */
+function useNow() {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, []);
-  return <span className="tabular">{clock(now - since)}</span>;
+  return now;
+}
+
+function Elapsed({ since }: { since: number }) {
+  return <span className="tabular">{clock(useNow() - since)}</span>;
+}
+
+/** Steps with how long each took. While it works, a tick for each one done and a dot for the one under way. */
+function StepLog({ steps, marks }: { steps: LoggedStep[]; marks?: boolean }) {
+  return (
+    <ol className="step-log">
+      {steps.map((step, i) => (
+        <li key={i} className="step-log-row" data-now={step.now || undefined}>
+          <span className="step-log-time tabular">{step.ms === null ? "" : clock(step.ms)}</span>
+          {marks && (
+            <svg className="step-log-mark" viewBox="0 0 20 20" aria-hidden="true">
+              {step.now ? <circle cx="10" cy="10" r="3.5" /> : <path d="M4 10l4 4 8-8" />}
+            </svg>
+          )}
+          <span className="truncate">{step.text}</span>
+        </li>
+      ))}
+    </ol>
+  );
 }
 
 const iconButton = (label: string, icon: Parameters<typeof Icon>[0]["name"], onClick: () => void, disabled = false) => (
@@ -284,12 +308,46 @@ export function ThinkingView({ reduced }: { reduced: boolean }) {
   );
 }
 
+/** The longest answer the terminal's own Other box is sent from here. */
+const TYPED_MOST = 2000;
+
+/** An answer in the user's own words, as the terminal's Other allows. Enter sends it, and an empty box sends
+ *  nothing, so nothing is ever picked for them. The island takes the keyboard only while the box is in use. */
+function AnswerBox({ value, onChange, onSend }: { value: string; onChange: (text: string) => void; onSend: () => void }) {
+  const took = useRef(false);
+  const keys = useRef((on: boolean) => {
+    if (took.current === on) return;
+    took.current = on;
+    islandTyping(on);
+  }).current;
+  useEffect(() => () => keys(false), [keys]);
+  return (
+    <form className="answer-box" onSubmit={(e) => { e.preventDefault(); if (value.trim()) onSend(); }}>
+      <input
+        aria-label="Type an answer"
+        placeholder="Type an answer…"
+        value={value}
+        maxLength={TYPED_MOST}
+        onChange={(e) => onChange(e.target.value)}
+        // Pressing in the box is typing, not the start of a drag.
+        onPointerDown={(e) => { e.stopPropagation(); keys(true); }}
+        onBlur={() => keys(false)}
+        onKeyDown={(e) => e.key === "Escape" && e.currentTarget.blur()}
+      />
+      <button type="submit" className="answer-send" aria-label="Send answer" disabled={!value.trim()}>
+        <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 16V4M5 9l5-5 5 5" /></svg>
+      </button>
+    </form>
+  );
+}
+
 /** Claude Code has asked something. Each question gets its own step, then they all go back together.
- *  On the island a tap answers. The panel has room to choose first, then confirm. */
+ *  On the island a tap answers, or an answer typed in the box. The panel has room to choose first, then confirm. */
 function QuestionCard({ sessionId, approval, panel }: { sessionId: string; approval: Approval; panel?: boolean }) {
   const questions = approval.questions!;
   const [answers, setAnswers] = useState<Record<string, string | string[]>>({});
   const [picked, setPicked] = useState<string[]>([]);
+  const [typed, setTyped] = useState("");
   const step = questions.length === 1 ? 0 : Object.keys(answers).length;
   const question = questions[Math.min(step, questions.length - 1)]!;
   const choosing = panel || question.multi;
@@ -297,17 +355,24 @@ function QuestionCard({ sessionId, approval, panel }: { sessionId: string; appro
   const finish = (pick: string | string[]) => {
     const next = { ...answers, [question.text]: pick };
     setPicked([]);
+    setTyped("");
     if (Object.keys(next).length === questions.length) answerApproval(sessionId, approval.id, true, next);
     else setAnswers(next);
   };
   const toggle = (option: string) =>
     setPicked((p) => (!question.multi ? [option] : p.includes(option) ? p.filter((o) => o !== option) : [...p, option]));
+  const done = choosing && (
+    <button className="allow" disabled={picked.length === 0} onClick={() => finish(question.multi ? picked : picked[0]!)}>
+      {panel && step + 1 < questions.length ? "Next" : "Done"}
+    </button>
+  );
+  const skip = <button className="ghost" onClick={() => answerApproval(sessionId, approval.id, false)}>Skip</button>;
 
   return (
     <>
       {panel && <span className="approval-kicker">A question{questions.length > 1 ? `, ${step + 1} of ${questions.length}` : ""}</span>}
       <p className="question-text" title={question.text}>{question.text}</p>
-      <div className="question-options" role="group" aria-label={question.text}>
+      <div className="question-options" role="group" aria-label={question.text} data-typing={typed.trim() !== "" || undefined}>
         {question.options.slice(0, 4).map((option, i) => (
           <button key={option} className="question-option" aria-pressed={choosing ? picked.includes(option) : undefined} onClick={() => (choosing ? toggle(option) : finish(option))}>
             <span className="truncate">{option}</span>
@@ -315,15 +380,16 @@ function QuestionCard({ sessionId, approval, panel }: { sessionId: string; appro
           </button>
         ))}
       </div>
-      <div className="row end">
-        {!panel && questions.length > 1 && <span className="meta grow tabular">{step + 1} of {questions.length}</span>}
-        <button className="ghost" onClick={() => answerApproval(sessionId, approval.id, false)}>Skip</button>
-        {choosing && (
-          <button className="allow" disabled={picked.length === 0} onClick={() => finish(question.multi ? picked : picked[0]!)}>
-            {panel && step + 1 < questions.length ? "Next" : "Done"}
-          </button>
-        )}
-      </div>
+      {panel ? (
+        <div className="row end">{skip}{done}</div>
+      ) : (
+        <div className="row answer-row">
+          {questions.length > 1 && <span className="meta tabular">{step + 1} of {questions.length}</span>}
+          <AnswerBox value={typed} onChange={setTyped} onSend={() => finish(typed.trim())} />
+          {skip}
+          {done}
+        </div>
+      )}
     </>
   );
 }
@@ -442,50 +508,57 @@ function SessionLine({ session }: { session: SessionDetail }) {
   );
 }
 
-/** What is open while the pointer is on the island: the list the agent keeps, or else every stage so far. */
-function StageCard({ session }: { session: SessionDetail }) {
-  const todos = session.todos ?? [];
-  const head = (right: React.ReactNode) => (
-    <div className="row stage-head">
-      <AgentMark agent={session.agent} size={18} live={false} />
-      <button className="grow text-button" onClick={() => openSession(session.id)}>
-        <span className="label">{session.project}</span>
-        <span className="meta truncate">{session.title}</span>
-      </button>
-      {right}
-      {!session.watched && iconButton("Stop task", "stop", () => cancelSession(session.id))}
-    </div>
-  );
-  if (todos.length > 0) {
-    return (
-      <div className="stage-card">
-        {head(<span className="stage-count tabular">{todoStep(todos)}</span>)}
-        <ul className="todo-list">
-          {todoWindow(todos, TODO_MAX_ROWS).map((todo) => (
-            <li key={todo.id} className="todo-line" data-status={todo.status}>
-              <i aria-hidden="true" />
-              <span className="truncate">{todo.text}</span>
-            </li>
-          ))}
-        </ul>
-      </div>
-    );
-  }
-  const start = turnStart(session);
+/** The list the agent keeps, while the pointer is on the island. */
+function TodoCard({ session }: { session: SessionDetail }) {
+  const todos = session.todos!;
   return (
     <div className="stage-card">
-      {head(<span className="meta"><Elapsed since={start} /></span>)}
-      <div className="stage-bars">
-        {stagesOf(session).map((stage) => (
-          <div key={stage.name} className="stage-bar" data-state={stage.state}>
-            <i />
-            <span className="stage-name">{stage.name}</span>
-            <span className="stage-note truncate">{stage.note}</span>
-          </div>
-        ))}
+      <div className="row stage-head">
+        <AgentMark agent={session.agent} size={18} live={false} />
+        <button className="grow text-button" onClick={() => openSession(session.id)}>
+          <span className="label">{session.project}</span>
+          <span className="meta truncate">{session.title}</span>
+        </button>
+        <span className="stage-count tabular">{todoStep(todos)}</span>
+        {!session.watched && iconButton("Stop task", "stop", () => cancelSession(session.id))}
       </div>
-      <div className="stage-steps">
-        {stepsOf(thisTurn(session)).slice(-4).map((step, i) => <StepRow key={i} step={step} start={start} />)}
+      <ul className="todo-list">
+        {todoWindow(todos, TODO_MAX_ROWS).map((todo) => (
+          <li key={todo.id} className="todo-line" data-status={todo.status}>
+            <i aria-hidden="true" />
+            <span className="truncate">{todo.text}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/** While it works, opened by the pointer or a click: how long so far, the step under way, and the last few
+ *  steps with how long each took. Stop is only for work the app started: one in a terminal is the user's. */
+function StageCard({ session, reduced }: { session: SessionDetail; reduced: boolean }) {
+  const now = useNow();
+  if (session.todos?.length) return <TodoCard session={session} />;
+  const log = stepLog(session, now);
+  const current = log.find((step) => step.now)?.text ?? (session.status === "starting" ? "Starting" : "Working");
+  return (
+    <div className="stage-card">
+      <div className="row stage-head">
+        <Mine mood="working" reduced={reduced} />
+        <AgentMark agent={session.agent} size={16} live={false} />
+        <button className="grow text-button" onClick={() => openSession(session.id)}>
+          <span className="meta truncate">{session.agent} · {session.project}</span>
+        </button>
+        <span className="meta tabular">Working · {spent(worked(session, now))}</span>
+      </div>
+      <div className="row stage-current">
+        <svg className="stage-current-mark" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3a7 7 0 1 1-7 7" /></svg>
+        <span className="label truncate">{current}</span>
+      </div>
+      {log.length > 0 && <StepLog steps={log.slice(-STAGE_ROWS)} marks />}
+      <div className="row end stage-actions">
+        <button className="stage-button" onClick={() => openSession(session.id)}>Show all steps</button>
+        {!session.watched && <button className="stage-button" data-stop="true" onClick={() => cancelSession(session.id)}>Stop</button>}
       </div>
     </div>
   );
@@ -499,14 +572,25 @@ export function WorkingView({ reduced, hovered }: { reduced: boolean; hovered: b
 
   if (blocked?.approval) {
     const { approval } = blocked;
-    const asks = approval.questions?.length ? "asks" : approval.plan ? "has a plan" : approval.tool === "Action" ? "needs your OK" : `wants to run ${approval.tool}`;
+    const question = Boolean(approval.questions?.length);
+    const asks = approval.plan ? "has a plan" : approval.tool === "Action" ? "needs your OK" : `wants to run ${approval.tool}`;
     const others = activeSessions(sessions).filter((s) => s.id !== blocked.id).slice(0, MULTITASK_MAX_ROWS - 1);
     return (
       <div className="stack pad-card">
         <div className="row">
           <Mine mood="needs" reduced={reduced} />
-          <span className="grow label truncate">{blocked.agent} {asks}</span>
-          <span className="meta">{blocked.project}</span>
+          {question ? (
+            <>
+              <AgentMark agent={blocked.agent} size={16} live={false} />
+              <span className="grow meta truncate">{blocked.agent} · {blocked.project}</span>
+              <span className="has-question">Has a question</span>
+            </>
+          ) : (
+            <>
+              <span className="grow label truncate">{blocked.agent} {asks}</span>
+              <span className="meta">{blocked.project}</span>
+            </>
+          )}
           <Queue sessionId={blocked.id} />
         </div>
         <ApprovalCard sessionId={blocked.id} approval={approval} />
@@ -515,7 +599,7 @@ export function WorkingView({ reduced, hovered }: { reduced: boolean; hovered: b
     );
   }
 
-  if (hovered) return <StageCard session={session} />;
+  if (hovered) return <StageCard session={session} reduced={reduced} />;
 
   const { word, what } = session.status === "starting" ? { word: "Starting", what: "" } : actionOf(session.activity);
   const todos = session.todos ?? [];
@@ -523,11 +607,17 @@ export function WorkingView({ reduced, hovered }: { reduced: boolean; hovered: b
   return (
     <div className="row pad-pill stage-pill">
       <AgentMark agent={session.agent} size={20} live={false} />
-      {/* The space keeps the two lines apart for a screen reader, and for anything that copies them. */}
-      <button className="grow text-button stacked" onClick={openStages}>
-        <span className="label truncate">{word}</span>{" "}
-        <span className="doing truncate">{what || session.project}</span>
-      </button>
+      {session.flash ? (
+        <button className="grow text-button stacked" onClick={openStages}>
+          <span className="label truncate" role="status">{session.flash}</span>
+        </button>
+      ) : (
+        // The space keeps the two lines apart for a screen reader, and for anything that copies them.
+        <button className="grow text-button stacked" onClick={openStages}>
+          <span className="label truncate">{word}</span>{" "}
+          <span className="doing truncate">{what || session.project}</span>
+        </button>
+      )}
       <span className="stage-clock">
         {todos.length > 0 ? <span>{todoStep(todos)}</span> : steps > 0 && <span>Step {steps}</span>}
         <Elapsed since={turnStart(session)} />
@@ -547,25 +637,31 @@ export function MultitaskView() {
   );
 }
 
-/** How a session came out, in its own words, for a moment before it moves to Notifications. */
-function FinishedCard({ noticeId, title, session, reduced }: { noticeId: string; title: string; session: SessionDetail; reduced: boolean }) {
-  const message = lastMessage(session);
-  const facts = endFacts(session);
+/** How a session came out, for a moment before it moves to Notifications: how long it worked and each step
+ *  it took. With no steps to show, its own last words instead. */
+function FinishedCard({ noticeId, session, reduced }: { noticeId: string; session: SessionDetail; reduced: boolean }) {
+  const now = Date.now();
+  const log = stepLog(session, now);
+  const message = log.length === 0 ? lastMessage(session) : null;
   const changed = changedFiles(session.log).length > 0;
   return (
     <div className="stack pad-card stage-end" data-tone="done">
-      <div className="row">
+      <div className="row stage-head">
         <span className="notice-face">
           <Mine mood="done" reduced={reduced} />
         </span>
-        <span className="grow label truncate">{title}</span>
-        <span className="meta tabular">{spent((session.endedAt ?? Date.now()) - turnStart(session))}</span>
+        <AgentMark agent={session.agent} size={16} live={false} />
+        <span className="grow meta truncate">{session.agent} · {session.project}</span>
+        <span className="meta">Done</span>
       </div>
-      {message && <p className="stage-message">{message}</p>}
-      {facts && <p className="meta truncate">{facts}</p>}
+      <span className="label truncate">{session.title}</span>
+      <span className="meta tabular stage-worked">
+        Worked for {spent(worked(session, now))}{log.length > 0 && ` · ${log.length} ${log.length === 1 ? "step" : "steps"}`}
+      </span>
+      {log.length > 0 ? <StepLog steps={log.slice(-FINISHED_ROWS)} /> : message && <p className="stage-message">{message}</p>}
       <div className="row end stage-actions">
         <PinButton id={noticeId} />
-        <button className="stage-button" onClick={() => dismissNotice(noticeId)}>Dismiss</button>
+        <button className="stage-button" onClick={() => dismissNotice(noticeId)}>Close</button>
         {session.pid ? <button className="stage-button" onClick={() => { dismissNotice(noticeId); void focusTerminal(session); }}>Terminal</button> : null}
         <button className="stage-button" data-main="true" onClick={() => { dismissNotice(noticeId); openSession(session.id, changed ? "changes" : "activity"); }}>
           {changed ? "See what changed" : "Open"}
@@ -612,7 +708,7 @@ export function NotificationView({ reduced }: { reduced: boolean }) {
   // Anything else is news, so the face glances at it as it arrives.
   const mood: Mood = notice.tone === "success" ? "done" : notice.tone === "urgent" ? "needs" : "notice";
   const ended = notice.finished && sessions.find((s) => s.id === notice.sessionId);
-  if (ended) return <FinishedCard noticeId={notice.id} title={notice.title} session={ended} reduced={reduced} />;
+  if (ended) return <FinishedCard noticeId={notice.id} session={ended} reduced={reduced} />;
 
   if (notice.quiet) {
     return (
@@ -878,6 +974,11 @@ function Wave({ tone, reduced, steps, listening }: { tone: string; reduced: bool
 
 export function VoiceView({ reduced }: { reduced: boolean }) {
   const voice = useApp((s) => s.voice);
+  // While the assistant looks in Knowledge, the island says whom it is looking up.
+  const looking = useApp((s) => {
+    const activity = s.agentChat.agent ? s.sessions.find((x) => x.id === s.agentChat.sessionId)?.activity : undefined;
+    return activity?.startsWith("Checking what I know about ") ? activity : null;
+  });
   if (!voice) return null;
   const hearing = voice.phase === "listening" || voice.phase === "pause";
   return (
@@ -889,7 +990,7 @@ export function VoiceView({ reduced }: { reduced: boolean }) {
         ) : (
           <Wave tone={hearing ? "#5ac8fa" : "#fff"} reduced={reduced} steps={hearing ? VOICE_STEPS.listen : VOICE_STEPS.speak} listening={hearing} />
         )}
-        <span className="meta">{VOICE_WORDS[voice.phase]}</span>
+        <span className="meta">{voice.phase === "thinking" && looking ? looking : VOICE_WORDS[voice.phase]}</span>
         {iconButton("Stop talking", "close", endConversation)}
       </div>
       <p className="voice-words" aria-live="polite">

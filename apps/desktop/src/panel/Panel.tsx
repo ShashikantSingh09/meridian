@@ -9,6 +9,7 @@ import { Agents } from "./Agents";
 import { Chat } from "./Chat";
 import { Home } from "./Home";
 import { Inbox } from "./Inbox";
+import { Knowledge } from "./Knowledge";
 import { Media } from "./Media";
 import { MyDay } from "./MyDay";
 import { Notes } from "./Notes";
@@ -23,6 +24,7 @@ const NAV: { tab: Tab; icon: IconName; label: string }[] = [
   { tab: "media", icon: "music", label: "Media" },
   { tab: "day", icon: "calendar", label: "My day" },
   { tab: "notes", icon: "note", label: "Notes" },
+  { tab: "knowledge", icon: "book", label: "Knowledge" },
   { tab: "inbox", icon: "bell", label: "Notifications" },
   { tab: "settings", icon: "settings", label: "Settings" },
 ];
@@ -34,6 +36,7 @@ const PAGES: Record<Tab, () => React.JSX.Element> = {
   media: Media,
   day: MyDay,
   notes: Notes,
+  knowledge: Knowledge,
   inbox: Inbox,
   settings: SettingsPage,
 };

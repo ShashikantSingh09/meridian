@@ -3,7 +3,9 @@
 
 import { Channel, invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import type { IdKind, IdNumbers, Profile } from "./details";
 import { mock } from "./mock";
+import type { StyleProfile } from "./style";
 import type {
   AgentEnvelope,
   AgentId,
@@ -18,8 +20,11 @@ import type {
   ContextEvent,
   Digest,
   EventTime,
+  HooksHealth,
   Integration,
   IslandPlace,
+  KnowledgeHit,
+  KnowledgeState,
   LocalServer,
   MediaAction,
   MediaSnapshot,
@@ -74,7 +79,7 @@ export interface StartSession {
 export const bridge = {
   setIslandRect: (rect: IslandRect) =>
     native ? invoke<void>("island_set_rect", { rect: { ...rect, dpr: window.devicePixelRatio || 1 } }) : Promise.resolve(),
-  setInteractive: (on: boolean) => (native ? invoke<void>("island_set_interactive", { on }) : Promise.resolve()),
+  setInteractive: (on: boolean) => (native ? invoke<void>("island_set_interactive", { on }) : mock.setInteractive(on)),
   islandDrag: (start: boolean) => (native ? invoke<void>("island_drag", { start }) : mock.islandDrag(start)),
   /** Off while the face sleeps, so the core stops reporting the pointer. */
   islandGaze: (on: boolean) => (native ? invoke<void>("island_gaze", { on }) : Promise.resolve()),
@@ -145,10 +150,22 @@ export const bridge = {
   accountDisconnect: (id: string) =>
     native ? invoke<void>("account_disconnect", { id }) : mock.accountDisconnect(id),
   accountSync: (id: string) => (native ? invoke<string>("account_sync", { id }) : Promise.resolve("Up to date.")),
-  openUrl: (url: string) => (native ? invoke<void>("open_url", { url }) : Promise.resolve()),
+  openUrl: (url: string) => (native ? invoke<void>("open_url", { url }) : mock.openUrl(url)),
   builtInClients: () => (native ? invoke<[boolean, boolean]>("built_in_clients") : mock.builtInClients()),
   /** Whether Gmail and Google Calendar are connected in the user's Claude account. */
   claudeConnectors: () => (native ? invoke<[boolean, boolean]>("claude_connectors") : mock.claudeConnectors()),
+  /** Sounds like you: a profile kept on this PC, learned from sent mail read through Claude, read-only. */
+  styleGet: () => (native ? invoke<StyleProfile | null>("style_get") : mock.styleGet()),
+  /** `onRead` hears how many sent emails have been read so far. */
+  styleLearn(onRead: (read: number) => void) {
+    if (!native) return mock.styleLearn(onRead);
+    const on = new Channel<number>();
+    on.onmessage = onRead;
+    return invoke<StyleProfile>("style_learn", { on });
+  },
+  styleStop: () => (native ? invoke<void>("style_stop") : mock.styleStop()),
+  styleSetLine: (key: string, text: string) => (native ? invoke<StyleProfile>("style_set_line", { key, text }) : mock.styleSetLine(key, text)),
+  styleForget: () => (native ? invoke<void>("style_forget") : mock.styleForget()),
   /** Sends the user to the service's own page, and stores what comes back. */
   aiSignIn: (id: string) => (native ? invoke<void>("ai_sign_in", { id }) : mock.setProviderKey(id)),
 
@@ -162,6 +179,8 @@ export const bridge = {
   watchStatus: () => (native ? invoke<boolean>("watch_status") : Promise.resolve(mock.watching())),
   watchPreview: (on: boolean) => (native ? invoke<SettingsChange>("watch_preview", { on }) : mock.watchPreview(on)),
   watchSet: (on: boolean) => (native ? invoke<void>("watch_set", { on }) : mock.watchSet(on)),
+  /** For Test and repair. Reads Claude Code's settings and these projects', and writes nothing. */
+  hooksHealth: (projects: string[]) => (native ? invoke<HooksHealth>("hooks_health", { projects }) : mock.hooksHealth(projects)),
 
   appVersion: () => (native ? invoke<string>("app_version") : Promise.resolve("0.0.0")),
   checkUpdate: (): Promise<UpdateStatus> =>
@@ -302,6 +321,11 @@ export const bridge = {
     if (!native) return Promise.resolve();
     return listen<string>("assistant-open", (e) => handler(e.payload)).then(() => {});
   },
+  /** The assistant was asked to take notes on a call. The page brings the microphone, as for a click. */
+  onAssistantStartNotes(handler: () => void) {
+    if (!native) return Promise.resolve(mock.onAssistantStartNotes(handler));
+    return listen("assistant-start-notes", handler).then(() => {});
+  },
   onAssistantStopListening(handler: () => void) {
     if (!native) return Promise.resolve();
     return listen("assistant-stop-listening", handler).then(() => {});
@@ -366,6 +390,28 @@ export const bridge = {
     if (!native) return Promise.resolve(mock.onNoteFailed(handler));
     return listen<{ id: string; title: string; why: string }>("note-failed", (e) => handler(e.payload)).then(() => {});
   },
+  knowledgeState: () => (native ? invoke<KnowledgeState>("knowledge_state") : mock.knowledgeState()),
+  /** Reads what is new from the sources that are on, and writes it up with the AI Chat is on. */
+  knowledgeUpdate: (engine: { agent?: string; provider?: string; model?: string }, chats: { text: string; at: number | null }[], idle: boolean) =>
+    native
+      ? invoke<void>("knowledge_update", { agent: engine.agent ?? null, provider: engine.provider ?? null, model: engine.model ?? null, chats, idle })
+      : mock.knowledgeUpdate(chats, idle),
+  knowledgeStop: () => (native ? invoke<void>("knowledge_stop") : mock.knowledgeStop()),
+  knowledgeSearch: (query: string) => (native ? invoke<KnowledgeHit[]>("knowledge_search", { query }) : mock.knowledgeSearch(query)),
+  knowledgeRead: (path: string) => (native ? invoke<string>("knowledge_read", { path }) : mock.knowledgeRead(path)),
+  /** `base` is the text the editor opened with, so a page an update changed meanwhile is not overwritten. */
+  knowledgeSave: (path: string, text: string, base: string) => (native ? invoke<void>("knowledge_save", { path, text, base }) : mock.knowledgeSave(path, text, base)),
+  knowledgeTick: (path: string, line: number, done: boolean) => (native ? invoke<void>("knowledge_tick", { path, line, done }) : mock.knowledgeTick(path, line, done)),
+  knowledgeOpen: (path: string) => (native ? invoke<void>("knowledge_open", { path }) : mock.knowledgeOpen(path)),
+  onKnowledgeChanged(handler: () => void) {
+    if (!native) return Promise.resolve(mock.onKnowledgeChanged(handler));
+    return listen("knowledge-changed", handler).then(() => {});
+  },
+  /** The PC has been idle for 10 minutes on its charger, so an update can start. */
+  onKnowledgeIdle(handler: () => void) {
+    if (!native) return Promise.resolve(mock.onKnowledgeIdle(handler));
+    return listen("knowledge-idle", handler).then(() => {});
+  },
   onNoteLevels(handler: (levels: NoteLevels) => void): Promise<() => void> {
     if (!native) return Promise.resolve(mock.onNoteLevels(handler));
     return listen<NoteLevels>("note-levels", (e) => handler(e.payload));
@@ -410,4 +456,16 @@ export const bridge = {
     if (!native) return Promise.resolve(() => {});
     return listen<string>("island-open-tab", (e) => handler(e.payload)).then((un) => un);
   },
+
+  // Your details. Kept on this PC by the core, and never given to the AI.
+  detailsGet: () => (native ? invoke<Profile>("details_get") : mock.detailsGet()),
+  /** Gives back the profile as kept, trimmed, or the first thing that is wrong. */
+  detailsSave: (profile: Profile) => (native ? invoke<Profile>("details_save", { profile }) : mock.detailsSave(profile)),
+  detailsDelete: () => (native ? invoke<void>("details_delete") : mock.detailsDelete()),
+  /** The ID numbers kept, masked. */
+  detailsIds: () => (native ? invoke<IdNumbers>("details_ids") : mock.detailsIds()),
+  /** One whole number, for Show. */
+  detailsIdShow: (kind: IdKind) => (native ? invoke<string>("details_id_show", { kind }) : mock.detailsIdShow(kind)),
+  /** An empty number removes it. */
+  detailsIdSet: (kind: IdKind, number: string) => (native ? invoke<void>("details_id_set", { kind, number }) : mock.detailsIdSet(kind, number)),
 };

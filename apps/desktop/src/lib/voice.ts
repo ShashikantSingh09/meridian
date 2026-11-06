@@ -640,6 +640,10 @@ async function onKey(down: boolean) {
   applyRelease();
 }
 
+let lastWake: { word: string; at: number } | null = null;
+/** The last time it woke to its name, for Test and repair. In memory only. */
+export const lastHeardWake = () => lastWake;
+
 export function wireVoice() {
   void bridge.onVoiceKey(onKey);
   void bridge.onWakeState((status) => {
@@ -664,6 +668,7 @@ export function wireVoice() {
   });
   void bridge.onWakeHeard(({ word, test, afterMs }) => {
     if (test) return wakeTestHeard(word);
+    lastWake = { word, at: Date.now() };
     // A perk, so it is plain it caught its name. Then it listens.
     feel("heard", HEARD_MS);
     void startVoice(getState().settings.wakeAfter, true, afterMs);

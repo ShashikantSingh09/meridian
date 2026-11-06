@@ -369,8 +369,12 @@ fn questions_of(input: &Value) -> Vec<Question> {
         .collect()
 }
 
+/// The longest answer typed on the island, as the terminal's own Other box would take it.
+const TYPED_CHARS: usize = 2000;
+
 /// True when the answers cover exactly what was asked: one per question, each from that
-/// question's own options. A multiple choice is a list of different options.
+/// question's own options or typed by the user, as the terminal's Other allows. A multiple choice
+/// is a list of different options, or one typed answer.
 fn answers_fit(input: &Value, answers: &Map<String, Value>) -> bool {
     let questions = questions_of(input);
     !questions.is_empty()
@@ -384,7 +388,7 @@ fn answers_fit(input: &Value, answers: &Map<String, Value>) -> bool {
                     unique.dedup();
                     !picks.is_empty() && unique.len() == picks.len() && picks.iter().all(offered)
                 }
-                Some(pick @ Value::String(_)) if !question.multi => offered(pick),
+                Some(Value::String(typed)) => !typed.trim().is_empty() && typed.chars().count() <= TYPED_CHARS,
                 _ => false,
             }
         })
@@ -1018,15 +1022,29 @@ mod tests {
         assert_eq!(decision["updatedInput"]["questions"], input["questions"]);
 
         for wrong in [
-            json!({ "Which?": "Z", "Also?": ["X"] }),
+            json!({ "Which?": "A", "Also?": ["X", "Z"] }),
             json!({ "Which?": "A" }),
             json!({ "Which?": ["A"], "Also?": ["X"] }),
             json!({ "Which?": "A", "Also?": ["X", "X"] }),
             json!({ "Which?": "A", "Also?": [] }),
+            json!({ "Which?": "  ", "Also?": ["X"] }),
+            json!({ "Which?": "Z".repeat(TYPED_CHARS + 1), "Also?": ["X"] }),
+            json!({ "Which?": 3, "Also?": ["X"] }),
         ] {
             assert_eq!(reply_body("AskUserQuestion", &input, reply(wrong.clone())), "", "{wrong}");
         }
         assert_eq!(reply_body("AskUserQuestion", &input, Reply { allow: true, answers: None }), "", "no answer leaves it to the terminal");
+    }
+
+    #[test]
+    fn a_typed_answer_goes_back_as_the_terminals_other_would() {
+        let input = json!({ "questions": [
+            { "question": "Which currency?", "options": [{ "label": "Rupees" }, { "label": "Dollars" }], "multiSelect": false },
+            { "question": "Which stores?", "options": [{ "label": "India" }, { "label": "US" }], "multiSelect": true },
+        ] });
+        let typed = json!({ "Which currency?": "Rupees, but keep dollars for the US store", "Which stores?": "All of them" });
+        let body: Value = serde_json::from_str(&reply_body("AskUserQuestion", &input, Reply { allow: true, answers: typed.as_object().cloned() })).unwrap();
+        assert_eq!(body["hookSpecificOutput"]["decision"]["updatedInput"]["answers"], typed);
     }
 
     #[test]

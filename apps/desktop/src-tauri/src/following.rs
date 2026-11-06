@@ -267,6 +267,51 @@ pub fn watch_status(following: State<'_, Following>) -> bool {
     following.on()
 }
 
+/// For Test and repair. Reads, and never writes.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HooksHealth {
+    /// Following is on, so the hooks should be there.
+    on: bool,
+    /// They are in Claude Code's settings, and something is listening for them.
+    in_place: bool,
+    /// The projects, of those asked about, that turn every hook off.
+    off_in: Vec<String>,
+}
+
+#[tauri::command]
+pub fn hooks_health(following: State<'_, Following>, projects: Vec<String>) -> HooksHealth {
+    let written = following.settings.as_deref().is_some_and(watch::installed);
+    let listening = following.watcher.lock().unwrap().is_some();
+    HooksHealth { on: following.on(), in_place: written && listening, off_in: projects.into_iter().filter(|project| hooks_off_in(std::path::Path::new(project))).collect() }
+}
+
+/// A project's own Claude Code settings can turn off every hook, ours with them.
+fn hooks_off_in(project: &std::path::Path) -> bool {
+    ["settings.json", "settings.local.json"].iter().any(|name| {
+        let text = std::fs::read_to_string(project.join(".claude").join(name)).unwrap_or_default();
+        serde_json::from_str::<serde_json::Value>(text.trim_start_matches('\u{feff}')).is_ok_and(|settings| settings["disableAllHooks"] == true)
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_project_that_turns_hooks_off_is_found() {
+        let project = std::env::temp_dir().join(format!("meridian-test-hooks-{}", std::process::id()));
+        let claude = project.join(".claude");
+        std::fs::create_dir_all(&claude).unwrap();
+        assert!(!hooks_off_in(&project), "no settings of its own");
+        std::fs::write(claude.join("settings.json"), r#"{ "disableAllHooks": false }"#).unwrap();
+        assert!(!hooks_off_in(&project));
+        std::fs::write(claude.join("settings.local.json"), "\u{feff}{ \"disableAllHooks\": true }").unwrap();
+        assert!(hooks_off_in(&project), "the local file counts too, byte order mark and all");
+        std::fs::remove_dir_all(project).unwrap();
+    }
+}
+
 #[tauri::command]
 pub async fn watch_set(app: AppHandle, following: State<'_, Following>, on: bool) -> Result<(), String> {
     if on {

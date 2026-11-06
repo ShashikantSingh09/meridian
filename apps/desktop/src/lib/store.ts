@@ -32,18 +32,20 @@ import type {
   WakeStatus,
   LimitWindow,
   NotesState,
+  KnowledgeState,
   Charge,
   IslandPlace,
 } from "./types";
 import type { Mood } from "../island/faces";
 import type { VoiceState } from "./voice";
+import type { RepairResult, Row } from "./repair";
 import { lastMessage, limitName, mergeTodo, resetLabel } from "./sessions";
 import { applyTheme } from "./theme";
 import { defaultSettings } from "./types";
 import { whatsNew, type NewThing } from "./whats-new";
 
-export type Tab = "home" | "chat" | "agents" | "media" | "day" | "notes" | "inbox" | "settings";
-export type SettingsSection = "general" | "themes" | "island" | "assistant" | "voice" | "wake" | "screen" | "updates" | "models" | "providers" | "agents" | "privacy" | "about";
+export type Tab = "home" | "chat" | "agents" | "media" | "day" | "notes" | "knowledge" | "inbox" | "settings";
+export type SettingsSection = "general" | "themes" | "island" | "assistant" | "voice" | "wake" | "fill" | "details" | "screen" | "updates" | "models" | "providers" | "agents" | "privacy" | "about";
 
 export interface LogEntry {
   kind: "user" | "text" | "activity" | "system" | "diff" | "output";
@@ -86,6 +88,8 @@ export interface SessionDetail extends SessionSummary {
   restored?: boolean;
   /** The agent's own id for this conversation, which is what lets it carry on after a restart. */
   nativeId?: string | null;
+  /** A few words the working line says for a moment, such as that an answer was sent. */
+  flash?: string;
 }
 
 export interface ChatState {
@@ -174,6 +178,10 @@ export interface AppState {
   notes: NotesState;
   /** The note open in Notes, until another is picked. */
   selectedNote: string | null;
+  /** The pages, and what an update is doing, as the core last said. */
+  knowledge: KnowledgeState;
+  /** The page open in Knowledge, until another is picked. */
+  knowledgePage: string | null;
   /** Google and Microsoft sign-in work with no registration of the user's own. */
   builtInClients: [boolean, boolean];
   digests: Record<string, Digest>;
@@ -218,6 +226,8 @@ export interface AppState {
   /** The message being written, kept while the panel is closed or on another page. */
   draft: string;
   draftFiles: string[];
+  /** Test and repair: each check as it stands, when the run began, and the last whole result. */
+  repair: { rows: Row[]; at: number; last: RepairResult | null };
 }
 
 const LOG_LIMIT = 500;
@@ -274,6 +284,8 @@ let state: AppState = {
   integrations: [],
   notes: { notes: [], recording: null, working: [] },
   selectedNote: null,
+  knowledge: { pages: [], status: { running: false, done: 0, total: 0, now: "", sources: [], failed: null }, updatedAt: null, folder: "", calls: 0 },
+  knowledgePage: null,
   builtInClients: [false, false],
   digests: {},
   fetching: [],
@@ -301,6 +313,7 @@ let state: AppState = {
   signingIn: [],
   draft: "",
   draftFiles: [],
+  repair: { rows: [], at: 0, last: null },
 };
 
 const listeners = new Set<() => void>();
@@ -443,7 +456,10 @@ export const clearDraft = () => set({ draft: "", draftFiles: [] });
 export const setTab = (tab: Tab) => set({ tab });
 export const setNotes = (notes: NotesState) => set({ notes });
 export const showNote = (selectedNote: string | null) => set({ selectedNote });
+export const setKnowledge = (knowledge: KnowledgeState) => set({ knowledge });
+export const showPage = (knowledgePage: string | null) => set({ knowledgePage });
 export const setSettingsSection = (settingsSection: SettingsSection) => set({ settingsSection });
+export const setRepair = (patch: Partial<AppState["repair"]>) => set({ repair: { ...state.repair, ...patch } });
 export const openSettings = (settingsSection: SettingsSection) => set({ tab: "settings", settingsSection });
 
 let hoverTimer: ReturnType<typeof setTimeout> | undefined;
@@ -842,7 +858,7 @@ export async function sendAgentChat(said: string, images: string[] = [], spoken 
 
 // ── Agent sessions ──────────────────────────────────────────────────────────
 
-const projectName = (cwd: string) => cwd.split(/[\\/]/).filter(Boolean).pop() ?? cwd;
+export const projectName = (cwd: string) => cwd.split(/[\\/]/).filter(Boolean).pop() ?? cwd;
 
 function patchSession(id: string, fn: (s: SessionDetail) => SessionDetail) {
   set({ sessions: state.sessions.map((s) => (s.id === id ? fn(s) : s)) });
@@ -904,7 +920,13 @@ export function applyAgentEvent(envelope: AgentEnvelope) {
         activity: `Waiting for approval: ${(s.approval ?? event.approval).tool}`,
       }));
       break;
-    case "approvalResolved":
+    case "approvalResolved": {
+      // A question that goes without an answer from here was answered in the terminal.
+      const question = [session.approval, ...session.queued].find((a) => a?.id === event.id)?.questions?.length;
+      const here = answeredHere.get(event.id);
+      answeredHere.delete(event.id);
+      if (question && here) flash(sessionId, `Sent. ${session.agent} is working.`);
+      else if (question && here === undefined && session.watched) flash(sessionId, "Answered in the terminal");
       patchSession(sessionId, (s) => {
         const queued = s.queued.filter((a) => a.id !== event.id);
         if (s.approval?.id !== event.id) return { ...s, queued };
@@ -914,6 +936,7 @@ export function applyAgentEvent(envelope: AgentEnvelope) {
         return { ...s, approval: next ?? null, queued: rest, status: next ? "waiting" : "running", activity: doing };
       });
       break;
+    }
     case "usage":
       patchSession(sessionId, (s) => ({
         ...s,
@@ -1102,9 +1125,24 @@ export async function focusTerminal(session: Pick<SessionDetail, "pid" | "cwd" |
   if (!found) pushError({ title: "Could not find its window", body: `The terminal ${session.project} runs in may have closed.` });
 }
 
+/** Requests answered from the app, and whether that sent answers. Any other goes by itself from the terminal. */
+const answeredHere = new Map<string, boolean>();
+const FLASH_MS = 4000;
+
+function flash(id: string, text: string) {
+  patchSession(id, (s) => ({ ...s, flash: text }));
+  setTimeout(() => patchSession(id, (s) => (s.flash === text ? { ...s, flash: undefined } : s)), FLASH_MS);
+}
+
+/** A box on the island needs the keyboard while it is in use, and gives it back after. The panel has its own. */
+export function islandTyping(on: boolean) {
+  if (!state.panelOpen) void bridge.setInteractive(on);
+}
+
 export function answerApproval(sessionId: string, approvalId: string, allow: boolean, answers?: Record<string, string | string[]>) {
   if (Date.now() - lastAnswerAt < ANSWER_GAP_MS) return;
   lastAnswerAt = Date.now();
+  answeredHere.set(approvalId, allow && answers !== undefined);
   feel(allow ? "love" : "error", 1300);
   void bridge.answerApproval(sessionId, approvalId, allow, answers).catch((err) => pushError({ title: "That request has gone", body: describe(err) }));
 }
@@ -1736,11 +1774,12 @@ const clear: Partial<AppState> = {
 /** A check nobody asked for says so on the island, once for each new version. */
 let announced: string | null = null;
 
+/** False when GitHub could not be reached. */
 export async function checkForUpdates(announce = false) {
-  if (state.updating) return;
+  if (state.updating) return true;
   if (state.settings.localOnly) {
     set({ update: { ...state.update, available: false, message: "Update checks are off in local-only mode." } });
-    return;
+    return true;
   }
   set({ updating: "checking" });
   try {
@@ -1750,14 +1789,18 @@ export async function checkForUpdates(announce = false) {
       announced = update.latest;
       pushNotice({ tone: "info", title: "Update ready", body: `Meridian ${update.latest.replace(/^v/, "")} is ready to install.`, update: true });
     }
+    return true;
   } catch {
     set({ update: { ...state.update, available: false, message: "Could not check for updates." } });
+    return false;
   } finally {
     set({ updating: null });
   }
 }
 
 export const RELEASES_URL = "https://github.com/ShashikantSingh09/meridian/releases/latest";
+/** Where Gmail and Google Calendar are connected to the user's Claude account. */
+export const CLAUDE_CONNECTORS = "https://claude.ai/customize/connectors";
 
 /** Succeeding ends the app, so only a failure comes back here. A copy that was not installed cannot
  *  update itself, so it gets the release page instead of half-updating. */

@@ -179,6 +179,8 @@ pub fn tool_label(name: &str, input: &Value) -> String {
         "WebFetch" => format!("Fetching {}", line(text("url"))),
         "WebSearch" => format!("Searching the web: {}", line(text("query"))),
         "Agent" | "Task" => format!("Subagent: {}", line(text("description"))),
+        // The island says this while the assistant looks in the user's Knowledge pages.
+        "mcp__meridian__my_knowledge" => format!("Checking what I know about {}", line(text("about"))),
         other => match connector_tool(other) {
             Some(tool) => format!("Tool: {tool}"),
             None => other.to_string(),
@@ -553,6 +555,7 @@ mod tests {
         assert_eq!(tool_label("Bash", &json!({"command": "ls\nrm x"})), "$ ls");
         assert_eq!(tool_label("SomeMcpTool", &json!({})), "SomeMcpTool");
         assert_eq!(tool_label("mcp__meridian__open_app", &json!({})), "Tool: Open app");
+        assert_eq!(tool_label("mcp__meridian__my_knowledge", &json!({"about": "Asha"})), "Checking what I know about Asha");
         assert_eq!(tool_label("mcp__plugin_claude-mem_mcp-search__work_state_write", &json!({})), "Tool: Work state write");
     }
 

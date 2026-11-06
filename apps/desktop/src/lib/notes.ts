@@ -110,6 +110,8 @@ export function setSummaryByItself(notesSummary: boolean) {
 export function wireNotes() {
   void bridge.onNotesChanged(() => void refreshNotes());
   void bridge.onNoteWritten((id) => void written(id));
+  // Asked of the assistant in the user's own words: the same start as the button, so the island shows it.
+  void bridge.onAssistantStartNotes(() => void startRecording());
   void bridge.onNoteQuiet(setQuietCall);
   void bridge.onNoteStoppedQuiet((id) => {
     setQuietCall(0);

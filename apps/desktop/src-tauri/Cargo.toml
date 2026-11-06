@@ -19,6 +19,7 @@ ai-core = { path = "../../../crates/ai-core" }
 base64 = "0.22"
 chrono = "0.4"
 getrandom = "0.3"
+knowledge = { path = "../../../crates/knowledge" }
 mcp = { path = "../../../crates/mcp" }
 media = { path = "../../../crates/media" }
 notes = { path = "../../../crates/notes" }

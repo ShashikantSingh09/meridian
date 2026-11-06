@@ -8,11 +8,10 @@ import { useEffect, useRef, useState } from "react";
 import { hostOf } from "../island/views";
 import { Brand } from "../lib/brands";
 import { Icon } from "../lib/icons";
-import { checkClaudeConnectors, connectIntegration, describeWhen, disconnectIntegration, fetchIntegration, openLink, useApp } from "../lib/store";
+import { checkClaudeConnectors, CLAUDE_CONNECTORS, connectIntegration, describeWhen, disconnectIntegration, fetchIntegration, openLink, useApp } from "../lib/store";
 import type { FetchedItem, Integration } from "../lib/types";
 
 const FIRST_GROUPS = ["Mail and calendar", "Work", "Development"];
-const CLAUDE_CONNECTORS = "https://claude.ai/customize/connectors";
 
 /** Counts up to the number of rows, so a result reads as work done just now. */
 function Count({ value }: { value: number }) {

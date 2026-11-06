@@ -65,62 +65,6 @@
   color: #64b5ff;
 }
 
-.stage-bars {
-  flex: none;
-  display: flex;
-  gap: 6px;
-}
-
-.stage-bar {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  min-height: 42px;
-}
-
-.stage-bar i {
-  height: 4px;
-  margin-bottom: 5px;
-  border-radius: 2px;
-  background: rgba(240, 240, 248, 0.32);
-}
-
-.stage-bar[data-state="done"] i { background: #4fd18b; }
-.stage-bar[data-state="now"] i { background: #64b5ff; }
-
-.stage-name {
-  font-size: 11.5px;
-  font-weight: 600;
-  color: #f7f7f9;
-}
-
-.stage-bar[data-state="next"] .stage-name { color: rgba(240, 240, 248, 0.62); }
-
-.stage-note {
-  font-size: 11px;
-  color: rgba(240, 240, 248, 0.62);
-}
-
-.stage-steps {
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.stage-steps .step-row {
-  --read: #64b5ff;
-  --edit: #c9a7ff;
-  --run: #4fd18b;
-  min-height: 21px;
-  gap: 8px;
-  font-size: 11.5px;
-}
-
-.stage-steps .step-verb { width: 34px; }
-.stage-steps .step-what { color: rgba(240, 240, 248, 0.8); font-size: 11.5px; }
-.stage-steps .step-time { color: rgba(240, 240, 248, 0.62); }
-
 .todo-list {
   margin: 0;
   padding: 0;
@@ -242,6 +186,153 @@
   margin-top: auto;
 }
 
+/* ── How long it worked ──────────────────────────────────────────────────────── */
+
+.stage-current {
+  flex: none;
+  min-height: 20px;
+  gap: 9px;
+}
+
+.stage-current .label {
+  font-size: 13.5px;
+}
+
+/* Still: the step's own words say it is under way, and a turning mark would redraw the window all along. */
+.stage-current-mark {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  fill: none;
+  stroke: #8cc8ff;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+}
+
+.stage-worked {
+  margin-top: -2px;
+}
+
+.step-log {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 8px 10px;
+  list-style: none;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.step-log-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 17px;
+  font-size: 12px;
+  color: rgba(240, 240, 248, 0.82);
+}
+
+.step-log-time {
+  width: 34px;
+  flex: none;
+  text-align: right;
+  color: rgba(240, 240, 248, 0.55);
+}
+
+.step-log-mark {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  fill: none;
+  stroke: #30d158;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.step-log-row[data-now] .step-log-mark {
+  fill: #8cc8ff;
+  stroke: none;
+}
+
+.stage-button[data-stop="true"],
+.stage-button[data-stop="true"]:hover {
+  background: linear-gradient(180deg, #ff5f55 0, #d92d20 100%);
+}
+
+/* ── A question answered in your own words ───────────────────────────────────── */
+
+.has-question {
+  flex: none;
+  font-size: 12px;
+  font-weight: 500;
+  color: #ffd18a;
+}
+
+.question-options[data-typing] {
+  opacity: 0.4;
+}
+
+.answer-row {
+  flex: none;
+  gap: 8px;
+}
+
+.answer-box {
+  flex: 1;
+  min-width: 0;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 4px 0 12px;
+  border-radius: 17px;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.answer-box:focus-within {
+  box-shadow: inset 0 0 0 1.5px #ffbe5c;
+}
+
+.island .answer-box input {
+  flex: 1;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  font-size: 13px;
+  color: #f7f7f9;
+  outline: none;
+}
+
+.island .answer-box input::placeholder {
+  color: rgba(240, 240, 248, 0.6);
+}
+
+.answer-send {
+  width: 26px;
+  height: 26px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 13px;
+  background: #f5f5f7;
+  color: #000;
+}
+
+.answer-send svg {
+  width: 12px;
+  height: 12px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 .stage-button {
   height: 28px;
   padding: 0 12px;
@@ -354,9 +445,6 @@
 .step-row[data-kind="run"] .step-verb { color: var(--run); }
 .step-row[data-kind="stop"] .step-verb,
 .step-row[data-failed="true"] .step-verb { color: var(--tint-red); }
-
-.stage-steps .step-row[data-failed="true"] .step-verb,
-.stage-steps .step-row[data-kind="stop"] .step-verb { color: #ff8a80; }
 
 .step-what {
   flex: 1;

@@ -135,6 +135,14 @@ export interface Approval {
   why?: string;
 }
 
+/** Whether the Claude Code hooks are where following needs them. */
+export interface HooksHealth {
+  on: boolean;
+  inPlace: boolean;
+  /** Projects that turn every hook off in their own settings. */
+  offIn: string[];
+}
+
 /** What a change to a settings file would do, shown before it is made. */
 export interface SettingsChange {
   path: string;
@@ -241,6 +249,8 @@ export interface Settings {
   /** What the assistant calls the user. Empty uses no name. */
   assistantCallsYou: string;
   assistantStyle: string;
+  /** A few things to ask, under Home's ask box. */
+  homeSuggestions: boolean;
   wakeEnabled: boolean;
   wakeWords: WakeWord[];
   wakeSensitivity: "sure" | "balanced" | "easily";
@@ -261,6 +271,113 @@ export interface Settings {
   onboarded: boolean;
   /** Which face lives on the island. */
   face: string;
+  /** Write here, Fill this form and Finish this for me. Kept for the fill engine to read. */
+  fill: FillSettings;
+  /** What Knowledge learns from, and when it updates. Every source is off until turned on. */
+  knowledge: KnowledgePreferences;
+}
+
+/** An app or site, as answered the first time Meridian filled in it. */
+export interface FillPlace {
+  /** The app's process name or the site's address, like slack.exe or mail.google.com. */
+  id: string;
+  name: string;
+  fill: "allowed" | "ask" | "never";
+  /** Finish this for me may work here too. Its own yes, per app. */
+  finish: boolean;
+  /** A bank, tax or government site, which asks every time. */
+  alwaysAsk: boolean;
+}
+
+export interface FillSettings {
+  on: boolean;
+  key: "ctrl-alt-f" | "off";
+  buttons: boolean;
+  /** The engine that decides what goes where. It never sees Your details. */
+  ai: string;
+  /** Experimental, off until turned on with its own switch. */
+  finish: boolean;
+  finishAi: string;
+  places: FillPlace[];
+  sources: { details: boolean; knowledge: boolean; mail: boolean; notes: boolean; files: boolean; clipboard: boolean; picture: boolean };
+}
+
+export interface KnowledgePreferences {
+  notes: boolean;
+  gmail: boolean;
+  calendar: boolean;
+  chats: boolean;
+  when: "idle" | "manual";
+}
+
+export type KnowledgeKind = "person" | "project" | "promise" | "place";
+export type KnowledgeSource = "notes" | "gmail" | "calendar" | "chats";
+
+export interface KnowledgeRef {
+  label: string;
+  /** meridian:note/<id>, meridian:chat, or a Gmail or Google Calendar address. */
+  target: string;
+}
+
+export interface KnowledgeLine {
+  /** Its line in the file, for ticking it. */
+  at: number;
+  text: string;
+  source: KnowledgeRef | null;
+  /** The user wrote or changed it, so no update touches it. */
+  yours: boolean;
+  /** A promise's tick box. */
+  done: boolean | null;
+  bullet: boolean;
+}
+
+export interface KnowledgePage {
+  /** Inside the Knowledge folder, as "People/Asha Rao.md". */
+  path: string;
+  kind: KnowledgeKind;
+  title: string;
+  about: string;
+  subtitle: string;
+  sections: { heading: string; lines: KnowledgeLine[] }[];
+  linked: string[];
+  sources: KnowledgeRef[];
+  /** When the file last changed, in ms. */
+  updated: number;
+}
+
+export interface KnowledgeSourceStatus {
+  id: KnowledgeSource;
+  state: "waiting" | "reading" | "read" | "done" | "skipped";
+  found: number;
+  why: string;
+  signIn: boolean;
+}
+
+export interface KnowledgeStatus {
+  running: boolean;
+  done: number;
+  total: number;
+  now: string;
+  sources: KnowledgeSourceStatus[];
+  failed: string | null;
+}
+
+export interface KnowledgeState {
+  pages: KnowledgePage[];
+  status: KnowledgeStatus;
+  updatedAt: number | null;
+  folder: string;
+  /** Finished call notes on this PC. */
+  calls: number;
+}
+
+export interface KnowledgeHit {
+  path: string;
+  kind: KnowledgeKind;
+  title: string;
+  snippet: string;
+  /** The snippet is quoted from the page. */
+  quote: boolean;
 }
 
 /** Where a provider's data comes from and how it signs in. "account" is the direct
@@ -526,6 +643,7 @@ export const defaultSettings: Settings = {
   customThemes: [],
   assistantCallsYou: "",
   assistantStyle: "calm",
+  homeSuggestions: true,
   wakeEnabled: false,
   wakeWords: [{ text: "Hey Meridian", on: true }, { text: "Okay Meridian", on: false }],
   wakeSensitivity: "balanced",
@@ -545,4 +663,15 @@ export const defaultSettings: Settings = {
   sounds: true,
   onboarded: false,
   face: "soft",
+  fill: {
+    on: false,
+    key: "ctrl-alt-f",
+    buttons: true,
+    ai: "claude-code",
+    finish: false,
+    finishAi: "claude-code",
+    places: [],
+    sources: { details: true, knowledge: true, mail: true, notes: true, files: true, clipboard: true, picture: false },
+  },
+  knowledge: { notes: false, gmail: false, calendar: false, chats: false, when: "idle" },
 };

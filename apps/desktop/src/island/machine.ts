@@ -192,22 +192,30 @@ const BATTERY: Geometry = { w: 340, ...BAR };
 const BATTERY_OPEN: Geometry = { w: 408, h: 104, r: 28 };
 const APPROVAL: Geometry = { w: 430, h: 132, r: 26 };
 const PLAN: Geometry = { w: 470, h: 320, r: 28 };
-/** Room for two lines of a question, plus this much per option. */
-const QUESTION_BASE = 134;
+/** Room for two lines of a question and the box to type an answer in, plus this much per option. */
+const QUESTION_BASE = 138;
 const QUESTION_ROW = 40;
+const QUESTION_W = 460;
 const MULTITASK_ROW = 34;
 const MULTITASK_PAD = 18;
 export const MULTITASK_MAX_ROWS = 4;
 /** A session carrying on while another one asks, under the question. */
 const OTHER_ROW = 38;
-const STAGES: Geometry = { w: 344, h: 208, r: 22 };
+/** The working card: its heading, the step under way and the buttons, and the short step log. */
+const STAGES: Geometry = { w: 460, h: 106, r: 24 };
+/** The last few steps on the working card, and as many as fit on the finished one. */
+export const STAGE_ROWS = 3;
+export const FINISHED_ROWS = 6;
+/** The step log's box, with a row per step. */
+const logBox = (rows: number) => (rows > 0 ? 20 + rows * 21 : 0);
 /** The heading of the to-do card, plus this much per line. */
 const TODO_BASE = 46;
 const TODO_ROW = 23;
 export const TODO_MAX_ROWS = 6;
-const FINISHED: Geometry = { w: 344, h: 196, r: 22 };
-/** Nothing to quote, so only the heading, the facts and the buttons. */
-const FINISHED_BRIEF: Geometry = { w: 344, h: 126, r: 22 };
+/** The heading, the title, how long it worked and the buttons, then its last words or its steps. */
+const FINISHED: Geometry = { w: 460, h: 196, r: 24 };
+const FINISHED_BRIEF: Geometry = { w: 460, h: 126, r: 24 };
+const FINISHED_LOG = 120;
 const STOPPED: Geometry = { w: 344, h: 164, r: 22 };
 
 const IDLE_CLOCK: Geometry = { w: 148, h: 34, r: 15 };
@@ -254,6 +262,8 @@ export interface GeometryContext {
   todos?: number;
   /** A session's end is on show, and whether there is a message to quote. */
   finished?: "message" | "brief";
+  /** Steps in the log of the session on show. */
+  steps?: number;
   /** What is on show is an agent that stopped. */
   stopped?: boolean;
   /** Nothing is recording, so the note view is only saying it is writing. */
@@ -278,14 +288,15 @@ export function geometryFor(view: IslandView, ctx: GeometryContext): Geometry {
   if (view === "working" && ctx.asking?.plan) return { ...PLAN, h: PLAN.h + others };
   if (view === "working" && ctx.asking?.questions?.length) {
     const most = Math.max(...ctx.asking.questions.map((q) => Math.min(q.options.length, 4)));
-    return { ...APPROVAL, h: QUESTION_BASE + most * QUESTION_ROW + others };
+    return { ...APPROVAL, w: QUESTION_W, h: QUESTION_BASE + most * QUESTION_ROW + others };
   }
   if (view === "working" && ctx.approval) return { ...APPROVAL, h: APPROVAL.h + others };
   if (view === "working" && ctx.hovered && ctx.todos) return { w: 324, h: TODO_BASE + Math.min(ctx.todos, TODO_MAX_ROWS) * TODO_ROW, r: 22 };
-  if (view === "working" && ctx.hovered) return STAGES;
+  if (view === "working" && ctx.hovered) return { ...STAGES, h: STAGES.h + logBox(Math.min(ctx.steps ?? 0, STAGE_ROWS)) };
   if (view === "note") return ctx.noteWriting ? NOTE_WRITING : ctx.hovered ? NOTE_STOP : SIZES.note;
   if (view === "notification" && ctx.noteReady) return NOTE_READY;
   if (view === "error" && ctx.noteFailed) return NOTE_FAILED;
+  if (view === "notification" && ctx.finished && ctx.steps) return { ...FINISHED, h: FINISHED_LOG + logBox(Math.min(ctx.steps, FINISHED_ROWS)) };
   if (view === "notification" && ctx.finished) return ctx.finished === "message" ? FINISHED : FINISHED_BRIEF;
   if (view === "error" && ctx.stopped) return STOPPED;
   if (view === "media" && ctx.mediaOpen) return MEDIA_OPEN;

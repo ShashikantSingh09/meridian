@@ -484,6 +484,7 @@ mod tests {
             subject: "Your booking confirmation - QX7K2M".into(),
             date: date.into(),
             text: "Thank you for booking with Northwind Airways.\n\nBooking reference: QX7K2M\nAirline: Northwind Airways\n\nFlight NW204\nBoston (BOS) to Reykjavik (KEF)\nDeparts: Fri, 20 Nov 2026 19:40\nArrives: Sat, 21 Nov 2026 05:05".into(),
+            link: String::new(),
         };
         let message = copied_message(&copy("18c2f0a9", "2026-10-02T08:15:00+00:00"));
         assert_eq!(message.source_ref.account, THROUGH_CLAUDE);

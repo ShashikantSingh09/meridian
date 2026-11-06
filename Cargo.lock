@@ -1291,6 +1291,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "fill"
+version = "0.6.3"
+dependencies = [
+ "screen",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "windows",
+]
+
+[[package]]
 name = "find-msvc-tools"
 version = "0.1.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2324,6 +2335,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "knowledge"
+version = "0.6.3"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "lazy_static"
 version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2513,6 +2533,7 @@ dependencies = [
  "chrono",
  "getrandom 0.3.4",
  "keyring",
+ "knowledge",
  "mcp",
  "media",
  "notes",

@@ -23,7 +23,7 @@ import {
 import { openSettings, pushError, showNote, updateSettings, useApp } from "../lib/store";
 import type { Note, NoteLine, NoteSpeaker, NoteTodo } from "../lib/types";
 
-const HEARING: Record<string, string> = { elevenlabs: "ElevenLabs", deepgram: "Deepgram" };
+export const HEARING: Record<string, string> = { elevenlabs: "ElevenLabs", deepgram: "Deepgram" };
 
 const sameDay = (a: Date, b: Date) => a.toDateString() === b.toDateString();
 const timeOf = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });

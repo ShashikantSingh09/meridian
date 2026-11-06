@@ -12,15 +12,18 @@ use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut,
 
 mod actions;
 mod commands;
+mod details;
 mod following;
 mod hush;
 mod island;
+mod knowledge;
 mod life;
 mod links;
 mod log;
 mod notetaker;
 mod secrets;
 mod settings;
+mod style;
 mod terminal;
 mod update;
 mod voice;
@@ -152,6 +155,8 @@ fn setup(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     app.manage(voice::state(app)?);
     app.manage(wake::Wake::default());
     app.manage(notetaker::state(app)?);
+    app.manage(style::state(app)?);
+    app.manage(knowledge::state(app)?);
     let path = settings::path(&handle).ok_or("no config directory")?;
     let settings = settings::load(&path);
     let placement = settings.clone();
@@ -199,6 +204,7 @@ fn setup(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     following::resume(&handle);
     following::watch_running(&handle);
     wake::spawn(handle.clone());
+    knowledge::spawn(handle.clone());
     life::spawn(handle);
 
     build_tray(app)?;
@@ -326,12 +332,32 @@ pub fn run() {
             following::running_refresh,
             following::watch_preview,
             following::watch_status,
+            following::hooks_health,
             following::watch_set,
             links::integrations_list,
             links::ai_sign_in,
             links::integration_connect,
             links::integration_disconnect,
             links::integration_fetch,
+            details::details_get,
+            details::details_save,
+            details::details_delete,
+            details::details_ids,
+            details::details_id_show,
+            details::details_id_set,
+            style::style_get,
+            style::style_learn,
+            style::style_stop,
+            style::style_set_line,
+            style::style_forget,
+            knowledge::knowledge_state,
+            knowledge::knowledge_update,
+            knowledge::knowledge_stop,
+            knowledge::knowledge_search,
+            knowledge::knowledge_read,
+            knowledge::knowledge_save,
+            knowledge::knowledge_tick,
+            knowledge::knowledge_open,
         ])
         .setup(setup)
         .run(tauri::generate_context!())

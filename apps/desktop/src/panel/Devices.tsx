@@ -13,11 +13,11 @@ const STAND_INS = ["default", "communications"];
 
 const realDevices = (devices: MediaDeviceInfo[], kind: Kind) => devices.filter((d) => d.kind === kind && d.deviceId && !STAND_INS.includes(d.deviceId));
 
-/** Windows' name, without the hardware id the browser adds to USB devices. */
-const deviceName = (device: MediaDeviceInfo) => device.label.replace(/ \([0-9a-f]{4}:[0-9a-f]{4}\)$/i, "");
+/** Windows' name, without the hardware id the browser adds to USB devices, or the Default the browser puts first. */
+export const deviceName = (device: { label: string }) => device.label.replace(/ \([0-9a-f]{4}:[0-9a-f]{4}\)$/i, "").replace(/^(Default|Communications) - /, "");
 
 /** Ids are hidden until the microphone has been allowed, and then nothing can be called missing. */
-function isUnplugged(devices: MediaDeviceInfo[], kind: Kind, chosen: string | null) {
+export function isUnplugged(devices: MediaDeviceInfo[], kind: Kind, chosen: string | null) {
   if (!chosen || devices.some((d) => d.kind === kind && !d.deviceId)) return false;
   return !realDevices(devices, kind).some((d) => d.deviceId === chosen);
 }

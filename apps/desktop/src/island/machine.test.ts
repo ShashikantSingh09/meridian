@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deriveView, geometryFor, MULTITASK_MAX_ROWS, TODO_MAX_ROWS, type SessionSummary, type Snapshot } from "./machine";
+import { deriveView, FINISHED_ROWS, geometryFor, MULTITASK_MAX_ROWS, STAGE_ROWS, TODO_MAX_ROWS, type SessionSummary, type Snapshot } from "./machine";
 
 const base: Snapshot = {
   panelOpen: false,
@@ -170,6 +170,16 @@ describe("geometryFor", () => {
     const message = geometryFor("notification", { ...ctx, finished: "message" });
     expect(brief.h).toBeGreaterThan(plain.h);
     expect(message.h).toBeGreaterThan(brief.h);
+  });
+
+  it("gives each step in the log a row, up to the most that fit", () => {
+    const finished = (steps: number) => geometryFor("notification", { ...ctx, finished: "brief", steps }).h;
+    expect(finished(3)).toBeGreaterThan(finished(2));
+    expect(finished(40)).toBe(finished(FINISHED_ROWS));
+    const working = (steps: number) => geometryFor("working", { ...ctx, hovered: true, steps }).h;
+    expect(working(2)).toBeGreaterThan(working(1));
+    expect(working(40)).toBe(working(STAGE_ROWS));
+    expect(working(0)).toBeLessThan(working(1));
   });
 
   it("gives an agent that stopped room to say why", () => {
