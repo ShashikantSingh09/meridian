@@ -41,6 +41,7 @@ import type { Mood } from "../island/faces";
 import type { VoiceState } from "./voice";
 import type { HereState } from "./here";
 import type { AskState } from "./ask";
+import type { FinishState } from "./finish";
 import type { RepairResult, Row } from "./repair";
 import { lastMessage, limitName, mergeTodo, resetLabel } from "./sessions";
 import { applyTheme } from "./theme";
@@ -243,6 +244,10 @@ export interface AppState {
   ask: AskState | null;
   /** The window whose box Meridian may write in had the cursor, as last looked when the pointer came onto the island. */
   hereOffer: number | null;
+  /** Finish this for me, from its first step to its card at the end. */
+  finish: FinishState | null;
+  /** That box is in a form, so the island offers Fill this form instead of Write here. */
+  formOffer: boolean;
 }
 
 const LOG_LIMIT = 500;
@@ -335,6 +340,8 @@ let state: AppState = {
   here: null,
   ask: null,
   hereOffer: null,
+  finish: null,
+  formOffer: false,
 };
 
 const listeners = new Set<() => void>();
@@ -486,7 +493,8 @@ export const setOfferedDraft = (offeredDraft: AppState["offeredDraft"]) => set({
 export const setRepair = (patch: Partial<AppState["repair"]>) => set({ repair: { ...state.repair, ...patch } });
 export const setHere = (here: HereState | null) => set({ here });
 export const setAsk = (ask: AskState | null) => set({ ask });
-export const setHereOffer = (hereOffer: number | null) => set({ hereOffer });
+export const setHereOffer = (hereOffer: number | null, formOffer = false) => set({ hereOffer, formOffer });
+export const setFinish = (finish: FinishState | null) => set({ finish });
 export const openSettings = (settingsSection: SettingsSection) => set({ tab: "settings", settingsSection });
 
 let hoverTimer: ReturnType<typeof setTimeout> | undefined;

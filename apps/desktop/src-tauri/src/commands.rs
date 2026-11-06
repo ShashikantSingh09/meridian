@@ -138,6 +138,7 @@ pub fn settings_save(app: AppHandle, core: State<'_, Core>, mut settings: Settin
         // The same for the apps and sites: the island adds them, and the page changes them through
         // `fill_place_set`, so an older copy here never undoes an answer.
         settings.fill.places = current.fill.places.clone();
+        settings.fill.details_offered = current.fill.details_offered;
         // Choosing a side again puts it back on the top edge there.
         if current.island_align != settings.island_align {
             if let Some(key) = win.as_ref().and_then(|win| island::monitor_key(&app, win, &settings.island_monitor)) {

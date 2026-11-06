@@ -61,9 +61,60 @@ pub async fn ask(system: &str, message: &str, model: &str, most_usd: &str, longe
     reply
 }
 
+/// A run that can use only the named tools of one server of Meridian's own, for Finish this for me.
+/// No built-in tool, none of the user's servers or connectors, no hooks and no session history, and
+/// any tool not named is refused, not asked about.
+pub(crate) fn acting_args(model: &str, most_usd: &str, system: &str, server: &str, url: &str, tools: &[&str]) -> Vec<String> {
+    let mut args = args(model, most_usd);
+    let servers = json!({ "mcpServers": { server: { "type": "http", "url": url } } });
+    let allowed: Vec<String> = tools.iter().map(|tool| format!("mcp__{server}__{tool}")).collect();
+    args.extend(["--strict-mcp-config".to_string(), "--mcp-config".to_string(), servers.to_string()]);
+    args.extend(["--allowedTools".to_string(), allowed.join(","), "--system-prompt".to_string(), system.to_string()]);
+    args
+}
+
+/// Runs until the AI's last word, `longest` passes or `stopped` resolves, and ends the run's process
+/// tree either way. A step waits on the island for as long as the user takes, so tool calls may.
+#[allow(clippy::too_many_arguments)]
+pub async fn act(
+    system: &str,
+    message: &str,
+    model: &str,
+    most_usd: &str,
+    (server, url): (&str, &str),
+    tools: &[&str],
+    longest: Duration,
+    stopped: impl std::future::Future<Output = ()>,
+) -> Result<String, String> {
+    let args = acting_args(model, most_usd, system, server, url, tools);
+    let settings = json!({ "disableAllHooks": true, "env": { "MCP_CONNECTION_NONBLOCKING": "false", "MCP_TOOL_TIMEOUT": "900000" } }).to_string();
+    let mut agent = start("finish", &settings, args, message).await?;
+    let reply = tokio::select! {
+        reply = tokio::time::timeout(longest, answer(&mut agent)) => reply.unwrap_or_else(|_| Err("Claude Code took too long.".to_string())),
+        () = stopped => Err("Stopped.".to_string()),
+    };
+    agent.kill_tree().await;
+    reply
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_finishing_run_has_only_meridians_named_tools() {
+        let args = acting_args("sonnet", "3", "Finish one task.", "meridian", "http://127.0.0.1:9/mcp/x/finish/y", &["read_window", "press"]);
+        let after = |flag: &str| &args[args.iter().position(|arg| arg == flag).unwrap() + 1];
+        assert_eq!(after("--tools"), "", "no built-in tool: no Bash, no files, no web");
+        assert_eq!(after("--permission-mode"), "dontAsk", "a tool not named is refused, never asked about");
+        assert!(args.iter().any(|arg| arg == "--strict-mcp-config"), "none of the user's servers or connectors");
+        assert!(args.iter().any(|arg| arg == "--no-session-persistence"));
+        assert_eq!(after("--allowedTools"), "mcp__meridian__read_window,mcp__meridian__press");
+        let servers: Value = serde_json::from_str(after("--mcp-config")).unwrap();
+        assert_eq!(servers["mcpServers"].as_object().unwrap().len(), 1);
+        assert_eq!(servers["mcpServers"]["meridian"]["url"], "http://127.0.0.1:9/mcp/x/finish/y");
+        assert_eq!(after("--system-prompt"), "Finish one task.");
+    }
 
     #[test]
     fn a_run_can_do_nothing_but_answer_and_leaves_nothing_behind() {

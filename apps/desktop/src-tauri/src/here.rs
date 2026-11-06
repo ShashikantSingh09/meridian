@@ -9,7 +9,8 @@
 //! the words selected.
 //!
 //! UI Automation lives on one thread of its own: its objects cannot move between threads, and a slow
-//! app can hold a call for seconds. What a box holds is never logged.
+//! app can hold a call for seconds. What a box holds is never logged. Fill this form (`crate::form`)
+//! runs on the same thread, behind the same checks.
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::{mpsc, Mutex};
@@ -26,14 +27,14 @@ use crate::island;
 use crate::settings::{Place, Settings};
 
 /// How much of the page before the box goes to the AI. A reply needs the thread, not the archive.
-const PAGE_CHARS: usize = 6_000;
+pub(crate) const PAGE_CHARS: usize = 6_000;
 /// An AI that has not answered by then has failed, and nothing was put in.
 const ANSWER_WITHIN: Duration = Duration::from_secs(20);
 // ponytail: Sonnet writes in the user's voice better than Haiku. Move to Haiku if 20 s proves tight.
 const MODEL: &str = "sonnet";
 const MOST_USD: &str = "0.5";
 /// Undo, Shorter and Warmer last this long, and only while the page is the same.
-const UNDO_FOR: Duration = Duration::from_secs(5 * 60);
+pub(crate) const UNDO_FOR: Duration = Duration::from_secs(5 * 60);
 /// A reply that could not go in is kept this long, to copy.
 const KEPT_FOR: Duration = Duration::from_secs(60);
 /// How often the box is looked at after writing, so typing in it closes the island's line.
@@ -81,13 +82,17 @@ pub enum Outcome {
     /// The cursor left before the words went in. The reply is kept a minute, to copy.
     Moved { title: String },
     Stopped,
+    /// Fill this form went through the form: what each box got, and what is left for the user.
+    Filled { form: Box<crate::form::Summary> },
+    /// Fill this form found a single box Meridian may fill, so Write here takes it.
+    Single,
 }
 
-fn line(text: impl Into<String>) -> Outcome {
+pub(crate) fn line(text: impl Into<String>) -> Outcome {
     Outcome::Line { text: text.into() }
 }
 
-fn failed(why: impl Into<String>) -> Outcome {
+pub(crate) fn failed(why: impl Into<String>) -> Outcome {
     Outcome::Failed { why: why.into() }
 }
 
@@ -103,7 +108,7 @@ fn not_written(why: &str) -> Outcome {
 /// What the list of apps and sites calls a window: its site in a browser, else its program. The
 /// key is what a yes for one time names. A browser whose site could not be read has no id, so it is
 /// never saved, and asks every time.
-fn place_of(target: &Target) -> (String, Option<String>, String) {
+pub(crate) fn place_of(target: &Target) -> (String, Option<String>, String) {
     if is_browser(&target.process) {
         return match &target.site {
             Some(site) => (site.clone(), Some(site.clone()), site.clone()),
@@ -127,13 +132,13 @@ fn app_name(process: &str, title: &str) -> String {
     letters.next().map_or_else(|| "This app".to_string(), |first| first.to_uppercase().chain(letters).collect())
 }
 
-fn excluded(target: &Target, rules: &[String]) -> Option<String> {
+pub(crate) fn excluded(target: &Target, rules: &[String]) -> Option<String> {
     let window = screen::WindowInfo { hwnd: 0, title: target.title.clone(), process: target.process.clone(), class: String::new() };
     screen::exclusion_reason(&window, rules)
 }
 
 /// Where a window stands, before a single box in it is read. `allow` is a yes the user just gave.
-fn gate(target: &Target, excluded: Option<String>, places: &[Place], allow: Option<&str>) -> Result<(), Outcome> {
+pub(crate) fn gate(target: &Target, excluded: Option<String>, places: &[Place], allow: Option<&str>) -> Result<(), Outcome> {
     if let Some(rule) = excluded {
         return Err(line(format!("Meridian is kept out of this window ({rule}).")));
     }
@@ -156,7 +161,7 @@ fn gate(target: &Target, excluded: Option<String>, places: &[Place], allow: Opti
 // ── The AI ──────────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq)]
-enum Engine {
+pub(crate) enum Engine {
     Claude,
     Model { provider: String, model: String },
 }
@@ -170,7 +175,7 @@ fn engine_name(id: &str) -> String {
 }
 
 impl Engine {
-    fn name(&self) -> String {
+    pub(crate) fn name(&self) -> String {
         match self {
             Self::Claude => engine_name("claude-code"),
             Self::Model { provider, .. } => engine_name(provider),
@@ -198,7 +203,7 @@ fn local_engine(settings: &Settings, running: &[ai_core::LocalServer]) -> Result
 }
 
 /// The AI that writes, settled before anything is read.
-async fn engine(core: &Core, settings: &Settings) -> Result<Engine, Outcome> {
+pub(crate) async fn engine(core: &Core, settings: &Settings) -> Result<Engine, Outcome> {
     if settings.local_only {
         let urls = settings.provider_base_urls.clone();
         let running = ai_core::discover(|id| urls.get(id).cloned()).await;
@@ -231,7 +236,7 @@ struct Context {
 }
 
 /// Page text can hold anything, even what looks like the end of its own block.
-fn data(text: &str) -> String {
+pub(crate) fn data(text: &str) -> String {
     text.replace('<', "‹")
 }
 
@@ -303,14 +308,16 @@ fn squash(text: &str) -> String {
 
 /// What only the UI Automation thread holds.
 #[derive(Default)]
-struct Seat {
+pub(crate) struct Seat {
     /// For a look at the window in front, apart from the run, so a look never disturbs its boxes.
-    look: Option<Uia>,
-    run: Option<Live>,
+    pub(crate) look: Option<Uia>,
+    pub(crate) run: Option<Live>,
+    /// The form Fill this form filled, until its Undo is over.
+    pub(crate) form: Option<crate::form::Live>,
 }
 
 /// One Write here, from reading the box to its Undo.
-struct Live {
+pub(crate) struct Live {
     uia: Uia,
     target: Target,
     field: Field,
@@ -359,7 +366,10 @@ fn serve(inbox: mpsc::Receiver<Job>, app: AppHandle) {
                     seat = Seat::default();
                 }
             }
-            Err(mpsc::RecvTimeoutError::Timeout) => watch(&mut seat, &app),
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                watch(&mut seat, &app);
+                crate::form::watch(&mut seat, &app);
+            }
             Err(mpsc::RecvTimeoutError::Disconnected) => return,
         }
     }
@@ -379,7 +389,7 @@ fn watch(seat: &mut Seat, app: &AppHandle) {
 }
 
 impl Here {
-    async fn on_seat<T: Send + 'static>(&self, job: impl FnOnce(&mut Seat) -> T + Send + 'static) -> Result<T, String> {
+    pub(crate) async fn on_seat<T: Send + 'static>(&self, job: impl FnOnce(&mut Seat) -> T + Send + 'static) -> Result<T, String> {
         let (tx, rx) = tokio::sync::oneshot::channel();
         let job: Job = Box::new(move |seat| {
             let _ = tx.send(job(seat));
@@ -397,7 +407,7 @@ impl Here {
     }
 }
 
-fn look(look: &mut Option<Uia>) -> Option<&mut Uia> {
+pub(crate) fn look(look: &mut Option<Uia>) -> Option<&mut Uia> {
     if look.is_none() {
         *look = Uia::new().ok();
     }
@@ -449,7 +459,7 @@ fn write_in(seat: &mut Seat, text: &str) -> Outcome {
 /// The same app and site as when it was written. A different page in the same window counts as
 /// leaving it, even where the box is still there.
 fn same_page(seat: &mut Seat) -> bool {
-    let Seat { look: eyes, run } = seat;
+    let Seat { look: eyes, run, .. } = seat;
     let Some(live) = run.as_ref() else { return false };
     look(eyes).and_then(|uia| uia.target().ok()).is_some_and(|now| now.process == live.target.process && now.site == live.target.site)
 }
@@ -478,8 +488,15 @@ fn undo_in(seat: &mut Seat) -> Result<(), String> {
     }
 }
 
+/// What the island's button offers: Fill this form when the cursor is in a box of a form, else Write here.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct Offer {
+    window: isize,
+    form: bool,
+}
+
 /// The window in front, when Write here could start there, read without what any box holds.
-fn offer(seat: &mut Seat, exclusions: &[String], places: &[Place]) -> Option<isize> {
+fn offer(seat: &mut Seat, exclusions: &[String], places: &[Place]) -> Option<Offer> {
     let front = screen::foreground()?;
     let uia = look(&mut seat.look)?;
     let target = uia.target().ok()?;
@@ -490,7 +507,8 @@ fn offer(seat: &mut Seat, exclusions: &[String], places: &[Place]) -> Option<isi
     if id.is_some_and(|id| places.iter().any(|place| place.id.eq_ignore_ascii_case(&id) && place.fill == "never")) {
         return None;
     }
-    uia.peek_focused().is_ok_and(|field| refusal(&field).is_none()).then_some(front.hwnd)
+    let field = uia.peek_focused().ok().filter(|field| refusal(field).is_none())?;
+    Some(Offer { window: front.hwnd, form: crate::form::in_a_form(field.kind) })
 }
 
 // ── Keys ────────────────────────────────────────────────────────────────────
@@ -527,10 +545,10 @@ pub fn sync_key(app: &AppHandle, settings: &Settings) {
 
 /// Esc stops a reply on its way, as the board says. The island has no keyboard then, so Esc is
 /// registered like any other key, only for those seconds, and always let go after.
-struct EscapeStops(AppHandle);
+pub(crate) struct EscapeStops(AppHandle);
 
 impl EscapeStops {
-    fn hold(app: &AppHandle) -> Self {
+    pub(crate) fn hold(app: &AppHandle) -> Self {
         let handle = app.clone();
         let _ = app.global_shortcut().on_shortcut(Shortcut::new(None, Code::Escape), move |_, _, event| {
             if event.state == ShortcutState::Pressed {
@@ -555,35 +573,47 @@ fn stop(here: &Here) {
 
 // ── A run ───────────────────────────────────────────────────────────────────
 
-/// Asks the AI, for at most 20 seconds, and Esc stops it.
-async fn think(app: &AppHandle, engine: &Engine, request: String) -> Result<String, Outcome> {
-    let core = app.state::<Core>();
-    let here = app.state::<Here>();
-    let system = system(crate::style::instructions(app));
+/// A stop Esc can give, held until the run is over. Write here and Fill this form share it.
+pub(crate) fn stopper(here: &Here) -> CancellationToken {
     let stop = CancellationToken::new();
     *here.stop.lock().unwrap() = Some(stop.clone());
+    stop
+}
+
+/// Asks the AI, for at most `within`, and Esc stops it. Err(None) when Esc stopped it, else why not.
+pub(crate) async fn ask_ai(app: &AppHandle, engine: &Engine, system: &str, request: String, within: Duration) -> Result<String, Option<String>> {
+    let core = app.state::<Core>();
+    let here = app.state::<Here>();
+    let stop = stopper(&here);
     let _escape = EscapeStops::hold(app);
     let name = engine.name();
     let asked = async {
         match engine {
             Engine::Claude => {
                 crate::links::refuse_if_local(&core)?;
-                agent_adapters::once::ask(&system, &request, MODEL, MOST_USD, ANSWER_WITHIN + Duration::from_secs(5)).await
+                agent_adapters::once::ask(system, &request, MODEL, MOST_USD, within + Duration::from_secs(5)).await
             }
             Engine::Model { provider, model } => {
-                crate::notetaker::ask_chosen(&core, None, Some(provider.clone()), Some(model.clone()), &system, request.clone(), &stop).await
+                crate::notetaker::ask_chosen(&core, None, Some(provider.clone()), Some(model.clone()), system, request.clone(), &stop).await
             }
         }
     };
     let reply = tokio::select! {
-        reply = tokio::time::timeout(ANSWER_WITHIN, asked) => reply.unwrap_or_else(|_| Err(format!("{name} did not answer in {} seconds.", ANSWER_WITHIN.as_secs()))),
-        () = stop.cancelled() => return Err(Outcome::Stopped),
+        reply = tokio::time::timeout(within, asked) => reply.unwrap_or_else(|_| Err(format!("{name} did not answer in {} seconds.", within.as_secs()))),
+        () = stop.cancelled() => return Err(None),
     };
     here.stop.lock().unwrap().take();
-    match reply.map(|reply| tidy(&reply)) {
+    reply.map_err(Some)
+}
+
+/// Asks the AI for the words, for at most 20 seconds, and Esc stops it.
+async fn think(app: &AppHandle, engine: &Engine, request: String) -> Result<String, Outcome> {
+    let system = system(crate::style::instructions(app));
+    match ask_ai(app, engine, &system, request, ANSWER_WITHIN).await.map(|reply| tidy(&reply)) {
         Ok(reply) if !reply.is_empty() => Ok(reply),
-        Ok(_) => Err(not_written(&format!("{name} gave nothing to put in."))),
-        Err(why) => Err(not_written(&why)),
+        Ok(_) => Err(not_written(&format!("{} gave nothing to put in.", engine.name()))),
+        Err(None) => Err(Outcome::Stopped),
+        Err(Some(why)) => Err(not_written(&why)),
     }
 }
 
@@ -715,9 +745,10 @@ pub async fn here_done(here: State<'_, Here>) -> Result<(), String> {
 }
 
 /// For the island's button and for asking on the island: the window in front, when a text box
-/// Meridian may write in has the cursor there. Nothing a box holds is read for this.
+/// Meridian may write in has the cursor there, and whether that box is part of a form. Nothing a box
+/// holds is read for this.
 #[tauri::command]
-pub async fn here_offer(core: State<'_, Core>, here: State<'_, Here>) -> Result<Option<isize>, String> {
+pub async fn here_offer(core: State<'_, Core>, here: State<'_, Here>) -> Result<Option<Offer>, String> {
     let settings = core.settings.lock().unwrap().clone();
     if !settings.fill.on {
         return Ok(None);

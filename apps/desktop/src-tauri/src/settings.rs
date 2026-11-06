@@ -68,10 +68,14 @@ pub struct Fill {
     pub ai: String,
     /// Finish this for me. Experimental, and off until turned on with its own switch.
     pub finish: bool,
-    /// Finish this for me runs on the user's Claude plan through Claude Code, and nothing else.
+    /// Finish this for me runs on the user's Claude plan through Claude Code, and nothing else: any
+    /// other value, from the file or from the page, is read as that.
+    #[serde(deserialize_with = "crate::finish::only_claude_code")]
     pub finish_ai: String,
     pub places: Vec<Place>,
     pub sources: Sources,
+    /// When a fill last offered to start Your details, in ms. Not now waits a week. Kept by the core.
+    pub details_offered: Option<i64>,
 }
 
 impl Default for Fill {
@@ -85,6 +89,7 @@ impl Default for Fill {
             finish_ai: "claude-code".into(),
             places: Vec::new(),
             sources: Sources::default(),
+            details_offered: None,
         }
     }
 }

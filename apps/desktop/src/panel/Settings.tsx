@@ -499,7 +499,7 @@ function About() {
   );
 }
 
-const SHORTCUTS = [["Open the island", "Space"], ["Look at the screen", "S"], ["Talk", "V"], ["Write here", "F"]] as const;
+const SHORTCUTS = [["Open the island", "Space"], ["Look at the screen", "S"], ["Talk", "V"], ["Write here, or fill this form", "F"]] as const;
 
 interface Section {
   id: SettingsSection;

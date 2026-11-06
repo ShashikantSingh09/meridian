@@ -254,7 +254,7 @@ test.describe("the island's button", () => {
     await fillOn(page, { on: false, buttons: true });
     await hover(page);
     await expect(island(page).getByRole("button", { name: "Write here" })).toHaveCount(0);
-    // Fill this form is for a later version.
+    // Nor Fill this form.
     await expect(island(page).getByRole("button", { name: "Fill this form" })).toHaveCount(0);
   });
 });

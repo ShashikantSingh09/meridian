@@ -126,6 +126,56 @@ fn fills_the_test_page_and_puts_every_box_back() {
     assert!(undone.iter().all(|(_, result)| *result == Undone::PutBack || *result == Undone::Failed("A choice is cleared by picking another one.".into())));
 }
 
+/// Click on the page background. Fills the form the way Fill this form does, from a mapping
+/// written here instead of by an AI, then puts every box back. Uses your clipboard and puts it back.
+#[test]
+#[ignore = "types into the window in front; run by hand against tests/fill/forms.html"]
+fn fill_this_form_fills_from_a_mapping_leaves_yours_alone_and_undoes() {
+    use fill::{check, Answer, Fill, Form, Given, Lookup, Mapping, Source, State};
+    let mut uia = after_click("on the test page's background");
+    let fields = uia.fields().expect("fields");
+    let id = |label: &str| find(&fields, label).id;
+    let profile = |field: u32, key: &str| Fill { field, answer: Answer::Profile { key: key.into() } };
+    let text = |field: u32, text: &str, source: Source| Fill { field, answer: Answer::Text { text: text.into(), source, from: String::new() } };
+    let mapping = Mapping {
+        fills: vec![
+            profile(id("Full name"), "name"),
+            profile(id("Email"), "email"),
+            profile(id("मोबाइल नंबर"), "phone"),
+            text(id("Notice period"), "60 days", Source::Said),
+            text(id("Why do you want"), "I build payment screens.\nUPI for kirana stores is next.", Source::WrittenByAi),
+            // Meridian refuses these whatever the mapping says.
+            text(id("Create a password"), "hunter2", Source::Said),
+            text(id("I agree"), "yes", Source::Said),
+        ],
+    };
+    let details = |key: &str| match key {
+        "name" => Lookup::Plain("Ravi Sharma".into()),
+        "email" => Lookup::Plain("ravi.sharma84@gmail.com".into()),
+        "phone" => Lookup::Plain("+91 98201 44317".into()),
+        _ => Lookup::Missing,
+    };
+    let given = Given { said: "notice period 60 days, my password is hunter2, and yes".into(), ..Given::default() };
+    let checked = check(mapping, &fields, &[]);
+    let mut form = Form::new(fields.clone());
+    form.plan(checked, details, &given);
+    println!("place of Full name: {:?}", uia.place(id("Full name")));
+    form.put(&mut uia, |_, done, total, field| println!("{done} of {total}: box {field}"), || false).expect("filled");
+    for row in &form.rows {
+        println!("{:<40} {:?} {:?} {}", row.label, row.state, row.origin, row.why);
+    }
+    assert_eq!(form.rows.iter().find(|row| row.label.contains("Create a password")).unwrap().state, State::Yours);
+    assert_eq!(form.rows.iter().find(|row| row.label.contains("I agree")).unwrap().state, State::Yours);
+    std::thread::sleep(Duration::from_millis(300));
+    let seen = page_text(&mut uia);
+    for never in ["Enter pressed", "Tab pressed", "Submitted", "A trap box was filled"] {
+        assert!(!seen.contains(never), "{never}:\n{seen}");
+    }
+    let undone = form.undo_all(&mut uia);
+    println!("{undone:?}");
+    assert!(undone.iter().all(|(_, result)| *result == Undone::PutBack || matches!(result, Undone::Failed(_))));
+}
+
 /// Click in the Message box at the bottom (a chat box where Enter sends).
 #[test]
 #[ignore = "pastes into the window in front and uses the clipboard; run by hand against tests/fill/forms.html"]
@@ -190,4 +240,21 @@ fn a_write_stops_when_the_cursor_moved_to_another_box() {
     println!("Now click in LinkedIn within 3 seconds.");
     std::thread::sleep(Duration::from_secs(3));
     assert_eq!(write(&mut uia, &field, "Ravi Sharma", Mode::Here), Err(FillError::Moved));
+}
+
+/// Finish this for me's reader. Click on the page background. Reads only: it presses nothing.
+#[test]
+#[ignore = "reads the window in front; run by hand against tests/fill/forms.html"]
+fn finish_reads_buttons_and_links_and_keeps_their_ids() {
+    let mut uia = after_click("on the page background");
+    let first = uia.elements().expect("elements");
+    print(&first);
+    let submit = find(&first, "Submit application");
+    assert_eq!(submit.kind, FieldKind::Button);
+    assert_eq!(fill::steps::press(submit, &[]), fill::Step::Ask(fill::Commit::Submit), "submit waits for a click");
+    assert_eq!(fill::steps::press(find(&first, "Your CV"), &[]), fill::Step::Ask(fill::Commit::Upload));
+    assert!(matches!(fill::steps::fill(find(&first, "Create a password")), fill::Step::Never(_)));
+    let again = uia.elements().expect("elements again");
+    assert_eq!(find(&again, "Submit application").id, submit.id, "ids stay the same across reads");
+    assert_eq!(uia.fresh(submit.id).expect("read again").label, submit.label);
 }

@@ -4,32 +4,33 @@
 
 import { useEffect, useRef } from "react";
 import { closeAsk, openAsk, openInChat, askAgain, sendAsk, signInAgain, SHOWN_CHARS, typeAsk, type AskState } from "../lib/ask";
-import { allowAlways, allowOnce, allowPlace, closeHere, copyReply, lookForBox, neverHere, notNow, openFillSettings, rewrite, startWriteHere, tryAgain, undoHere, type HereState } from "../lib/here";
+import { allowAlways, allowOnce, allowPlace, closeHere, copyReply, lookForBox, neverHere, notNow, openFillSettings, rewrite, startFillForm, startWriteHere, tryAgain, undoHere, type HereState } from "../lib/here";
 import { Icon } from "../lib/icons";
 import { useApp } from "../lib/store";
 import { Face, type Mood } from "./faces";
+import { FORM_STEPS, FormView } from "./form";
 import "./here.css";
 
-function Eyes({ mood, reduced }: { mood: Mood; reduced: boolean }) {
+export function Eyes({ mood, reduced }: { mood: Mood; reduced: boolean }) {
   const id = useApp((s) => s.settings.face);
   const feeling = useApp((s) => s.feeling);
   return <Face id={id} mood={feeling ?? mood} reduced={reduced} />;
 }
 
 /** Something under way, without a time it will take. */
-const Working = () => (
+export const Working = () => (
   <span className="here-progress" aria-hidden="true">
     <i />
   </span>
 );
 
-const Button = ({ label, main, onClick }: { label: string; main?: boolean; onClick: () => void }) => (
+export const Button = ({ label, main, onClick }: { label: string; main?: boolean; onClick: () => void }) => (
   <button className="here-b" data-main={main || undefined} onClick={(e) => { e.stopPropagation(); onClick(); }}>
     {label}
   </button>
 );
 
-function Card({ mood, title, body, reduced, children }: { mood: Mood; title: string; body: string; reduced: boolean; children: React.ReactNode }) {
+export function Card({ mood, title, body, reduced, children }: { mood: Mood; title: string; body: string; reduced: boolean; children: React.ReactNode }) {
   return (
     <div className="stack pad-card here-card" role="alertdialog" aria-label={title}>
       <div className="row">
@@ -44,8 +45,13 @@ function Card({ mood, title, body, reduced, children }: { mood: Mood; title: str
 
 const sentence = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 
+/** Banks, tax and government sites, which ask every time whatever the list says. */
+const CAREFUL = ["a bank", "a tax site", "a government site"];
+
 function HereCard({ here, reduced }: { here: HereState; reduced: boolean }) {
   const place = here.place;
+  const form = here.kind === "form";
+  const what = form ? "Fill this form" : "Write here";
   // On a site, in an app.
   const on = place && (place.id === null || (place.id.includes(".") && !/\.exe$/i.test(place.id))) ? "on" : "in";
   switch (here.step) {
@@ -53,7 +59,7 @@ function HereCard({ here, reduced }: { here: HereState; reduced: boolean }) {
       if (!place) return null;
       if (!place.every) {
         return (
-          <Card mood="needs" reduced={reduced} title={`Write here ${on} ${place.name}?`} body={`${place.name} is not on your list of apps and sites yet. Nothing in it is read until you say.`}>
+          <Card mood="needs" reduced={reduced} title={`${what} ${on} ${place.name}?`} body={`${place.name} is not on your list of apps and sites yet. Nothing in it is read until you say.`}>
             <Button label="Never" onClick={() => void neverHere()} />
             <Button label="Once" onClick={() => void allowOnce()} />
             <Button label="Always" main onClick={() => void allowAlways()} />
@@ -61,29 +67,31 @@ function HereCard({ here, reduced }: { here: HereState; reduced: boolean }) {
         );
       }
       const why = place.every.startsWith("set to") ? `${place.name} is ${place.every}.` : `${sentence(place.every)} asks every time.`;
+      // The bank card on the Fill this form board.
+      const body = form && CAREFUL.includes(place.every) ? "Banks and government sites ask every time. Passwords and one-time codes stay yours." : `${why} Nothing is read until you say.`;
       return (
-        <Card mood="needs" reduced={reduced} title={`Write here ${on} ${place.name}?`} body={`${why} Nothing is read until you say.`}>
+        <Card mood="needs" reduced={reduced} title={`${what} ${on} ${place.name}?`} body={body}>
           <Button label="Not now" onClick={notNow} />
-          <Button label="Write here" main onClick={() => void allowOnce()} />
+          <Button label={form ? "Fill this time" : "Write here"} main onClick={() => void allowOnce()} />
         </Card>
       );
     }
     case "off":
       return place ? (
-        <Card mood="rest" reduced={reduced} title={`Write here is off ${on} ${place.name}`} body={`You set ${place.name} to Never, so nothing in it is read.`}>
+        <Card mood="rest" reduced={reduced} title={`${what} is off ${on} ${place.name}`} body={`You set ${place.name} to Never, so nothing in it is read.`}>
           <Button label="Not now" onClick={notNow} />
           <Button label={`Allow ${place.name}`} main onClick={() => void allowPlace()} />
         </Card>
       ) : null;
     case "local":
       return (
-        <Card mood="rest" reduced={reduced} title="Local-only mode is on" body={`Write here is set to use ${here.ai ?? "an AI"}, which is online. Pick an AI on this PC, or turn local-only mode off.`}>
+        <Card mood="rest" reduced={reduced} title="Local-only mode is on" body={`${what} is set to use ${here.ai ?? "an AI"}, which is online. Pick an AI on this PC, or turn local-only mode off.`}>
           <Button label="Settings" onClick={openFillSettings} />
         </Card>
       );
     case "failed":
       return (
-        <Card mood="error" reduced={reduced} title="Could not write here" body={here.text ?? ""}>
+        <Card mood="error" reduced={reduced} title={form ? "Could not fill this form" : "Could not write here"} body={here.text ?? ""}>
           <Button label="Close" onClick={closeHere} />
           <Button label="Try again" main onClick={() => void tryAgain()} />
         </Card>
@@ -103,6 +111,7 @@ function HereCard({ here, reduced }: { here: HereState; reduced: boolean }) {
 /** Given what to show rather than reading it, so the content on its way out keeps showing what it was. */
 export function HereView({ here, reduced }: { here: HereState | null; reduced: boolean }) {
   if (!here) return null;
+  if (FORM_STEPS.has(here.step)) return <FormView here={here} reduced={reduced} />;
   if (here.step === "writing") {
     return (
       <div className="row pad-pill here-pill" role="status">
@@ -135,9 +144,10 @@ export function HereView({ here, reduced }: { here: HereState | null; reduced: b
 }
 
 /** Under the greeting when the pointer is on the island: a field to ask from, and Write here when a
- *  box Meridian may write in has the cursor. */
+ *  box Meridian may write in has the cursor, or Fill this form when that box is in a form. */
 export function AskRow() {
   const offer = useApp((s) => s.hereOffer !== null && s.settings.fill.on && s.settings.fill.buttons);
+  const form = useApp((s) => s.formOffer);
   useEffect(() => void lookForBox(), []);
   return (
     <div className="row peek-ask">
@@ -145,7 +155,7 @@ export function AskRow() {
         <span className="grow">Ask anything</span>
         <Icon name="mic" size={14} />
       </button>
-      {offer && <Button label="Write here" onClick={() => void startWriteHere()} />}
+      {offer && (form ? <Button label="Fill this form" onClick={() => void startFillForm()} /> : <Button label="Write here" onClick={() => void startWriteHere()} />)}
     </div>
   );
 }

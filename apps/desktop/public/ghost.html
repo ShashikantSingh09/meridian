@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Meridian</title>
+<!-- Finish this for me's blue cursor. Its window sits over the control at work, takes no mouse, no
+     keyboard and no focus, and has no access to the app's commands. The core moves it, and sets
+     data-paused on the body while the task is paused. The padding matches ghost::PAD in finish.rs. -->
+<style>
+  html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }
+  .box { position: absolute; top: 28px; left: 28px; right: 100px; bottom: 40px; border-radius: 5px; box-shadow: 0 0 0 1.5px #64d2ff, 0 0 16px rgba(100, 210, 255, 0.8); }
+  .cursor { position: absolute; left: calc(100% - 114px); top: calc(100% - 52px); display: flex; align-items: flex-start; gap: 2px; filter: drop-shadow(0 0 6px rgba(100, 210, 255, 0.85)); }
+  .cursor span { margin-top: 18px; height: 18px; display: inline-flex; align-items: center; padding: 0 7px; border-radius: 9px; background: #64d2ff; color: #00243a; font: 700 10px "Segoe UI", system-ui, sans-serif; }
+  .box, .cursor { transition: opacity 0.2s; }
+  body[data-paused] .box, body[data-paused] .cursor { opacity: 0.35; }
+</style>
+</head>
+<body>
+<div class="box"></div>
+<div class="cursor" aria-hidden="true">
+  <svg width="22" height="26" viewBox="0 0 22 26"><path d="M3 2v19l5-4.6 3.4 7.4 3.2-1.5-3.3-7.2H18z" fill="#64d2ff" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/></svg>
+  <span>Meridian</span>
+</div>
+</body>
+</html>

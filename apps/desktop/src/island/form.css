@@ -1,0 +1,153 @@
+/* Fill this form on the island, from the Fill this form board: the Show list and its rows. */
+
+.form-progress i {
+  left: 0;
+  width: 0;
+  animation: none;
+  transition: width 0.3s ease;
+}
+
+[data-reduced] .form-progress i {
+  left: 0;
+  transition: none;
+}
+
+.here-b.form-sm {
+  height: 22px;
+  padding: 0 9px;
+  border-radius: 11px;
+  font-size: 11px;
+}
+
+.form-site {
+  flex: none;
+  max-width: 160px;
+  font-size: 12px;
+  color: rgba(240, 240, 248, 0.66);
+}
+
+.form-list {
+  height: 100%;
+  gap: 0;
+  padding: 0 18px 16px;
+  box-sizing: border-box;
+}
+
+.form-head {
+  flex: none;
+  height: 48px;
+  gap: 10px;
+  padding-left: 0;
+}
+
+.form-rows {
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.form-row {
+  height: 25px;
+  gap: 10px;
+  padding: 0 2px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  font-size: 12px;
+  color: #f7f7f9;
+}
+
+.form-row:first-child {
+  border-top: 0;
+}
+
+.form-k {
+  flex: none;
+  width: 132px;
+  color: rgba(240, 240, 248, 0.62);
+}
+
+.form-v {
+  flex: 1;
+  min-width: 0;
+}
+
+.form-row[data-state="yours"] .form-v,
+.form-row[data-state="needs-you"] .form-v,
+.form-row[data-state="ask-first"] .form-v {
+  color: #ffd18a;
+}
+
+.form-row[data-quiet] .form-v,
+.form-row[data-state="kept"] .form-v,
+.form-row[data-state="put-back"] .form-v {
+  color: rgba(240, 240, 248, 0.6);
+}
+
+/* Undo for one box shows under the pointer, so the list keeps the board's look. */
+.form-undo {
+  opacity: 0;
+}
+
+.form-row:hover .form-undo,
+.form-row:focus-within .form-undo {
+  opacity: 1;
+}
+
+.form-src {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 18px;
+  padding: 0 7px;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.1);
+  font-size: 10.5px;
+  font-weight: 500;
+  color: rgba(240, 240, 248, 0.86);
+  white-space: nowrap;
+}
+
+.form-src[data-ai] {
+  background: rgba(100, 210, 255, 0.16);
+  color: #bfe9ff;
+}
+
+.form-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #30d158;
+}
+
+.form-said,
+.form-hint {
+  margin: 10px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: rgba(240, 240, 248, 0.66);
+}
+
+.form-hint {
+  padding: 9px 11px;
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.07);
+  font-size: 12.5px;
+  color: rgba(240, 240, 248, 0.88);
+}
+
+.form-hint b {
+  font-weight: 500;
+  color: #fff;
+}
+
+.form-foot {
+  flex: none;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.form-check {
+  font-size: 12px;
+  color: rgba(240, 240, 248, 0.66);
+}

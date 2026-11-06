@@ -16,14 +16,16 @@ const openModels = async (page: Page) => {
 };
 
 const settled = async (page: Page) => {
+  // Three polls in a row, 240 ms: closing holds the shape still for 90 ms before it pulls up, so two could match too soon.
   let last = "";
+  let same = 0;
   await expect
     .poll(
       async () => {
         const box = JSON.stringify(await island(page).boundingBox());
-        const same = box === last;
+        same = box === last ? same + 1 : 0;
         last = box;
-        return same;
+        return same >= 3;
       },
       { intervals: [80] },
     )

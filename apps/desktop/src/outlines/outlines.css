@@ -1,0 +1,119 @@
+/* The outlines over a form, from the Fill this form board, figures 2 and 3. Drawn over other apps,
+   so the colours are fixed: they must read on a white page and a dark one alike. */
+
+html,
+body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+}
+
+#outlines {
+  position: fixed;
+  inset: 0;
+  font-family: "Inter Variable", Inter, "Segoe UI", sans-serif;
+}
+
+.ol-box {
+  position: absolute;
+  box-sizing: border-box;
+  border-radius: 6px;
+}
+
+.ol-box[data-look="ok"] {
+  box-shadow: 0 0 0 1.5px #30d158;
+  background: rgba(48, 209, 88, 0.07);
+}
+
+.ol-box[data-look="ok"][data-hover] {
+  box-shadow: 0 0 0 1.5px #30d158, 0 0 0 5px rgba(48, 209, 88, 0.25);
+}
+
+.ol-box[data-look="need"] {
+  box-shadow: 0 0 0 1.5px #ff9f0a;
+  background: rgba(255, 159, 10, 0.07);
+}
+
+.ol-box[data-look="now"] {
+  box-shadow: 0 0 0 1.5px #64d2ff, 0 0 14px rgba(100, 210, 255, 0.75);
+}
+
+.ol-tag {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 18px;
+  padding: 0 7px;
+  border-radius: 9px;
+  font: 600 10px/1 "Inter Variable", Inter, sans-serif;
+  white-space: nowrap;
+}
+
+.ol-tag[data-low] {
+  top: auto;
+  bottom: 4px;
+  transform: none;
+}
+
+.ol-tag[data-kind="lock"],
+.ol-tag[data-kind="need"] {
+  background: #ff9f0a;
+  color: #000;
+}
+
+.ol-tag[data-kind="ai"] {
+  background: #000;
+  color: #fff;
+}
+
+.ol-tag[data-kind="mail"] {
+  background: #e8f0fe;
+  color: #1967d2;
+}
+
+.ol-eyes {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.ol-eyes i {
+  display: block;
+  width: 4px;
+  height: 7px;
+  border-radius: 2px;
+  background: #fff;
+  box-shadow: 0 0 7px rgba(255, 255, 255, 0.5);
+}
+
+.ol-tip {
+  position: absolute;
+  width: 262px;
+  box-sizing: border-box;
+  padding: 9px 11px;
+  border-radius: 12px;
+  background: #000;
+  color: #f7f7f9;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.1);
+  font: 400 11.5px/1.45 "Inter Variable", Inter, sans-serif;
+}
+
+.ol-tip b {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 3px;
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.ol-tip .ol-eyes i {
+  width: 5px;
+  height: 8px;
+  border-radius: 3px;
+}

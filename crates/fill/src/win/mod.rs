@@ -226,9 +226,15 @@ impl Uia {
                 UIA_RadioButtonControlTypeId => FieldKind::Radio,
                 UIA_SpinnerControlTypeId => FieldKind::Number,
                 UIA_ButtonControlTypeId | UIA_SplitButtonControlTypeId => FieldKind::Button,
+                // Only Finish this for me asks for these, through `elements`.
+                UIA_HyperlinkControlTypeId => FieldKind::Link,
+                UIA_TabItemControlTypeId => FieldKind::Tab,
+                UIA_MenuItemControlTypeId => FieldKind::MenuItem,
+                UIA_ListItemControlTypeId | UIA_TreeItemControlTypeId => FieldKind::Item,
                 _ => return Ok(None),
             };
-            if read_only && kind != FieldKind::List {
+            // A link's address is read-only, and is what tells where it goes.
+            if read_only && !matches!(kind, FieldKind::List | FieldKind::Link | FieldKind::Tab | FieldKind::MenuItem | FieldKind::Item) {
                 return Ok(None);
             }
 
@@ -242,6 +248,13 @@ impl Uia {
                     .GetCachedPatternAs::<IUIAutomationSelectionItemPattern>(UIA_SelectionItemPatternId)
                     .is_ok_and(|pattern| flag(pattern.CachedIsSelected()))
                     .to_string(),
+                FieldKind::Tab | FieldKind::Item
+                    if element
+                        .GetCachedPatternAs::<IUIAutomationSelectionItemPattern>(UIA_SelectionItemPatternId)
+                        .is_ok_and(|pattern| flag(pattern.CachedIsSelected())) =>
+                {
+                    "selected".to_string()
+                }
                 _ => value_pattern.map(|pattern| text(pattern.CachedValue())).unwrap_or_default(),
             };
 
@@ -424,6 +437,19 @@ impl Uia {
         self.focused_with(false)
     }
 
+    /// Where a box of the last read is now, in screen pixels, for the outlines drawn over it. None
+    /// once it has scrolled off, gone, or its window is no longer in front.
+    pub fn place(&mut self, id: u32) -> Option<Bounds> {
+        self.window().ok()?;
+        let (element, _) = self.entry(id).ok()?;
+        if flag(unsafe { element.CurrentIsOffscreen() }) {
+            return None;
+        }
+        let rect = unsafe { element.CurrentBoundingRectangle() }.ok()?;
+        let bounds = Bounds { x: rect.left, y: rect.top, width: rect.right - rect.left, height: rect.bottom - rect.top };
+        bounds.big_enough().then_some(bounds)
+    }
+
     fn focused_with(&mut self, values: bool) -> Result<Field, FillError> {
         self.window()?;
         self.boxes.clear();
@@ -433,12 +459,137 @@ impl Uia {
         // The focus lives in the window in front, so it is still ours if that has not changed.
         self.window()?;
         let field = self.describe(&element, 0, true)?.ok_or(FillError::NoBox)?;
-        if matches!(field.kind, FieldKind::Button | FieldKind::File | FieldKind::List | FieldKind::Checkbox | FieldKind::Radio) {
+        if matches!(
+            field.kind,
+            FieldKind::Button | FieldKind::File | FieldKind::List | FieldKind::Checkbox | FieldKind::Radio | FieldKind::Link | FieldKind::Tab | FieldKind::MenuItem | FieldKind::Item
+        ) {
             return Err(FillError::NoBox);
         }
         self.boxes.push((element.clone(), field.kind));
         self.focused = Some(element);
         Ok(field)
+    }
+}
+
+/// Finish this for me's eyes and hands. Everything works only in the window [`Reader::target`] read,
+/// and only while it is in front. Nothing moves the mouse or sends a key: pressing goes through UI
+/// Automation's own patterns, and writing through the writer ladder.
+impl Uia {
+    /// Every control you can see in the window: boxes, buttons, links, tabs, menu items and rows, in
+    /// page order. Unlike [`Reader::fields`], ids carry on from the reads before, so an id read
+    /// earlier still names the same control, or fails with Gone once it has left the page.
+    pub fn elements(&mut self) -> Result<Vec<Field>, FillError> {
+        let hwnd = self.window()?;
+        let root = unsafe { self.automation.ElementFromHandle(hwnd) }?;
+        // In a browser only the page counts: the address bar is not the task's to use.
+        let scope = if self.browser {
+            match self.first_document(&root) {
+                Some(page) => page,
+                None => return Ok(Vec::new()),
+            }
+        } else {
+            root
+        };
+        let controls = self.control_is(&[
+            UIA_EditControlTypeId,
+            UIA_ComboBoxControlTypeId,
+            UIA_ListControlTypeId,
+            UIA_CheckBoxControlTypeId,
+            UIA_RadioButtonControlTypeId,
+            UIA_SpinnerControlTypeId,
+            UIA_ButtonControlTypeId,
+            UIA_SplitButtonControlTypeId,
+            UIA_HyperlinkControlTypeId,
+            UIA_TabItemControlTypeId,
+            UIA_MenuItemControlTypeId,
+            UIA_ListItemControlTypeId,
+            UIA_TreeItemControlTypeId,
+        ])?;
+        let enabled = self.equals(UIA_IsEnabledPropertyId, true.into())?;
+        let on_screen = self.equals(UIA_IsOffscreenPropertyId, false.into())?;
+        let shown = unsafe { self.automation.CreateAndCondition(&enabled, &on_screen) }?;
+        let wanted = unsafe { self.automation.CreateAndCondition(&controls, &shown) }?;
+        let found = unsafe { scope.FindAllBuildCache(TreeScope_Descendants, &wanted, &self.cache(true)?) }?;
+        let mut elements = Vec::new();
+        for index in 0..unsafe { found.Length() }? {
+            let Ok(element) = (unsafe { found.GetElement(index) }) else { continue };
+            // The same control read again keeps the id it had.
+            // ponytail: one comparison per control already known, so a read costs n × known. Fine for a
+            // form of a few hundred controls; cache runtime ids and compare them here if a big page drags.
+            let known = self.boxes.iter().position(|(seen, _)| unsafe { self.automation.CompareElements(seen, &element) }.is_ok_and(|same| same.as_bool()));
+            let id = known.unwrap_or(self.boxes.len()) as u32;
+            let Ok(Some(field)) = self.describe(&element, id, false) else { continue };
+            if !field.visible {
+                continue;
+            }
+            if known.is_none() {
+                self.boxes.push((element, field.kind));
+            }
+            elements.push(field);
+        }
+        Ok(elements)
+    }
+
+    /// One control read again, as it is right now, under the id it already has. A page can rename or
+    /// swap a control after it was read, so this is what a step is checked against just before it acts.
+    pub fn fresh(&mut self, id: u32) -> Result<Field, FillError> {
+        self.window()?;
+        let (element, _) = self.entry(id)?;
+        let now = unsafe { element.BuildUpdatedCache(&self.cache(true)?) }?;
+        let field = self.describe(&now, id, false)?.ok_or(FillError::Gone)?;
+        self.boxes[id as usize].1 = field.kind;
+        Ok(field)
+    }
+
+    /// The window as it is now, without reading it again: its site may have changed.
+    pub fn now(&self) -> Result<Target, FillError> {
+        let hwnd = self.window()?;
+        let front = screen::foreground().ok_or(FillError::NoWindow)?;
+        let site = if self.browser { self.address(hwnd) } else { None };
+        Ok(Target { process: front.process, title: front.title, site })
+    }
+
+    /// Where a control is on the screen now, for the blue cursor.
+    pub fn bounds(&self, id: u32) -> Result<Bounds, FillError> {
+        self.window()?;
+        let (element, _) = self.entry(id)?;
+        let rect = unsafe { element.CurrentBoundingRectangle() }?;
+        Ok(Bounds { x: rect.left, y: rect.top, width: rect.right - rect.left, height: rect.bottom - rect.top })
+    }
+
+    /// Presses a button or link, picks a tab, row or choice, or opens a list, the way a screen reader
+    /// does. A control that offers none of these is left for the user, rather than clicked with the mouse.
+    pub fn press(&mut self, id: u32) -> Result<(), FillError> {
+        self.window()?;
+        let (element, _) = self.entry(id)?;
+        unsafe {
+            if let Ok(invoke) = element.GetCurrentPatternAs::<IUIAutomationInvokePattern>(UIA_InvokePatternId) {
+                return Ok(invoke.Invoke()?);
+            }
+            if let Ok(item) = element.GetCurrentPatternAs::<IUIAutomationSelectionItemPattern>(UIA_SelectionItemPatternId) {
+                return Ok(item.Select()?);
+            }
+            if let Ok(toggle) = element.GetCurrentPatternAs::<IUIAutomationTogglePattern>(UIA_TogglePatternId) {
+                return Ok(toggle.Toggle()?);
+            }
+            if let Ok(expand) = element.GetCurrentPatternAs::<IUIAutomationExpandCollapsePattern>(UIA_ExpandCollapsePatternId) {
+                return Ok(if expand.CurrentExpandCollapseState()? == ExpandCollapseState_Collapsed { expand.Expand()? } else { expand.Collapse()? });
+            }
+        }
+        Err(FillError::NeedsYou("It cannot be pressed without the mouse, so it is yours to press.".into()))
+    }
+
+    /// Scrolls the page, or the window, a screen up or down.
+    pub fn scroll(&mut self, down: bool) -> Result<(), FillError> {
+        let hwnd = self.window()?;
+        let root = unsafe { self.automation.ElementFromHandle(hwnd) }?;
+        let page = if self.browser { self.first_document(&root).unwrap_or(root.clone()) } else { root.clone() };
+        let scrolls = self.equals(UIA_IsScrollPatternAvailablePropertyId, true.into())?;
+        let target = unsafe { page.FindFirst(TreeScope_Subtree, &scrolls) }.or_else(|_| unsafe { root.FindFirst(TreeScope_Subtree, &scrolls) })?;
+        let pattern: IUIAutomationScrollPattern = unsafe { target.GetCurrentPatternAs(UIA_ScrollPatternId) }?;
+        let amount = if down { ScrollAmount_LargeIncrement } else { ScrollAmount_LargeDecrement };
+        unsafe { pattern.Scroll(ScrollAmount_NoAmount, amount) }?;
+        Ok(())
     }
 }
 
@@ -625,4 +776,9 @@ impl Writer for Uia {
 /// Puts text on the clipboard as an ordinary copy, when the user asks for one.
 pub fn copy(text: &str) -> Result<(), FillError> {
     input::copy(text)
+}
+
+/// The text on the clipboard. Read only when the user says "from my clipboard".
+pub fn pasted() -> Result<String, FillError> {
+    input::pasted()
 }

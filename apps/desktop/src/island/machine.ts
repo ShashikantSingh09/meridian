@@ -19,7 +19,8 @@ export type IslandView =
   | "error" | "level" | "voice"
   | "note"
   | "here"
-  | "ask";
+  | "ask"
+  | "finish";
 
 export interface SessionSummary {
   id: string;
@@ -114,6 +115,8 @@ export interface Snapshot {
   here?: boolean;
   /** A question asked on the island, from typing it to its answer. */
   asking?: boolean;
+  /** Finish this for me is at work, waiting for the user, or showing how it ended. */
+  finish?: boolean;
 }
 
 const ACTIVE: ReadonlySet<SessionStatus> = new Set(["starting", "running", "waiting"]);
@@ -137,6 +140,8 @@ export function deriveView(s: Snapshot): IslandView {
   if (s.panelOpen && !s.voice) return "expanded";
   if (s.listening) return "listening";
   if (s.capturing) return "screen";
+  // A task in the user's app, which they watch step by step, and whose Stop must always be on show.
+  if (s.finish) return "finish";
   if (waitingApproval(s.sessions)) return "working";
   // Started by the user a moment ago, and the reply going into their box is what they are waiting for.
   if (s.here) return "here";
@@ -202,12 +207,37 @@ const SIZES: Record<IslandView, Geometry> = {
   note: { w: 190, ...BAR },
   here: { w: 300, ...BAR },
   ask: { w: 440, h: 92, r: 24 },
+  finish: { w: 470, h: 108, r: 24 },
 };
 
 /** Write here's line with Undo, Shorter and Warmer, a line on why not, and a card that needs a click. */
 const HERE_WRITTEN: Geometry = { w: 450, ...BAR };
 const HERE_LINE: Geometry = { w: 380, ...BAR };
 const HERE_CARD: Geometry = { w: 430, h: 128, r: 24 };
+/** Fill this form: the line once it is in, the card after Undo, and the Show list with a row a box. */
+const FORM_FILLED: Geometry = { w: 420, ...BAR };
+const FORM_UNDONE: Geometry = { w: 440, h: 96, r: 24 };
+const FORM_LIST = (rows: number): Geometry => ({ w: 560, h: 102 + rows * 25, r: 26 });
+
+function hereGeometry(step: string | undefined, rows: number): Geometry {
+  switch (step) {
+    case "writing":
+    case "filling":
+      return SIZES.here;
+    case "written":
+      return HERE_WRITTEN;
+    case "line":
+      return HERE_LINE;
+    case "filled":
+      return FORM_FILLED;
+    case "list":
+      return FORM_LIST(rows);
+    case "undone":
+      return FORM_UNDONE;
+    default:
+      return HERE_CARD;
+  }
+}
 /** The question while it is answered, and the answer: a line per line of it, three at most. */
 const ASK_THINKING: Geometry = { w: 330, ...BAR };
 const ASK_ANSWER = (lines: number): Geometry => ({ w: 440, h: 61 + lines * 20, r: 24 });
@@ -309,14 +339,19 @@ export interface GeometryContext {
   noteFailed?: boolean;
   /** Lines in the morning line on show. */
   cards?: number;
-  /** Where Write here is up to. */
+  /** Where Write here, or Fill this form, is up to. */
   here?: string;
+  /** Rows of room the Show list of a form needs. */
+  formRows?: number;
   /** Where a question asked on the island is up to, and how many lines its answer takes. */
   ask?: { phase: string; lines: number };
+  /** Finish this for me's card, sized by `finishGeometry` from what it shows. */
+  finish?: Geometry;
 }
 
 export function geometryFor(view: IslandView, ctx: GeometryContext): Geometry {
   if (view === "expanded") return PANELS[ctx.tab ?? "home"] ?? EXPANDED;
+  if (view === "finish") return ctx.finish ?? SIZES.finish;
   if (view === "idle" && ctx.greeting) return GREETING;
   if (view === "idle" && ctx.hovered) return IDLE_HOVER;
   if (view === "idle" && ctx.sliver) return SLIVER;
@@ -336,7 +371,7 @@ export function geometryFor(view: IslandView, ctx: GeometryContext): Geometry {
   if (view === "working" && ctx.hovered) return { ...STAGES, h: STAGES.h + logBox(Math.min(ctx.steps ?? 0, STAGE_ROWS)) };
   if (view === "note") return ctx.noteWriting ? NOTE_WRITING : ctx.hovered ? NOTE_STOP : SIZES.note;
   if (view === "notification" && ctx.cards) return ctx.hovered ? { ...MORNING_OPEN, h: MORNING_OPEN.h + ctx.cards * MORNING_ROW } : MORNING;
-  if (view === "here") return ctx.here === "written" ? HERE_WRITTEN : ctx.here === "line" ? HERE_LINE : ctx.here === "writing" ? SIZES.here : HERE_CARD;
+  if (view === "here") return hereGeometry(ctx.here, ctx.formRows ?? 0);
   if (view === "ask") {
     if (ctx.ask?.phase === "thinking") return ASK_THINKING;
     if (ctx.ask?.phase === "answer") return ASK_ANSWER(ctx.ask.lines);
@@ -390,6 +425,8 @@ export function stateToken(view: IslandView, s: Snapshot): string {
     case "here":
     case "ask":
       return "--state-thinking";
+    case "finish":
+      return "--state-working";
     default:
       return "--state-idle";
   }

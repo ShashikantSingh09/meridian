@@ -490,6 +490,42 @@ side by side in the real window before it counts as done.
 Apple-style glass, themes, limits and models, the assistant's name and personality, and wake words are on the canvas and held for review.
 Wake words would reverse the part of D51 that left them out, and only because the owner asked for them.
 
+## D77. Finish this for me: experimental, and every step that commits waits for a click
+
+Asked by voice or on the island, Meridian finishes a task in the window in front, on the user's Claude plan through Claude Code. It is off
+by default behind its own switch, works only in apps and sites the user marked "Finish too", never in banks, tax and government sites, and
+never in local-only mode. Its AI is always Claude Code, whatever the settings file says.
+
+The run gets its own tools at a per-run address on Meridian's tool server, which the assistant never holds. It runs with no built-in
+tools, `--strict-mcp-config`, `dontAsk`, no hooks and no saved session. Rust sorts every step before it runs: filling, picking, ticking,
+scrolling and ordinary buttons go ahead; submit, send, pay, buy, book, upload, delete, sign in or out, OK and Confirm, and any site the
+task has not been on, wait for one click on the island naming that exact control; passwords, codes, cards, CAPTCHA, consent, unnamed and
+hidden controls are never touched. A control is read again just before it is used, and refused if the page changed it. Only the
+island's own buttons can answer; no answer in five minutes is a no. It presses through UI Automation's own patterns and never moves the
+mouse. It pauses when the user touches the mouse or keyboard (read by polling Windows' last-input time, no hook), Esc and Stop end it, and
+it stops after 30 steps, 10 working minutes, or three failures on one control. A blue cursor shows where it works, in a window with no
+access to the app's commands. Undo puts back the boxes it filled.
+
+**Gave up.** Uploads stop at the file picker for the user. Done boxes do not turn green, and the cursor jumps rather than glides. Whether a
+real task completes end to end is not yet known.
+
+## D76. Fill this form: Rust writes the values, the AI only says which box takes which
+
+Ctrl Alt F fills the whole form when the cursor is in a one-line box, a list or a tick box, or in no box, and writes a reply when it is in
+a long box or a card's draft is on offer; a form with one box goes to Write here. The assistant's `fill_form` is gated like `write_here`.
+
+The run reads the visible boxes, sets aside the user's own (passwords, cards, codes, CAPTCHA, consent, uploads), and gives the AI each
+box's number, kind and label and the names of the user's details, never a value. Rust looks each key up and writes the value itself. A
+fact the AI says it found in what the user said, the page, Knowledge, mail, notes or the clipboard must appear in what it was given, or
+the box is left for the user. A box that already holds something changes only on the user's own words. Mail and Calendar are read only
+when the user mentions them, the clipboard only when they say so. PAN, Aadhaar and passport ask every time, naming the site, and the
+number is read from Credential Manager only after the click. Outlines over the page show what was filled and where it came from, in a
+click-through window that never takes focus or the app's commands. Nothing is ever submitted. Undo puts back the whole form or one box,
+keeping anything the user typed since. A form that asked for details nobody added offers Your details once a week at most.
+
+**Gave up.** A list's choices are not read, so a choice it lacks is left for the user. Files the user names are not read yet. Outlines lag
+scrolling by up to 0.7 s. Page text can still hold a number the browser shows on the page.
+
 ## D75. Cards you can act on, and a morning line
 
 My Day now opens on what needs the user: replies people are waiting on, renewals and trial ends in the next three days, and trips with
@@ -534,8 +570,9 @@ Windows Settings, Windows Security, password managers, private windows or a brow
 time. A value is written by setting it through UI Automation, then by pasting, then by typing, reading the box back after each, and
 stopping rather than writing twice when it cannot tell. Pasting keeps the user's clipboard and puts it back, and marks the text so Win+V
 and cloud clipboard skip it. The only keys it ever sends are Ctrl+A, Ctrl+V, Ctrl+Z and plain characters, never Enter or Tab, and it
-waits for held keys to be let go by polling, with no hook. Undo puts a box back only if it still holds what Meridian wrote. Nothing calls
-the engine yet; phase 2 wires it to Ctrl Alt F.
+waits for held keys to be let go by polling, with no hook. Undo puts a box back only if it still holds what Meridian wrote. Write here (D74),
+Fill this form (D76) and Finish this for me (D77) use it. Links, tabs, menu items and rows are refused as boxes, so nothing is ever typed
+into one.
 
 **Your details** are a file in the app's local folder. PAN, Aadhaar and passport numbers are off until turned on, live in Windows
 Credential Manager, go when the switch goes off, and come back from Rust only as "ask first", so no fill can use one without the user's

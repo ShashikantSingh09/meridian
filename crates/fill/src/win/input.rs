@@ -212,6 +212,24 @@ pub(super) fn copy(text: &str) -> Result<(), FillError> {
     }
 }
 
+/// The clipboard's text, as the user copied it. Nothing on it is changed.
+pub(super) fn pasted() -> Result<String, FillError> {
+    let owner = Owner::new()?;
+    let _open = Open::new(&owner)?;
+    let none = || FillError::Clipboard("There is no text on the clipboard.".into());
+    let handle = unsafe { GetClipboardData(CF_UNICODETEXT) }.map_err(|_| none())?;
+    let memory = HGLOBAL(handle.0);
+    let data = unsafe { GlobalLock(memory) } as *const u16;
+    if data.is_null() {
+        return Err(none());
+    }
+    let units = unsafe { std::slice::from_raw_parts(data, GlobalSize(memory) / 2) };
+    let end = units.iter().position(|&unit| unit == 0).unwrap_or(units.len());
+    let text = String::from_utf16_lossy(&units[..end]);
+    let _ = unsafe { GlobalUnlock(memory) };
+    Ok(text.replace("\r\n", "\n"))
+}
+
 fn key(vk: VIRTUAL_KEY, flags: KEYBD_EVENT_FLAGS) -> INPUT {
     INPUT {
         r#type: INPUT_KEYBOARD,

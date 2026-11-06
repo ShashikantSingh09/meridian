@@ -14,7 +14,9 @@ mod actions;
 mod cards;
 mod commands;
 mod details;
+mod finish;
 mod following;
+mod form;
 mod here;
 mod hush;
 mod island;
@@ -23,6 +25,7 @@ mod life;
 mod links;
 mod log;
 mod notetaker;
+mod outlines;
 mod secrets;
 mod settings;
 mod style;
@@ -161,6 +164,7 @@ fn setup(app: &mut App) -> Result<(), Box<dyn std::error::Error>> {
     app.manage(knowledge::state(app)?);
     app.manage(cards::state(app)?);
     app.manage(here::state(app)?);
+    app.manage(finish::Finish::default());
     let path = settings::path(&handle).ok_or("no config directory")?;
     let settings = settings::load(&path);
     let placement = settings.clone();
@@ -380,6 +384,18 @@ pub fn run() {
             here::here_offer,
             here::fill_place_set,
             here::fill_place_forget,
+            finish::finish_stop,
+            finish::finish_continue,
+            finish::finish_answer,
+            finish::finish_undo,
+            finish::finish_close,
+            finish::finish_again,
+            form::form_start,
+            form::form_ids,
+            form::form_undo,
+            form::form_go,
+            form::form_done,
+            form::form_pick,
         ])
         .setup(setup)
         .run(tauri::generate_context!())

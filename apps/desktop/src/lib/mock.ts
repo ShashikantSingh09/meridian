@@ -41,11 +41,21 @@ import type {
   Track,
   WakeStatus,
   FillPlace,
+  FormProgress,
+  FormRow,
+  FormSummary,
+  FormUndone,
   HereOutcome,
   HereRequest,
 } from "./types";
 import { defaultSettings } from "./types";
 import { emptyProfile, idProblem, problem, tidyId, type IdKind, type IdNumbers, type Profile } from "./details";
+import type { FinishView } from "./finish";
+
+// Finish this for me: the core's view, pushed by a test, and every click the page sent. Nothing here
+// answers a question by itself.
+let finishShown: ((view: FinishView | null) => void) | null = null;
+const finishCalls: string[] = [];
 
 // Write here: how the next runs end, what the page asked, and a run held open so a test can look at it.
 const hereOutcomes: HereOutcome[] = [];
@@ -62,6 +72,44 @@ let nextAnswer: { text?: string; fail?: string } | null = null;
 const nextHere = async () => {
   if (hereHeld) await hereHeld;
   return hereOutcomes.shift() ?? ({ outcome: "written" } as HereOutcome);
+};
+
+// Fill this form: the job application on the board, as the core would leave it.
+const formRow = (field: number, label: string, state: FormRow["state"], value = "", origin?: FormRow["origin"], from = "", why = ""): FormRow => ({ field, label, kind: "plain-text", state, value, origin, from, why });
+const sampleForm = (): FormSummary => ({
+  site: "kestrellabs.in",
+  filled: 8,
+  total: 11,
+  need: 3,
+  rows: [
+    formRow(0, "Full name", "filled", "Ravi Sharma", "details"),
+    formRow(1, "Email", "filled", "ravi.sharma84@gmail.com", "details"),
+    formRow(2, "Phone", "filled", "+91 98201 44317", "details"),
+    formRow(3, "LinkedIn", "filled", "linkedin.com/in/ravi-sharma-design", "details"),
+    formRow(4, "Current company", "filled", "Northwind Software", "details"),
+    formRow(5, "Notice period", "filled", "60 days", "knowledge", "Job search"),
+    formRow(6, "Expected salary (₹ a year)", "filled", "32,00,000", "knowledge", "Job search"),
+    formRow(7, "Why do you want to join Kestrel Labs?", "filled", "I have spent four years designing payment screens at Northwind Software, mostly for small shops.", "written-by-ai"),
+    formRow(8, "Create a password", "yours", "", undefined, "", "Password boxes are yours to fill."),
+    formRow(9, "Your CV", "yours", "", undefined, "", "File uploads are yours to do."),
+    formRow(10, "I agree to the privacy policy", "yours", "", undefined, "", "“I agree” boxes are yours to tick."),
+  ],
+  ids: [],
+  details: null,
+  canUndo: true,
+  stopped: null,
+  note: null,
+});
+const formOutcomes: HereOutcome[] = [];
+const formUndos: FormUndone[] = [];
+let formOffered = false;
+let formPicked = false;
+let formAsked: ((start: { instruction: string }) => void) | null = null;
+let formProgressed: ((progress: FormProgress) => void) | null = null;
+let formEnded: (() => void) | null = null;
+const nextForm = async () => {
+  if (hereHeld) await hereHeld;
+  return formOutcomes.shift() ?? ({ outcome: "filled", form: sampleForm() } as HereOutcome);
 };
 const answerWith = async (send: (event: AgentEvent) => void) => {
   const answer = nextAnswer!;
@@ -391,8 +439,46 @@ export const mock = {
     releaseHere();
   },
   hereDone: async () => void hereCalls.push("done"),
-  /** The window in front, when a box has the cursor. */
-  hereOffer: async () => (hereOffered ? 4242 : null),
+  /** The window in front, when a box has the cursor, and whether that box is in a form. */
+  hereOffer: async () => (hereOffered ? { window: 4242, form: formOffered } : null),
+
+  async formStart(request: HereRequest) {
+    hereCalls.push(`form ${JSON.stringify(request)}`);
+    formProgressed?.({ done: 0, total: 0, reading: null });
+    return nextForm();
+  },
+  async formIds(yes: boolean) {
+    hereCalls.push(`form ids ${yes}`);
+    return nextForm();
+  },
+  async formUndo(field: number | null) {
+    hereCalls.push(`form undo ${field ?? "all"}`);
+    if (undoRefused) throw undoRefused;
+    const form = sampleForm();
+    const back = (row: FormRow) => field === null || row.field === field;
+    form.rows = form.rows.map((row) => (row.state === "filled" && back(row) ? { ...row, state: "put-back", value: "" } : row));
+    form.filled = form.rows.filter((row) => row.state === "filled").length;
+    return formUndos.shift() ?? { putBack: field === null ? 8 : 1, kept: [], form };
+  },
+  formGo: async (field: number) => void hereCalls.push(`form go ${field}`),
+  formDone: async () => void hereCalls.push("form done"),
+  formPick: async () => formPicked,
+  onFormStart: (handler: (start: { instruction: string }) => void) => void (formAsked = handler),
+  onFormProgress: (handler: (progress: FormProgress) => void) => void (formProgressed = handler),
+  onFormEnded: (handler: () => void) => void (formEnded = handler),
+  /** The form as the board draws it, to change for a test. */
+  sampleForm,
+  formNext: (...outcomes: HereOutcome[]) => void formOutcomes.push(...outcomes),
+  formUndoNext: (...undos: FormUndone[]) => void formUndos.push(...undos),
+  /** The cursor is in a box of a form, for the island's button and for Ctrl Alt F. */
+  offerForm: (on: boolean) => void (formOffered = on),
+  pickForm: (on: boolean) => void (formPicked = on),
+  /** As the core does when the assistant calls fill_form. */
+  askToFillForm: (instruction: string) => formAsked?.({ instruction }),
+  /** As the core does before each box. */
+  fillingBox: (done: number, total: number, reading: "mail" | null = null) => formProgressed?.({ done, total, reading }),
+  /** The user submits, or leaves the page. */
+  leaveThePage: () => formEnded?.(),
   async fillPlaceSet(place: FillPlace) {
     const known = settings.fill.places.some((p) => p.id === place.id);
     const places = known ? settings.fill.places.map((p) => (p.id === place.id ? { ...place, alwaysAsk: p.alwaysAsk || place.alwaysAsk } : p)) : [...settings.fill.places, place];
@@ -406,6 +492,22 @@ export const mock = {
   onHereKey: (handler: () => void) => void (hereKey = handler),
   onHereStart: (handler: (start: { instruction: string }) => void) => void (hereAsked = handler),
   onHereEnded: (handler: () => void) => void (hereEnded = handler),
+  finishStop: async () => void finishCalls.push("stop"),
+  finishContinue: async () => void finishCalls.push("continue"),
+  finishAnswer: async (id: string, yes: boolean) => void finishCalls.push(`answer ${id} ${yes ? "yes" : "no"}`),
+  async finishUndo() {
+    finishCalls.push("undo");
+    return "Put back 4 boxes.";
+  },
+  finishClose: async () => void finishCalls.push("close"),
+  async finishAgain() {
+    finishCalls.push("again");
+    return "It has started.";
+  },
+  onFinishState: (handler: (view: FinishView | null) => void) => void (finishShown = handler),
+  /** As the core does while a task runs. */
+  finishShow: (view: FinishView | null) => finishShown?.(view),
+  finishCalls: () => [...finishCalls],
   /** As the core does when Ctrl Alt F is pressed. */
   pressHereKey: () => hereKey?.(),
   /** As the core does when the assistant calls write_here. */

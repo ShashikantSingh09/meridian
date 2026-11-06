@@ -54,6 +54,25 @@ impl UndoLog {
         let mode = self.mode;
         self.entries.drain(..).rev().map(|entry| (entry.field, undo_one(w, mode, &entry))).collect()
     }
+
+    /// Puts one box back, through every write to it, newest first, and forgets them. None when
+    /// Meridian did not write in it. The answer is how the oldest write went back: what the box held
+    /// before Meridian came.
+    pub fn undo_field<W: Writer>(&mut self, w: &mut W, field: u32) -> Option<Undone> {
+        let mode = self.mode;
+        let (mine, rest) = std::mem::take(&mut self.entries).into_iter().partition::<Vec<_>, _>(|entry| entry.field == field);
+        self.entries = rest;
+        let mut last = None;
+        for entry in mine.iter().rev() {
+            let undone = undo_one(w, mode, entry);
+            let stop = undone != Undone::PutBack;
+            last = Some(undone);
+            if stop {
+                break;
+            }
+        }
+        last
+    }
 }
 
 fn undo_one<W: Writer>(w: &mut W, mode: Mode, entry: &Entry) -> Undone {
@@ -157,6 +176,21 @@ mod tests {
         log.record(&body, write(&mut w, &body, "Hello", Mode::Here).unwrap());
         assert_eq!(log.undo(&mut w), vec![(0, Undone::CannotCheck)]);
         assert!(!w.calls.contains(&"ctrl z".to_string()));
+    }
+
+    #[test]
+    fn one_box_is_put_back_alone_through_every_write_to_it() {
+        let mut w = Fake::new(vec![Behaviour { value: "R".into(), ..Default::default() }, Behaviour::default()]);
+        let name = field(0, "Full name", FieldKind::PlainText);
+        let email = field(1, "Email", FieldKind::Email);
+        let mut log = UndoLog::new(Mode::Form);
+        log.record(&name, write(&mut w, &name, "Ravi", Mode::Form).unwrap());
+        log.record(&email, write(&mut w, &email, "ravi@gmail.com", Mode::Form).unwrap());
+        log.record(&name, write(&mut w, &name, "Ravi Sharma", Mode::Form).unwrap());
+        assert_eq!(log.undo_field(&mut w, 0), Some(Undone::PutBack));
+        assert_eq!((w.boxes[0].value.as_str(), w.boxes[1].value.as_str()), ("R", "ravi@gmail.com"));
+        assert_eq!(log.len(), 1, "the other box can still be put back");
+        assert_eq!(log.undo_field(&mut w, 0), None, "nothing more to put back there");
     }
 
     #[test]

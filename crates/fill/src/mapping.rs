@@ -62,6 +62,8 @@ pub enum Source {
     Mail,
     Notes,
     File,
+    /// Only when the user said "from my clipboard".
+    Clipboard,
     Page,
     Said,
     WrittenByAi,
@@ -92,13 +94,20 @@ pub struct Checked {
     pub problems: Vec<(u32, Problem)>,
 }
 
-/// The first part of a key names what it is: `pan`, `passport.expiry`.
+/// The first part of a key names what it is: `pan`, `passport.expiry`. Your details
+/// names ID numbers `id.pan`, so a leading "id." is passed over.
 fn root(key: &str) -> &str {
+    let key = key.strip_prefix("id.").unwrap_or(key);
     key.split('.').next().unwrap_or_default()
 }
 
 pub fn is_id_key(key: &str) -> bool {
     ID_KEYS.contains(&root(key))
+}
+
+/// Which ID number a key names, such as "pan" for `id.pan`, or None for any other key.
+pub fn id_kind(key: &str) -> Option<&str> {
+    is_id_key(key).then(|| root(key))
 }
 
 fn good_key(key: &str) -> bool {
@@ -242,6 +251,9 @@ mod tests {
         assert_eq!(check(one(profile("pan"), 7), &form(), &[]).problems, vec![(7, Problem::IdNumber)]);
         assert_eq!(check(one(profile("passport.number"), 7), &form(), &["pan"]).problems, vec![(7, Problem::IdNumber)]);
         assert!(check(one(profile("pan"), 7), &form(), &["pan"]).problems.is_empty());
+        assert_eq!(check(one(profile("id.pan"), 7), &form(), &[]).problems, vec![(7, Problem::IdNumber)], "Your details' own name for it");
+        assert!(check(one(profile("id.pan"), 7), &form(), &["pan"]).problems.is_empty());
+        assert_eq!((id_kind("id.aadhaar"), id_kind("passport.number"), id_kind("phone")), (Some("aadhaar"), Some("passport"), None));
     }
 
     #[test]

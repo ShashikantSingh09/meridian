@@ -68,7 +68,6 @@ pub struct Profile {
 pub const ID_KINDS: [&str; 3] = ["pan", "aadhaar", "passport"];
 
 /// Every key the fill engine may ask for. The AI is given these names, never the values.
-#[allow(dead_code)] // The fill engine uses it, in a later phase.
 pub const KEYS: &[&str] = &[
     "name", "name.en", "name.hi", "name.first", "name.last", "birth", "email", "phone", "phone.other", "address", "address.lines", "address.city",
     "address.pin", "address.state", "address.hi", "work.company", "work.title", "work.department", "work.id", "work.email", "work.linkedin", "id.pan",
@@ -76,7 +75,6 @@ pub const KEYS: &[&str] = &[
 ];
 
 /// A value for one box, as Rust writes it.
-#[allow(dead_code)] // The fill engine uses it, in a later phase.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     Plain(String),
@@ -128,9 +126,25 @@ fn english_address(address: &Address) -> String {
 
 /// The one call the fill engine makes for a value. It reads the file and Credential Manager here,
 /// so a value goes from this PC's store straight into the box.
-#[allow(dead_code)] // The fill engine uses it, in a later phase.
 pub fn resolve(app: &AppHandle, key: &str) -> Option<Value> {
-    resolve_in(&load(&path(app).ok()?), key, read_id)
+    resolve_in(&kept(app), key, read_id)
+}
+
+/// Your details as kept on this PC, without the ID numbers.
+pub fn kept(app: &AppHandle) -> Profile {
+    path(app).map(|path| load(&path)).unwrap_or_default()
+}
+
+impl Profile {
+    /// Nothing added yet, so a fill can offer to start them.
+    pub fn is_empty(&self) -> bool {
+        tidy(self.clone()) == Profile { ids: self.ids, ..Profile::default() }
+    }
+}
+
+/// An ID number as the Show list may show it: only its end.
+pub fn masked(key: &str, number: &str) -> String {
+    mask(key.strip_prefix("id.").unwrap_or(key), number)
 }
 
 // ── Checks ─────────────────────────────────────────────────────────────
@@ -404,6 +418,14 @@ mod tests {
         profile.name.en = "Ravi".into();
         assert_eq!(resolve_in(&profile, "name.first", NO_IDS), plain("Ravi"));
         assert_eq!(resolve_in(&profile, "name.last", NO_IDS), None);
+    }
+
+    #[test]
+    fn a_profile_with_nothing_added_is_empty_even_with_id_numbers_on() {
+        assert!(Profile::default().is_empty());
+        assert!(Profile { ids: true, email: "  ".into(), ..Profile::default() }.is_empty());
+        assert!(!Profile { phone: "+91 98201 44317".into(), ..Profile::default() }.is_empty());
+        assert_eq!(masked("id.pan", "ABCDE1234K"), "•••••1234K");
     }
 
     #[test]

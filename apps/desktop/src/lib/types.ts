@@ -314,7 +314,70 @@ export type HereOutcome =
   | { outcome: "local"; ai: string }
   | { outcome: "failed"; why: string }
   | { outcome: "moved"; title: string }
-  | { outcome: "stopped" };
+  | { outcome: "stopped" }
+  /** Fill this form went through the form. */
+  | { outcome: "filled"; form: FormSummary }
+  /** Fill this form found one box only, so Write here takes it. */
+  | { outcome: "single" };
+
+/** Where one box of a form is up to. */
+export type FormRowState = "waiting" | "filled" | "yours" | "needs-you" | "kept" | "ask-first" | "put-back";
+/** Where a value came from. Your details are put in by Meridian and never go to the AI. */
+export type FormOrigin = "details" | "knowledge" | "mail" | "notes" | "file" | "clipboard" | "page" | "said" | "written-by-ai";
+
+/** One box of a form, for the Show list. */
+export interface FormRow {
+  field: number;
+  label: string;
+  kind: string;
+  state: FormRowState;
+  origin?: FormOrigin;
+  /** The Knowledge page, mail or file it came from. */
+  from: string;
+  /** What went in. An ID number is masked. */
+  value: string;
+  /** Why it was left. */
+  why: string;
+}
+
+/** A form as Fill this form left it. */
+export interface FormSummary {
+  site: string;
+  filled: number;
+  total: number;
+  need: number;
+  rows: FormRow[];
+  /** ID numbers waiting for a yes, by name, such as PAN. */
+  ids: string[];
+  /** Offers to start Your details, naming what the form asked for. */
+  details: string[] | null;
+  canUndo: boolean;
+  /** Why the run ended before every box. */
+  stopped: string | null;
+  /** Something asked for that could not be read, such as Gmail. */
+  note: string | null;
+}
+
+/** How an Undo of a form went. */
+export interface FormUndone {
+  putBack: number;
+  /** Boxes the user changed since, which keep what they typed. */
+  kept: string[];
+  form: FormSummary;
+}
+
+/** The box being filled, or a source being read first. */
+export interface FormProgress {
+  done: number;
+  total: number;
+  reading: "mail" | null;
+}
+
+/** What the island offers: Fill this form when the cursor is in a box of a form, else Write here. */
+export interface HereOffer {
+  window: number;
+  form: boolean;
+}
 
 /** What to write: words the user asked for, or words already written. A yes for one place, once. */
 export interface HereRequest {

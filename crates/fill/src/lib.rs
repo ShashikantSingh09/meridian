@@ -15,6 +15,8 @@
 //! [`Reader`] and [`Writer`] traits: Windows has [`Uia`], and a Mac reader and
 //! writer can implement the same two traits.
 
+mod finish;
+mod form;
 mod mapping;
 mod model;
 mod policy;
@@ -26,12 +28,18 @@ mod write;
 #[cfg(test)]
 mod fake;
 
-pub use mapping::{check, is_id_key, Answer, Checked, Fill, Mapping, Problem, Source, ID_KEYS, MAX_TEXT};
+pub use finish::{commit, same_site, Commit, Step};
+pub mod steps {
+    //! Finish this for me's rules for each step, by name: `steps::press`, `steps::fill`, `steps::go`, `steps::landed`.
+    pub use crate::finish::{fill, go, landed, press};
+}
+pub use form::{Form, Given, Lookup, Origin, Row, State};
+pub use mapping::{check, id_kind, is_id_key, Answer, Checked, Fill, Mapping, Problem, Source, ID_KEYS, MAX_TEXT};
 pub use model::{site_from_address, Bounds, Field, FieldKind, Target, MAX_VALUE, MIN_SIDE};
 pub use policy::{access, is_browser, refusal, Access, Refusal};
 pub use undo::{Undone, UndoLog};
 #[cfg(windows)]
-pub use win::{copy, Uia};
+pub use win::{copy, pasted, Uia};
 pub use write::{write, yes_no, Method, Mode, Need, Written, Writer};
 
 /// Messages are shown to the user as they are, and never hold a box's value.

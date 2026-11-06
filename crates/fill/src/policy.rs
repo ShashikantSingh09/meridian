@@ -63,7 +63,7 @@ const CAPTCHA: &[&str] = &[
     "captcha", "recaptcha", "hcaptcha", "not a robot", "characters you see", "characters shown", "कैप्चा",
 ];
 /// Only for tick boxes and choices: a text box called "Terms" is just a box.
-const CONSENT: &[&str] = &[
+pub(crate) const CONSENT: &[&str] = &[
     "agree", "agreement", "accept", "consent", "terms", "conditions", "privacy policy", "i have read",
     "i confirm", "declare", "declaration", "authorise", "authorize", "subscribe", "newsletter", "marketing",
     "offers", "promotional", "opt in", "send me", "सहमत", "स्वीकार", "शर्तें", "शर्तों", "नियम", "घोषणा",
@@ -75,26 +75,32 @@ pub fn refusal(field: &Field) -> Option<Refusal> {
     match field.kind {
         FieldKind::Password => return Some(Refusal::Password),
         FieldKind::File => return Some(Refusal::FileUpload),
-        FieldKind::Button => return Some(Refusal::Button),
+        // Links, tabs, menu items and rows are pressed by Finish this for me, never written in: typing into
+        // one would reach the page's own single-key shortcuts.
+        FieldKind::Button | FieldKind::Link | FieldKind::Tab | FieldKind::MenuItem | FieldKind::Item => return Some(Refusal::Button),
         _ => {}
     }
     let words = field.words();
     let tick = matches!(field.kind, FieldKind::Checkbox | FieldKind::Radio);
+    secret(&words).or_else(|| (tick && has_any(&words, CONSENT)).then_some(Refusal::Consent))
+}
+
+/// Passwords, codes, cards and CAPTCHA, known by their words whatever the control is, so Finish this
+/// for me never presses "Show password" or "Resend OTP" either.
+pub(crate) fn secret(words: &str) -> Option<Refusal> {
     // A one-time password is a code, so codes are checked before passwords.
-    if has_any(&words, ONE_TIME_CODE) {
+    if has_any(words, ONE_TIME_CODE) {
         Some(Refusal::OneTimeCode)
-    } else if has_any(&words, PASSWORD) {
+    } else if has_any(words, PASSWORD) {
         Some(Refusal::Password)
-    } else if has_any(&words, CVV) {
+    } else if has_any(words, CVV) {
         Some(Refusal::Cvv)
-    } else if has_any(&words, CARD_NUMBER) && !has_any(&words, ID_CARDS) {
+    } else if has_any(words, CARD_NUMBER) && !has_any(words, ID_CARDS) {
         Some(Refusal::CardNumber)
-    } else if has_any(&words, EXPIRY) {
+    } else if has_any(words, EXPIRY) {
         Some(Refusal::Expiry)
-    } else if has_any(&words, CAPTCHA) {
+    } else if has_any(words, CAPTCHA) {
         Some(Refusal::Captcha)
-    } else if tick && has_any(&words, CONSENT) {
-        Some(Refusal::Consent)
     } else {
         None
     }
@@ -151,7 +157,7 @@ pub fn is_browser(process: &str) -> bool {
     BROWSERS.contains(&stem(process).as_str())
 }
 
-fn on(host: &str, domain: &str) -> bool {
+pub(crate) fn on(host: &str, domain: &str) -> bool {
     host == domain || host.strip_suffix(domain).is_some_and(|rest| rest.ends_with('.'))
 }
 
@@ -207,6 +213,13 @@ mod tests {
 
     fn refused(label: &str) -> Option<Refusal> {
         refusal(&field(0, label, FieldKind::PlainText))
+    }
+
+    #[test]
+    fn links_tabs_menu_items_and_rows_are_never_written_in() {
+        for kind in [FieldKind::Button, FieldKind::Link, FieldKind::Tab, FieldKind::MenuItem, FieldKind::Item] {
+            assert_eq!(refusal(&field(0, "Inbox", kind)), Some(Refusal::Button), "{kind:?}");
+        }
     }
 
     #[test]

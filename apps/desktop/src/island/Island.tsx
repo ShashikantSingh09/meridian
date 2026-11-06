@@ -32,8 +32,11 @@ import {
   WorkingView,
 } from "./views";
 import { AskView, HereView } from "./here";
+import { FinishView } from "./finish";
 import { answerLines, type AskState } from "../lib/ask";
 import type { HereState } from "../lib/here";
+import { finishGeometry, type FinishState } from "../lib/finish";
+import { listRows } from "../lib/form";
 import "./stages.css";
 
 /** A press that moves this far, in CSS pixels, is a drag and not a click. */
@@ -70,13 +73,14 @@ function useSnapshot(): Snapshot {
   const writingNote = useApp((s) => s.notes.working.length > 0);
   const here = useApp((s) => s.here !== null);
   const asking = useApp((s) => s.ask !== null);
+  const finish = useApp((s) => s.finish !== null);
   return useMemo(
-    () => ({ panelOpen, listening, capturing, mediaPlaying, chatPending, sessions, notices, suggestions, errors, live, level, voice, recording, writingNote, here, asking }),
-    [panelOpen, listening, capturing, mediaPlaying, chatPending, sessions, notices, suggestions, errors, live, level, voice, recording, writingNote, here, asking],
+    () => ({ panelOpen, listening, capturing, mediaPlaying, chatPending, sessions, notices, suggestions, errors, live, level, voice, recording, writingNote, here, asking, finish }),
+    [panelOpen, listening, capturing, mediaPlaying, chatPending, sessions, notices, suggestions, errors, live, level, voice, recording, writingNote, here, asking, finish],
   );
 }
 
-function CompactContent({ view, reduced, hovered, sliver, mediaOpen, here, ask }: { view: IslandView; reduced: boolean; hovered: boolean; sliver: boolean; mediaOpen: boolean; here: HereState | null; ask: AskState | null }) {
+function CompactContent({ view, reduced, hovered, sliver, mediaOpen, here, ask, finish }: { view: IslandView; reduced: boolean; hovered: boolean; sliver: boolean; mediaOpen: boolean; here: HereState | null; ask: AskState | null; finish: FinishState | null }) {
   switch (view) {
     case "listening":
       return <ListeningView reduced={reduced} />;
@@ -108,6 +112,8 @@ function CompactContent({ view, reduced, hovered, sliver, mediaOpen, here, ask }
       return <HereView here={here} reduced={reduced} />;
     case "ask":
       return <AskView ask={ask} reduced={reduced} />;
+    case "finish":
+      return <FinishView finish={finish} reduced={reduced} />;
     default:
       return <IdleView reduced={reduced} hovered={hovered} sliver={sliver} />;
   }
@@ -140,6 +146,7 @@ export function Island() {
   const ask = useApp((s) => s.ask);
   const hereStep = here?.step;
   const askPhase = ask?.phase;
+  const finish = useApp((s) => s.finish);
   const askLines = answerLines(ask?.answer ?? "");
   const finished = useApp((s) => {
     const notice = s.notices[0];
@@ -193,7 +200,9 @@ export function Island() {
     noteFailed: snapshot.errors[0]?.note !== undefined,
     cards: snapshot.notices[0]?.cards?.length,
     here: hereStep,
+    formRows: here?.step === "list" && here.form ? listRows(here.form, here.all ?? false) : undefined,
     ask: askPhase ? { phase: askPhase, lines: askLines } : undefined,
+    finish: finish ? finishGeometry(finish) : undefined,
   });
 
   const width = useMotionValue(reduced ? target.w : BIRTH.w);
@@ -307,7 +316,7 @@ export function Island() {
   const opensOnHover = view === "idle" || view === "live" || view === "note" || (view === "working" && waiting === null) || (view === "notification" && snapshot.notices[0]?.cards !== undefined);
   const contentKey = expanded
     ? "panel"
-    : view + (opened && opensOnHover ? "-hover" : "") + (view === "media" && playerOpen ? "-open" : "") + (view === "here" ? `-${hereStep}` : view === "ask" ? `-${askPhase}` : "");
+    : view + (opened && opensOnHover ? "-hover" : "") + (view === "media" && playerOpen ? "-open" : "") + (view === "here" ? `-${hereStep}` : view === "ask" ? `-${askPhase}` : view === "finish" ? `-${finish?.phase}-${finish?.ask?.id ?? finish?.end?.kind ?? finish?.card?.kind ?? ""}` : "");
 
   return (
     <motion.div
@@ -356,7 +365,7 @@ export function Island() {
         <span className="island-tint" aria-hidden="true" />
         <AnimatePresence initial={false}>
           <motion.div key={contentKey} className="island-content" style={{ width: target.w, height: target.h, transformOrigin: place === "up" ? "50% 100%" : "50% 0" }} initial={enter.initial} animate={enter.animate} exit={enter.exit}>
-            {expanded ? <Panel /> : <CompactContent view={view} reduced={reduced} hovered={opened} sliver={sliver} mediaOpen={playerOpen} here={here} ask={ask} />}
+            {expanded ? <Panel /> : <CompactContent view={view} reduced={reduced} hovered={opened} sliver={sliver} mediaOpen={playerOpen} here={here} ask={ask} finish={finish} />}
           </motion.div>
         </AnimatePresence>
         {!expanded && <ClosingLine view={view} />}

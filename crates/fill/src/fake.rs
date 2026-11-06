@@ -17,6 +17,8 @@ pub struct Behaviour {
     /// The box formats what it is given.
     pub strips_spaces: bool,
     pub items: Vec<String>,
+    /// Another window came to the front just before this box.
+    pub elsewhere: bool,
 }
 
 impl Default for Behaviour {
@@ -31,6 +33,7 @@ impl Default for Behaviour {
             mangles: false,
             strips_spaces: false,
             items: Vec::new(),
+            elsewhere: false,
         }
     }
 }
@@ -86,6 +89,7 @@ impl Writer for Fake {
     fn check(&mut self, id: u32, need: Need) -> Result<(), FillError> {
         match self.boxes.get(id as usize) {
             None => Err(FillError::Gone),
+            Some(found) if found.behaviour.elsewhere => Err(FillError::WindowChanged),
             Some(found) if found.behaviour.gone => Err(FillError::Gone),
             Some(_) if need == Need::Focus && self.focus != Some(id) => Err(FillError::Moved),
             Some(_) => Ok(()),

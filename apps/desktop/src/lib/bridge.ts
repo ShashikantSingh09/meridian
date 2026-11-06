@@ -4,6 +4,7 @@
 import { Channel, invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { IdKind, IdNumbers, Profile } from "./details";
+import type { FinishView } from "./finish";
 import { mock } from "./mock";
 import type { StyleProfile } from "./style";
 import type {
@@ -22,6 +23,9 @@ import type {
   Digest,
   EventTime,
   FillPlace,
+  FormProgress,
+  FormUndone,
+  HereOffer,
   HereOutcome,
   HereRequest,
   HooksHealth,
@@ -508,7 +512,7 @@ export const bridge = {
   /** The island's line has gone, so the core lets the box go. */
   hereDone: () => (native ? invoke<void>("here_done") : mock.hereDone()),
   /** The window in front, when a box Meridian may write in has the cursor there. Nothing a box holds is read. */
-  hereOffer: () => (native ? invoke<number | null>("here_offer") : mock.hereOffer()),
+  hereOffer: () => (native ? invoke<HereOffer | null>("here_offer") : mock.hereOffer()),
   /** The list of apps and sites belongs to the core. Each change comes back as the whole settings. */
   fillPlaceSet: (place: FillPlace) => (native ? invoke<Settings>("fill_place_set", { place }) : mock.fillPlaceSet(place)),
   fillPlaceForget: (id: string) => (native ? invoke<Settings>("fill_place_forget", { id }) : mock.fillPlaceForget(id)),
@@ -526,5 +530,49 @@ export const bridge = {
   onHereEnded(handler: () => void) {
     if (!native) return Promise.resolve(mock.onHereEnded(handler));
     return listen("here-ended", handler).then(() => {});
+  },
+
+  // Finish this for me. Only the assistant's finish_this starts a task; these are the user's clicks.
+  finishStop: () => (native ? invoke<void>("finish_stop") : mock.finishStop()),
+  finishContinue: () => (native ? invoke<void>("finish_continue") : mock.finishContinue()),
+  /** The user's click on the question up, by its id. */
+  finishAnswer: (id: string, yes: boolean) => (native ? invoke<void>("finish_answer", { id, yes }) : mock.finishAnswer(id, yes)),
+  /** Puts back the boxes it filled, and says how many. */
+  finishUndo: () => (native ? invoke<string>("finish_undo") : mock.finishUndo()),
+  /** The card has gone, so the core lets the task go. */
+  finishClose: () => (native ? invoke<void>("finish_close") : mock.finishClose()),
+  /** After Allow on the island: the same task again, with every check. */
+  finishAgain: () => (native ? invoke<string>("finish_again") : mock.finishAgain()),
+  /** What the task is doing now, or null once it is let go. */
+  onFinishState(handler: (view: FinishView | null) => void) {
+    if (!native) return Promise.resolve(mock.onFinishState(handler));
+    return listen<FinishView | null>("finish-state", (e) => handler(e.payload)).then(() => {});
+  },
+  // Fill this form. The core reads the boxes and writes each value itself; these say what happened.
+  formStart: (request: HereRequest) => (native ? invoke<HereOutcome>("form_start", { request }) : mock.formStart(request)),
+  /** The user's click on the question about an ID number, which names the site. */
+  formIds: (yes: boolean) => (native ? invoke<HereOutcome>("form_ids", { yes }) : mock.formIds(yes)),
+  /** The whole form back, or one box. A box the user changed since keeps what they typed. */
+  formUndo: (field: number | null) => (native ? invoke<FormUndone>("form_undo", { field }) : mock.formUndo(field)),
+  /** The cursor into that box, which brings it into view. */
+  formGo: (field: number) => (native ? invoke<void>("form_go", { field }) : mock.formGo(field)),
+  /** The island's line has gone, so the core lets the form go, with its outlines. */
+  formDone: () => (native ? invoke<void>("form_done") : mock.formDone()),
+  /** For Ctrl Alt F: whether the cursor is in a form rather than a reply box. */
+  formPick: () => (native ? invoke<boolean>("form_pick") : mock.formPick()),
+  /** The assistant was asked to fill in the form. */
+  onFormStart(handler: (start: { instruction: string }) => void) {
+    if (!native) return Promise.resolve(mock.onFormStart(handler));
+    return listen<{ instruction: string }>("form-start", (e) => handler(e.payload)).then(() => {});
+  },
+  /** The box being filled now, or a source being read first. */
+  onFormProgress(handler: (progress: FormProgress) => void) {
+    if (!native) return Promise.resolve(mock.onFormProgress(handler));
+    return listen<FormProgress>("form-progress", (e) => handler(e.payload)).then(() => {});
+  },
+  /** The page was left, or Undo ran out, so the form's line goes. */
+  onFormEnded(handler: () => void) {
+    if (!native) return Promise.resolve(mock.onFormEnded(handler));
+    return listen("form-ended", handler).then(() => {});
   },
 };

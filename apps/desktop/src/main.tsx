@@ -37,6 +37,7 @@ import { refreshNotes, wireNotes } from "./lib/notes";
 import { wireKnowledge } from "./lib/knowledge";
 import { wireCards } from "./lib/cards";
 import { startWriteHere, wireHere } from "./lib/here";
+import { wireFinish } from "./lib/finish";
 import { endConversation, say, startVoice, wireVoice } from "./lib/voice";
 
 // A file or link dropped on the island would otherwise load in its place, and every page here can
@@ -49,6 +50,7 @@ wireVoice();
 wireNotes();
 wireKnowledge();
 wireCards();
+wireFinish();
 wireHere();
 watchTheme(() => getState().settings);
 

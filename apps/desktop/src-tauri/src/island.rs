@@ -399,6 +399,11 @@ pub fn set_user_hidden(win: &WebviewWindow, gate: &Gate, hidden: bool) {
     sync_visibility(win, gate);
 }
 
+/// The pointer is on the island, so moving it there is not using another app.
+pub fn pointer_over(gate: &Gate) -> bool {
+    gate.hovered.load(Ordering::Relaxed)
+}
+
 pub fn user_hidden(gate: &Gate) -> bool {
     gate.user_hidden.load(Ordering::Relaxed)
 }

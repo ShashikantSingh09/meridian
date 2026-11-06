@@ -1,5 +1,24 @@
 # Development ledger
 
+## 2026-11-06: Fill this form and Finish this for me (phases 3 and 4)
+
+Built by two builds in parallel, then merged. See D76 and D77. Merging found one real gap between them: Finish taught the reader about
+links, tabs, menu items and rows, so the engine now refuses those as boxes too, and nothing is ever typed into one. A flaky island test
+was also fixed: closing holds the shape still for 90 ms, so "settled" now needs three matching reads.
+
+### Proved
+
+Rust: every crate passes, including 80 for the fill engine (the form run, Finish's step rules in English and Hindi, the new refusal) and
+159 for the app core. Vitest 256 and Playwright 299 pass on the merged tree, with no compiler warnings.
+
+### Not proved
+
+- Anything in real windows: Fill this form and Finish this for me reading and writing a real browser or app, the outlines window and the
+  blue cursor (transparency, click-through, never taking focus, scaling), Go to it, pausing on real input, Esc. The by-hand tests are in
+  `crates/fill/tests/live_forms.rs` against `tests/fill/forms.html`.
+- A real Claude Code run for Finish this for me, including whether its flags allow the run's own tools in `-p` mode, and the quality of
+  the AI's form mapping.
+
 ## 2026-11-06: Write here, answers into the box, and cards in My Day (phase 2)
 
 Built by two builds in parallel, then merged. See D74 and D75. Open in Gmail now hands its draft to Write here, and drafts are written

@@ -27,6 +27,12 @@ pub enum FieldKind {
     Password,
     File,
     Button,
+    /// Only Finish this for me reads these. A link's value is where it goes.
+    Link,
+    Tab,
+    MenuItem,
+    /// A row of a list or tree.
+    Item,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
