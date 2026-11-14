@@ -1,5 +1,13 @@
 # Development ledger
 
+## 2026-11-14: React Bits as a component source
+
+Set up as reactbits.dev describes: the `@react-bits` registry in `apps/desktop/components.json`, and the shadcn MCP server in
+`.mcp.json` (shadcn 4.23.0, pinned, started inside `apps/desktop` because its `--cwd` flag is ignored when it looks up registries).
+`@/` now means `src` in `tsconfig.json` and `vite.config.ts`. Components come in with `npm run react-bits -- <Name>-TS-CSS`
+(`scripts/react-bits.mjs`), not `npx shadcn add`, which installed the registry's motion 12 over our 14 in a throwaway test. No
+component is in the app yet. Checked by fetching BlurText and GlassSurface, typechecking them, and removing them again.
+
 ## 2026-11-14: The panel is the island grown (D78)
 
 Built from the approved "Alive" boards after a side-by-side study of Coucou, TwoCode, Boring Notch, NotchNook Pro and Alcove

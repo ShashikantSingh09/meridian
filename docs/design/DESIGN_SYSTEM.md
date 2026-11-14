@@ -83,6 +83,15 @@ Rules:
 - Reduced motion, from the system or from Settings, lands instantly with no line animation.
 - Nothing animates forever at rest. See `docs/DECISIONS.md`, D12.
 
+## Components from React Bits
+
+React Bits (reactbits.dev) is set up as a component source, as its site describes: the `@react-bits` registry in
+`apps/desktop/components.json`, and the shadcn MCP server in `.mcp.json` so an agent can search and read it. Add a component
+with `npm run react-bits -- <Name>-TS-CSS` in `apps/desktop`: TypeScript with plain CSS, since there is no Tailwind here. It
+lands in `src/components/<Name>/` and lists any package still to install. Never `npx shadcn add`: the registry asks for
+motion 12 and shadcn installs it over our motion 14. A component still needs an approved design before it is used (D54), and
+must follow this page: our springs, reduced motion, and nothing looping at rest.
+
 ## Writing
 
 Sentence case, with plain verbs: Allow, Deny, Dismiss, Retry. Errors say what happened in the provider's or agent's own
