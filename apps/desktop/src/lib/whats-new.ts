@@ -6,6 +6,11 @@ export interface NewThing {
 }
 
 export const WHATS_NEW: Record<string, NewThing[]> = {
+  "0.8.0": [
+    { title: "A panel that fits each page", line: "The island grows to the page you open, and reshapes as you change tab." },
+    { title: "Tabs that say where you are", line: "They float under the panel, and the one you are on shows its name." },
+    { title: "Calmer Home, with colour", line: "One card for what is happening now, and a glow while an agent works or waits for you." },
+  ],
   "0.7.5": [
     { title: "Your AI on another machine", line: "Give Ollama or LM Studio an address, and a key if it asks, in Settings, AI models." },
   ],
