@@ -6,6 +6,11 @@ export interface NewThing {
 }
 
 export const WHATS_NEW: Record<string, NewThing[]> = {
+  "0.8.1": [
+    { title: "Set the volume from the island", line: "When the volume shows, drag it, or scroll over it." },
+    { title: "Numbers that roll", line: "Steps, minutes and the clock roll to the next number." },
+    { title: "Small moments of light", line: "Sparks when an agent finishes, a lap of light round Ask, a glow under the pointer." },
+  ],
   "0.8.0": [
     { title: "A panel that fits each page", line: "The island grows to the page you open, and reshapes as you change tab." },
     { title: "Tabs that say where you are", line: "They float under the panel, and the one you are on shows its name." },
