@@ -6,6 +6,11 @@ export interface NewThing {
 }
 
 export const WHATS_NEW: Record<string, NewThing[]> = {
+  "0.9.0": [
+    { title: "Meet Lantern", line: "Meridian's face now has a body of dark glass, lit from inside in the colour of its mood." },
+    { title: "Home, at a glance", line: "Tiles for what is happening now, the time, your next event and your music." },
+    { title: "Big numbers, real colour", line: "Agents show how long, how many steps and how many lines. Music takes its album's colour." },
+  ],
   "0.8.1": [
     { title: "Set the volume from the island", line: "When the volume shows, drag it, or scroll over it." },
     { title: "Numbers that roll", line: "Steps, minutes and the clock roll to the next number." },
