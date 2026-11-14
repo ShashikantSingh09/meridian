@@ -490,6 +490,30 @@ side by side in the real window before it counts as done.
 Apple-style glass, themes, limits and models, the assistant's name and personality, and wake words are on the canvas and held for review.
 Wake words would reverse the part of D51 that left them out, and only because the owner asked for them.
 
+## D79. Eight React Bits components, each in one place
+
+Approved by the owner on 2026-11-14 from the "React Bits: for your review" boards. Each is React Bits' own component, in its
+TypeScript and plain CSS version, copied into `apps/desktop/src/components/` with `npm run react-bits`, and set to our springs:
+
+1. **Counter** rolls the island's numbers (the step, the time an agent has worked, the clock, a recording's time). `island/roll.tsx`
+   says the plain text once for screen readers and tests, and draws the rolling digits for the eye only. Seconds change
+   without rolling: rolled, they redrew the window most of every second for as long as an agent worked.
+2. **Shiny Text** crosses the thinking label once, then every 6 s while it lasts.
+3. **Click Spark** bursts round the face when an agent finishes, and from the Allow button. It is fired from code, never by
+   ordinary clicks.
+4. **Spotlight Card** lights Home's card and the agent tiles under the pointer.
+5. **Star Border** runs one lap round the Ask box when it takes focus.
+6. **Blur Text** brings in the greeting word by word, the first time the panel opens each day.
+7. **Gradual Blur** softens the bottom edge of lists that scroll.
+8. **Elastic Slider** sets the volume from the island, through a new `level_set_volume` command, and replaces the Glass slider in
+   Themes.
+
+Nothing moves while nothing is happening, and every one follows reduced motion, the system's or the app's.
+
+**Gave up.** Brightness and the song's position on Media stay as they are: the core cannot set either yet. Elastic Slider's own
+icons came from an icon library; ours replace them, so no new package. Star Border laps on focus only, not when an approval
+arrives, because the component starts a lap only from the pointer or focus.
+
 ## D78. The panel is the island grown: a size for each page, a tab capsule, and state colour as light
 
 Approved by the owner on 2026-11-14, from the "Alive: for your review" boards and the v0 board, after a side-by-side study of

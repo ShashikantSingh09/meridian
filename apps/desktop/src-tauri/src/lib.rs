@@ -253,6 +253,7 @@ pub fn run() {
             commands::island_reset,
             commands::island_placement,
             commands::battery_now,
+            commands::level_set_volume,
             commands::island_set_interactive,
             commands::settings_get,
             commands::settings_save,

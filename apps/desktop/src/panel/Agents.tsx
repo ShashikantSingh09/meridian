@@ -7,6 +7,8 @@ import { AgentMark } from "../island/marks";
 import { ApprovalCard } from "../island/views";
 import { LogLine, StepRow, useFollow } from "./LogLine";
 import type { AgentId } from "../lib/types";
+import { Spot } from "./Spot";
+import { ScrollEdge } from "./ScrollEdge";
 
 const LIVE = ["starting", "running", "waiting"];
 
@@ -144,6 +146,7 @@ function Session({ session, view, setView }: { session: SessionDetail; view: Vie
           {blocksOf(session.log, session.status === "failed").map((block, i) =>
             "steps" in block ? <StepList key={i} steps={block.steps} start={session.startedAt} /> : <LogLine key={i} entry={block.entry} />,
           )}
+          <ScrollEdge />
         </div>
       )}
 
@@ -345,7 +348,7 @@ function Tile({ session, now, onOpen }: { session: SessionDetail; now: number; o
   const { approval } = session;
   const simple = approval && !approval.questions?.length && !approval.plan;
   return (
-    <div className="agent-tile" data-needs={approval !== null}>
+    <Spot className="agent-tile" data-needs={approval !== null}>
       <button className="agent-tile-head" onClick={onOpen}>
         <AgentMark agent={session.agent} size={20} live={false} />
         <span className="stacked grow">
@@ -364,7 +367,7 @@ function Tile({ session, now, onOpen }: { session: SessionDetail; now: number; o
           {(approval ? [approval.summary] : recentLines(session)).map((line, i) => <div key={i} className="truncate">{line}</div>)}
         </div>
       )}
-    </div>
+    </Spot>
   );
 }
 

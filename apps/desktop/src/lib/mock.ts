@@ -635,6 +635,12 @@ export const mock = {
     return () => {};
   },
   publishLevel: (level: Level) => pushLevel(level),
+  /** Every volume the island slider asked for, newest last, and the level it reports back as the PC would. */
+  volumes: [] as number[],
+  async setVolume(percent: number) {
+    this.volumes.push(Math.round(percent));
+    pushLevel({ kind: "volume", percent: Math.round(percent), muted: false });
+  },
   batteryNow: async () => charge,
   /** Sets the laptop's charge, which the island reads on its next look. */
   setCharge: (next: Charge | null) => void (charge = next),

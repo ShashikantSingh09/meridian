@@ -23,6 +23,7 @@ import { teachWakeWord } from "../lib/voice";
 import type { AgentInfo, Settings, WakeWord } from "../lib/types";
 import { Integrations } from "./Integrations";
 import { Providers } from "./Providers";
+import { ScrollEdge } from "./ScrollEdge";
 
 function Choice<K extends keyof Settings>({ name, label, options }: {
   name: K;
@@ -580,6 +581,7 @@ export function SettingsPage() {
       </nav>
       <motion.div key={current} className={current === "providers" ? "settings-body flush" : "settings-body"} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.14 }}>
         <Section />
+        {current !== "providers" && <ScrollEdge />}
       </motion.div>
     </div>
   );

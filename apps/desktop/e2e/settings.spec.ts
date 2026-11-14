@@ -135,7 +135,9 @@ test.describe("themes", () => {
 
   test("the glass slider sets the tint of the sheet", async ({ page }) => {
     const glass = page.getByRole("slider", { name: "Glass" });
-    await glass.fill("100");
+    // An elastic slider now (D79): End takes it all the way, as on any slider.
+    await glass.focus();
+    await glass.press("End");
     expect(await app(page).get("glass")).toBe(100);
     await expect.poll(() => page.evaluate(() => document.documentElement.style.getPropertyValue("--glass-strength"))).toBe("1");
   });

@@ -50,6 +50,7 @@ import {
 import { Icon } from "../lib/icons";
 import type { Card, CardKind, Category, ContextEvent } from "../lib/types";
 import { Switch } from "./Fill";
+import { ScrollEdge } from "./ScrollEdge";
 
 const CATEGORIES: { value: Category; label: string }[] = [
   { value: "today", label: "Today" },
@@ -601,6 +602,7 @@ export function MyDay() {
             {!connected && !throughClaude && <button className="solid" onClick={() => openSettings("providers")}>Connect an account</button>}
           </div>
         )}
+        <ScrollEdge />
       </div>
 
       <AddReminder onPaste={() => setPasting(!pasting)} />

@@ -1,5 +1,25 @@
 # Development ledger
 
+## 2026-11-14: Eight React Bits components (D79)
+
+Fetched with `npm run react-bits` and wired in as the design system's table lists. What it took:
+
+- **Counter** keeps every numeral in each digit's column, so `island/roll.tsx` says the plain text once in an `sr-only` span
+  and hides the columns. Tests that look for "0:41" in the island still find it. Seconds change without rolling: rolled,
+  they kept the window redrawing most of every second, and the tests that run a minute or more on a fake clock timed out.
+- **Click Spark** sits on a full-window layer the pointer passes through, mounted beside the island in `main.tsx`, since the
+  island's own transform would trap a fixed layer. It fires from code: a finish notice, and any `button.allow`.
+- **Star Border** cruised round its edge for ever, with a frame loop running. Our copy adds a `once` mode, and listens for
+  `focusin` so an input inside it starts the lap.
+- **Elastic Slider** sets the volume through a new `level_set_volume` command, which calls the same `change_volume` the
+  assistant uses. The island's own drag skips presses that start on a slider; without that, moving the slider dragged the
+  island. Its icon library is gone; callers pass their own icons.
+- **Gradual Blur** goes last inside each list that scrolls, held there with `position: sticky`, and hides when there is
+  nothing below. Not on Settings, Providers, whose columns sit side by side and scroll themselves.
+
+Tested by `e2e/bits.spec.ts` and the Glass slider test, which now presses End. The Rust command is not compiled on this PC,
+whose C++ build tools are gone; GitHub's build checks it.
+
 ## 2026-11-14: React Bits as a component source
 
 Set up as reactbits.dev describes: the `@react-bits` registry in `apps/desktop/components.json`, and the shadcn MCP server in

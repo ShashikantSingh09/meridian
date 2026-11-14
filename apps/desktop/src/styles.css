@@ -2123,6 +2123,34 @@ html[data-reduced] .beam[data-on="true"]::after {
   font-weight: 600;
 }
 
+/* Said once to a screen reader and never shown. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Elastic sliders (D79) take the room the plain track had. */
+.level-slider.elastic-slider,
+.glass-slider.elastic-slider {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+}
+
+/* Numbers that roll (island/roll.tsx, D79): React Bits Counter columns, sized by the text around them. */
+.roll,
+.roll-digits {
+  display: inline-flex;
+  align-items: baseline;
+}
+
 /* The tabs float in a capsule outside the shape (D78), black like the island in every theme. The open tab is a
    pill that holds its name; the others are icons, and the pills slide as the name opens. */
 .capsule {

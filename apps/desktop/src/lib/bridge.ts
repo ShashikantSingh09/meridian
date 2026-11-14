@@ -95,6 +95,8 @@ export const bridge = {
   islandReset: () => (native ? invoke<void>("island_reset") : mock.islandReset()),
   islandPlacement: () => (native ? invoke<IslandPlace>("island_placement") : mock.islandPlacement()),
   batteryNow: () => (native ? invoke<Charge | null>("battery_now") : mock.batteryNow()),
+  /** The system volume, 0 to 100, from the slider on the island (D79). */
+  setVolume: (percent: number) => (native ? invoke<void>("level_set_volume", { percent: Math.round(Math.min(100, Math.max(0, percent))) }) : mock.setVolume(percent)),
 
   getSettings: () => (native ? invoke<Settings>("settings_get") : mock.getSettings()),
   saveSettings: (settings: Settings) =>

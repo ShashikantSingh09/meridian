@@ -99,6 +99,13 @@ pub fn battery_now() -> Option<Charge> {
     media::levels::battery_now().map(|(percent, plugged)| Charge { percent, plugged })
 }
 
+/// The system volume, from the slider on the island (D79). Percent, 0 to 100. Choosing a volume unmutes, as the
+/// assistant's own set_volume does.
+#[tauri::command]
+pub fn level_set_volume(percent: u8) -> Result<(), String> {
+    media::levels::change_volume(Some(percent.min(100)), None, None).map(|_| ()).map_err(|err| err.to_string())
+}
+
 #[tauri::command]
 pub fn island_set_interactive(app: AppHandle, core: State<'_, Core>, on: bool) {
     if let Some(win) = app.get_webview_window(island::LABEL) {

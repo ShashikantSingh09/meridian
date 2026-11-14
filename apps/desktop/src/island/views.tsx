@@ -48,6 +48,9 @@ import { story, type LevelStory } from "../lib/levels";
 import { endConversation, voiceLevel, type VoiceState } from "../lib/voice";
 import { openFailedNote, seeNote, stopRecording, useRunningClock } from "../lib/notes";
 import { useMicLevel } from "./useMicLevel";
+import { Roll } from "./roll";
+import ShinyText from "@/components/ShinyText/ShinyText";
+import ElasticSlider from "@/components/ElasticSlider/ElasticSlider";
 
 /** With nothing to do and no pointer, the face gets drowsy, then falls asleep. */
 const SLEEPY_AFTER_MS = 45_000;
@@ -78,7 +81,7 @@ function useNow() {
 }
 
 function Elapsed({ since }: { since: number }) {
-  return <span className="tabular">{clock(useNow() - since)}</span>;
+  return <Roll className="tabular" text={clock(useNow() - since)} still />;
 }
 
 /** Steps with how long each took. While it works, a tick for each one done and a dot for the one under way. */
@@ -129,7 +132,7 @@ export function Clock({ className = "rest-time tabular" }: { className?: string 
     const timer = setTimeout(() => setNow(new Date()), 60_000 - (Date.now() % 60_000));
     return () => clearTimeout(timer);
   }, [now]);
-  return <span className={className}>{now.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>;
+  return <Roll className={className} text={now.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} />;
 }
 
 /** A laptop's charge at rest: how full, and a bolt while the charger is in. Low and off the charger turns it red. */
@@ -257,7 +260,7 @@ export function RecordingClock({ since }: { since: number }) {
   return (
     <span className="note-clock tabular" role="img" aria-label={`Recording, ${time}`}>
       <i aria-hidden="true" />
-      {time}
+      <Roll text={time} still />
     </span>
   );
 }
@@ -303,7 +306,8 @@ export function ThinkingView({ reduced }: { reduced: boolean }) {
     <div className="row pad-pill">
       <span className="orb" />
       <div className="grow stacked">
-        <span className="label truncate">{provider ?? "Thinking"}</span>
+        {/* A sheen crosses the words once, then every 6 s while it thinks: laps, like the comet (D79). */}
+        <ShinyText className="label truncate" text={provider ?? "Thinking"} color="#c7c7cc" shineColor="#ffffff" speed={1.4} delay={6} disabled={reduced} />
         {task && <span className="meta truncate tiny">{task}</span>}
       </div>
       <Mine mood="think" reduced={reduced} />
@@ -622,7 +626,7 @@ export function WorkingView({ reduced, hovered }: { reduced: boolean; hovered: b
         </button>
       )}
       <span className="stage-clock">
-        {todos.length > 0 ? <span>{todoStep(todos)}</span> : steps > 0 && <span>Step {steps}</span>}
+        {todos.length > 0 ? <span>{todoStep(todos)}</span> : steps > 0 && <span>Step <Roll text={String(steps)} /></span>}
         <Elapsed since={turnStart(session)} />
       </span>
       <Mine mood="working" reduced={reduced} />
@@ -1064,6 +1068,9 @@ export function LevelView({ hovered, reduced }: { hovered: boolean; reduced: boo
             <span className="label truncate">{told.title}</span>
             <span className="meta truncate">{told.detail}</span>
           </span>
+        ) : level.kind === "volume" ? (
+          // Volume can be set from here: it grows under the pointer and stretches past either end (D79).
+          <ElasticSlider className="level-slider" value={told.percent} maxValue={100} valuePosition="none" thickness={6} activeThickness={10} maxStretch={14} bounce={0.4} restOpacity={1} rangeColor={told.tone} wheel ariaLabel="Volume" onChange={(v) => void bridge.setVolume(v)} />
         ) : (
           <span className="level-track"><i style={{ width: `${told.percent}%`, background: told.tone }} /></span>
         )}

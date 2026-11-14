@@ -92,6 +92,22 @@ lands in `src/components/<Name>/` and lists any package still to install. Never 
 motion 12 and shadcn installs it over our motion 14. A component still needs an approved design before it is used (D54), and
 must follow this page: our springs, reduced motion, and nothing looping at rest.
 
+In use (D79), each in one place:
+
+| Component | Where | Kept calm by |
+|---|---|---|
+| Counter | The island's step, time worked, clock and recording time (`island/roll.tsx`) | Rolls only when a number changes, never the seconds; read as plain text |
+| Shiny Text | The thinking label | One sweep, then one every 6 s, only while thinking |
+| Click Spark | Round the face when an agent finishes, and from Allow (`island/Sparks.tsx`) | Fired from code; ordinary clicks pass through |
+| Spotlight Card | Home's card, the agent tiles (`panel/Spot.tsx`) | Only under the pointer |
+| Star Border | The Ask boxes on Home and in Chat (`panel/AskLap.tsx`) | Our `once` mode: one lap on focus, no frames otherwise |
+| Blur Text | The greeting, first time the panel opens each day | Once a day |
+| Gradual Blur | The bottom edge of Chat, an agent's log, My day and Settings (`panel/ScrollEdge.tsx`) | Shows only while there is more below |
+| Elastic Slider | Volume on the island, and Glass in Themes | Moves only while dragged |
+
+Our copies differ from React Bits' in three places, each marked "Meridian:": Elastic Slider has no default icons, Blur Text
+can draw a `span` to sit in a heading, and Star Border has the `once` mode.
+
 ## Writing
 
 Sentence case, with plain verbs: Allow, Deny, Dismiss, Retry. Errors say what happened in the provider's or agent's own

@@ -1,6 +1,7 @@
 import { contentEnterReduced, pageEnter } from "@meridian/design-system/motion";
 import { AnimatePresence, motion, useIsPresent } from "motion/react";
-import { useEffect, useRef } from "react";
+import BlurText from "@/components/BlurText/BlurText";
+import { useEffect, useRef, useState } from "react";
 import { useReduced } from "../island/faces";
 import { Clock, RecordingClock, greetingWord } from "../island/views";
 import { blurOn, watchFrames } from "../lib/frames";
@@ -79,6 +80,23 @@ export function Capsule() {
 
 type Enter = ReturnType<typeof pageEnter> | typeof contentEnterReduced;
 
+const GREETED = "meridian.greetedOn";
+
+/** True for the first time the panel opens on a given day, so the greeting arrives word by word just once (D79). */
+function useFirstToday() {
+  const [first] = useState(() => {
+    const today = new Date().toDateString();
+    try {
+      const seen = localStorage.getItem(GREETED);
+      localStorage.setItem(GREETED, today);
+      return seen !== today;
+    } catch {
+      return false;
+    }
+  });
+  return first;
+}
+
 /** A page and its head. While it fades out under the next one it is out of reach: no focus, no clicks, and nothing
  *  read aloud, so there is only ever one page to use. The ref is AnimatePresence's, for popLayout. */
 function PanelBody({ enter, children, ref }: { enter: Enter; children: React.ReactNode; ref?: React.Ref<HTMLDivElement> }) {
@@ -102,6 +120,8 @@ export function Panel() {
   const title = !onboarded ? "Welcome" : tab === "home" ? greetingWord() : NAV.find((n) => n.tab === tab)?.label;
   const date = new Date().toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
   const blur = !reduced && blurOn();
+  const firstToday = useFirstToday();
+  const greet = firstToday && onboarded && tab === "home" && !reduced;
   const enter = reduced ? contentEnterReduced : pageEnter(speed, blur);
 
   useEffect(() => {
@@ -128,7 +148,7 @@ export function Panel() {
         <PanelBody key={key} enter={enter}>
           <header className="panel-head">
             <span className="face-slot" aria-hidden="true" />
-            <h1 className="grow truncate">{title}</h1>
+            <h1 className="grow truncate">{greet ? <BlurText as="span" text={title} animateBy="words" trigger="load" delay={90} stepDuration={0.3} blur={8} distance={8} /> : title}</h1>
             {recording && <RecordingClock since={recording.startedAt} />}
             {wakeOn && <span className="wake-dot-head" role="img" aria-label="Listening for a wake word" title="Listening for a wake word" />}
             <span className="meta">{date}</span>

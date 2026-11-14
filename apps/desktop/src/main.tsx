@@ -5,6 +5,7 @@ import { createRoot } from "react-dom/client";
 import "./styles.css";
 import "./glass.css";
 import { Island } from "./island/Island";
+import { Sparks } from "./island/Sparks";
 import { mock } from "./lib/mock";
 import {
   answerApproval,
@@ -44,7 +45,12 @@ import { endConversation, say, startVoice, wireVoice } from "./lib/voice";
 // reach the app's commands. The island's own drag uses the pointer, not this, so nothing is lost.
 for (const kind of ["dragover", "drop"] as const) addEventListener(kind, (e) => e.preventDefault());
 
-createRoot(document.getElementById("root")!).render(<Island />);
+createRoot(document.getElementById("root")!).render(
+  <>
+    <Island />
+    <Sparks />
+  </>,
+);
 
 wireVoice();
 wireNotes();

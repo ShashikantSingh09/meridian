@@ -7,6 +7,7 @@ import { getState, updateSettings, useApp } from "../lib/store";
 import { activeTheme, applyTheme, THEMES } from "../lib/theme";
 import type { CustomTheme, Settings } from "../lib/types";
 import { Menu } from "./Menu";
+import ElasticSlider from "@/components/ElasticSlider/ElasticSlider";
 
 const ACCENTS = [["#2a84ea", "Blue"], ["#17a2b8", "Teal"], ["#30b35a", "Green"], ["#ff9f0a", "Amber"], ["#e0527c", "Rose"], ["#8e6bff", "Violet"]] as const;
 const DARK_WINDOWS = [["#0c0d14", "Ink"], ["#06263a", "Deep sea"], ["#30101f", "Plum"], ["#1b2a20", "Moss"], ["#2c2d30", "Graphite"]] as const;
@@ -56,7 +57,7 @@ function Glass({ value, onChange }: { value: number; onChange: (value: number) =
   return (
     <div className="slider">
       <span className="meta">Clear</span>
-      <input type="range" aria-label="Glass" min={0} max={100} value={value} style={{ "--at": `${value}%` } as React.CSSProperties} onChange={(e) => onChange(Number(e.target.value))} />
+      <ElasticSlider className="glass-slider" value={value} maxValue={100} valuePosition="none" thickness={6} activeThickness={10} maxStretch={14} bounce={0.4} restOpacity={1} ariaLabel="Glass" onChange={(v) => onChange(Math.round(v))} />
       <span className="meta">Tinted</span>
     </div>
   );

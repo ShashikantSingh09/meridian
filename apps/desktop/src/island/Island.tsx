@@ -14,6 +14,7 @@ import { Capsule, Panel } from "../panel/Panel";
 import { Face, useReduced } from "./faces";
 import { activeSessions, deriveView, geometryFor, stateToken, waitingApproval, type IslandView, type Snapshot } from "./machine";
 import { notchPath, pillPath, pillRadius } from "./notch";
+import { sparkFrom } from "./Sparks";
 import {
   Bubble,
   ClosingLine,
@@ -173,6 +174,13 @@ export function Island() {
   const playerOpen = mediaOpen || hovered;
 
   useEffect(() => reportView(view), [view]);
+  // An agent finishing gets a burst of sparks round the face, once the island has made room for the news (D79).
+  const finishedId = useApp((s) => (s.notices[0]?.finished ? s.notices[0].id : null));
+  useEffect(() => {
+    if (!finishedId) return;
+    const timer = setTimeout(() => sparkFrom(el.current?.querySelector(".island-content .face")), 320);
+    return () => clearTimeout(timer);
+  }, [finishedId]);
   // One switch for reduced motion, from the app's setting and Windows', for every style to follow.
   useEffect(() => void document.documentElement.toggleAttribute("data-reduced", reduced), [reduced]);
 
@@ -313,6 +321,8 @@ export function Island() {
   // Press and move to drag it anywhere. Less than a few pixels is still a click.
   const down = (e: React.PointerEvent) => {
     if (expanded || e.button !== 0) return;
+    // A slider on the island (the volume, D79) keeps its own drag.
+    if ((e.target as Element | null)?.closest?.("[role=\"slider\"]")) return;
     press.current = { x: e.screenX, y: e.screenY, moved: false };
   };
   const move = (e: React.PointerEvent) => {

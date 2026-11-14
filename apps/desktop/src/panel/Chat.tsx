@@ -37,7 +37,9 @@ import { say, startVoice } from "../lib/voice";
 import { LogLine, useFollow } from "./LogLine";
 import { LookButton, LookCard, LookChips } from "./Look";
 import { Markdown } from "./Markdown";
+import { AskLap } from "./AskLap";
 import { Menu } from "./Menu";
+import { ScrollEdge } from "./ScrollEdge";
 
 const LIVE = ["starting", "running", "waiting"];
 const ADD_ENGINE = "add";
@@ -246,6 +248,7 @@ function Composer({ start, placeholder, stop, canSend, onSend }: { start?: React
     if (prompt && canSend) onSend(prompt);
   };
   return (
+    <AskLap radius={16}>
     <form className="composer" onSubmit={submit}>
       {start}
       <LookButton />
@@ -263,6 +266,7 @@ function Composer({ start, placeholder, stop, canSend, onSend }: { start?: React
         </button>
       )}
     </form>
+    </AskLap>
   );
 }
 
@@ -439,6 +443,7 @@ function ApiChat() {
           </div>
         ))}
         {!pending && last?.role === "assistant" && last.content && <ReplyActions text={last.content} retry={retryLast} />}
+        <ScrollEdge />
       </div>
 
       <Composer placeholder={chat.messages.length ? "Ask on" : "Ask anything"} stop={pending ? { title: "Stop this answer", run: cancelChat } : null} canSend={!pending} onSend={send} />

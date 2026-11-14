@@ -209,6 +209,23 @@ html[data-reduced] .live-dot {
   padding: 4px 16px 0;
 }
 
+/* Cards with a spotlight (panel/Spot.tsx, D79) keep their own size and corners; the light sits under their content. */
+.now-spot.spotlight-card {
+  flex: none;
+  padding: 0;
+  border-radius: 18px;
+}
+
+.now-spot > .plate,
+.now-spot > .plate:hover {
+  background-color: transparent;
+}
+
+.agent-tile.spotlight-card {
+  padding: 12px 14px;
+  border-radius: 16px;
+}
+
 /* One card for what is happening now (D78). */
 .now {
   flex: none;
@@ -915,8 +932,18 @@ button.now:hover {
   padding: 0 18px 8px;
 }
 
-.chat-page .chat > .composer {
+.chat-page .chat > .composer,
+.chat-page .chat > .ask-lap {
   margin: 0 16px;
+}
+
+/* The Ask boxes sit inside a Star Border (panel/AskLap.tsx, D79), which keeps its own looks out of the way. */
+.ask-lap.star-border {
+  display: block;
+  flex: none;
+  padding: 0;
+  font-weight: inherit;
+  line-height: inherit;
 }
 
 .look-pill {

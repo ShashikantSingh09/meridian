@@ -14,6 +14,8 @@ import { ago } from "../lib/sessions";
 import { firstSeen, goingFrom, pickStarters } from "../lib/starters";
 import { clearDraft, describeTime, endFocus, openPanel, sendToEngine, setDraft, setTab, startFocus, timeToday, useApp } from "../lib/store";
 import { startVoice } from "../lib/voice";
+import { AskLap } from "./AskLap";
+import { Spot } from "./Spot";
 
 /** Only an event within this long is "now" enough for Home. */
 const SOON = 12 * 3_600_000;
@@ -167,7 +169,10 @@ export function Home() {
 
   return (
     <div className="home board">
-      <NowCard />
+      <Spot className="now-spot">
+        <NowCard />
+      </Spot>
+      <AskLap radius={24}>
       <form className="composer" onSubmit={submit}>
         <button type="button" className="round" aria-label="Talk" title="Talk. Or hold Ctrl Alt V anywhere." onClick={() => void startVoice("turn")}>
           <Icon name="mic" size={15} />
@@ -177,6 +182,7 @@ export function Home() {
           <Icon name="send" size={14} />
         </button>
       </form>
+      </AskLap>
       {suggest && <Starters dim={text.trim() !== ""} picked={picked !== null && picked === text} onPick={pick} />}
     </div>
   );
