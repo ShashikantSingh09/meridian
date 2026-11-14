@@ -174,16 +174,18 @@ export interface Geometry {
 /** The radius is for the two bottom corners only: the top is the screen's edge. */
 export const EXPANDED: Geometry = { w: 820, h: 600, r: 32 };
 
-/** One size for every page, as on the boards, so moving between tabs never resizes the window. */
+/** Each page gets the room it needs, and the island reshapes when the tab changes (D78). The window never
+ *  resizes. The tab capsule floats outside the shape, so it is not counted here; the tallest page leaves it room. */
 const PANELS: Record<string, Geometry> = {
-  home: { w: 820, h: 600, r: 32 },
-  chat: { w: 820, h: 600, r: 32 },
-  agents: { w: 820, h: 600, r: 32 },
-  media: { w: 820, h: 600, r: 32 },
-  day: { w: 820, h: 600, r: 32 },
-  notes: { w: 820, h: 600, r: 32 },
-  inbox: { w: 820, h: 600, r: 32 },
-  settings: EXPANDED,
+  home: { w: 720, h: 300, r: 30 },
+  chat: { w: 820, h: 540, r: 32 },
+  agents: { w: 820, h: 540, r: 32 },
+  media: { w: 720, h: 420, r: 30 },
+  day: { w: 820, h: 540, r: 32 },
+  notes: { w: 820, h: 540, r: 32 },
+  knowledge: { w: 820, h: 540, r: 32 },
+  inbox: { w: 760, h: 480, r: 30 },
+  settings: { w: 820, h: 560, r: 32 },
 };
 
 /** Everything small and active shares one height, so moving between them only changes the width. */

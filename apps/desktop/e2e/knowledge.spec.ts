@@ -50,7 +50,7 @@ test("the first time, it is empty until sources are picked, and nothing is read 
   expect(await mock(page, (m) => m.knowledgeRuns().length)).toBe(0);
   await page.getByRole("button", { name: "Back to the pages" }).click();
   await page.getByRole("button", { name: "Not now" }).click();
-  await expect(page.locator(".panel-head h1")).not.toHaveText("Knowledge");
+  await expect(page.locator(".panel-body:not([aria-hidden]) .panel-head h1")).not.toHaveText("Knowledge");
 });
 
 test("turning sources on and pressing Update now writes the pages", async ({ page }) => {
@@ -130,7 +130,7 @@ test("a call link opens that note, and a mail link opens Gmail", async ({ page }
   await page.locator(".know-line", { hasText: "Wants the hero photos" }).getByRole("button", { name: "mail, 3 Nov" }).click();
   expect(await mock(page, (m) => m.openedUrls())).toEqual(["https://mail.google.com/mail/u/0/#all/18c2"]);
   await page.locator(".know-line", { hasText: "The launch moves to 18 Nov" }).getByRole("button", { name: "call on 4 Nov" }).click();
-  await expect(page.locator(".panel-head h1")).toHaveText("Notes");
+  await expect(page.locator(".panel-body:not([aria-hidden]) .panel-head h1")).toHaveText("Notes");
   await expect(page.getByRole("heading", { name: "Launch date and checkout" })).toBeVisible();
 });
 

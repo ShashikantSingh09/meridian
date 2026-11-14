@@ -1,5 +1,36 @@
 # Development ledger
 
+## 2026-11-14: The panel is the island grown (D78)
+
+Built from the approved "Alive" boards after a side-by-side study of Coucou, TwoCode, Boring Notch, NotchNook Pro and Alcove
+(frames and notes kept with the boards).
+
+- **A size for each page.** `PANELS` in `island/machine.ts`: Home 720 × 300, Media 720 × 420, Notifications 760 × 480, Settings
+  820 × 560, the rest 820 × 540, and the welcome 820 × 600. The island reshapes on the opening or closing spring when the tab
+  changes; the window still never resizes.
+- **The tab capsule.** `Capsule` in `panel/Panel.tsx`, placed by `Island.tsx` 10 px under the shape (above it when the island sits
+  at the bottom). Black in every theme. The open tab is a pill holding its name, and the others are icons; the label opens on
+  our snap spring written as a CSS `linear()` curve (`--ease-snap`). The island's click-through rectangle now includes it.
+- **Content from the edge.** `contentEnter` takes a `blur` flag: from an 8 px blur, 96 % and 6 px towards the edge, at 0.15 of the
+  shape's spring. `pageEnter` crossfades pages for 90 ms with `popLayout`, so the panel is never black between them; the leaving
+  page is `inert` and `aria-hidden` meanwhile, so there is only ever one page to use or hear. The head
+  changes with the page, so its right side never jumps to the new width. `lib/frames.ts` turns the blur off for the session after
+  two entrances in a row with a frame over 34 ms.
+- **State colour as light.** `.island-glow` around the shape and a gradient halo behind the island's face, in `--glow`. The open
+  panel takes `--state-waiting` while an agent waits and `--state-working` while one works. The amber wash on what needs you is
+  stronger, on the agent tile, the approval and Home's card.
+- **The face rides.** Drawn by `Island.tsx` as `.riding-face`, carried on the shape's left edge into the head's empty
+  `.face-slot`, and back on close. `MotionValue.jump` starts it with no speed; `set` made the spring fling it the wrong way first.
+- **Hover and press.** The resting pill grows on a new `spring.wobble` (0.3 s, bounce 0.3) and squashes to 95 % when pressed.
+- **Calmer Home.** One `NowCard` (an agent, a note recording, focus, music with its album glow, the next event, or Nothing running
+  with Focus and New session), Ask, and the starters as a quiet line. The bento cards and their styles are gone. Providers stay in
+  Settings, and their digests there.
+- **Default theme** is plain black; the other themes keep their colour.
+
+Tested: `frames.test.ts`, `machine.test.ts`, `e2e/alive.spec.ts` (reshaping, capsule placement, the face landing in its slot, the
+glow, Home), and the dock tests updated. Frames measured in Chromium while pages change: 17 ms throughout in software rendering,
+one 33 ms frame on Media; not yet measured in WebView2 on a real PC, which is what the fallback is for.
+
 ## 2026-11-06: A local AI on another machine
 
 Each server under On this PC in Settings, AI models, now has an Address button. Typing `192.168.1.20` becomes

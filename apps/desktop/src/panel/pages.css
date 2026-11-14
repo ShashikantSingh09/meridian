@@ -139,7 +139,7 @@
 }
 
 /* Marks on rows sit bare, in the ink of the page, as logos with no colour of their own need to. */
-.home-agent .brand,
+.now .brand,
 .conv .brand,
 .pill-button .brand,
 .menu-row .brand {
@@ -148,7 +148,7 @@
   color: var(--ink-1);
 }
 
-.home-agent .brand svg,
+.now .brand svg,
 .conv .brand svg,
 .pill-button .brand svg,
 .menu-row .brand svg {
@@ -209,226 +209,112 @@ html[data-reduced] .live-dot {
   padding: 4px 16px 0;
 }
 
-.bento {
-  grid-template-rows: 124px 124px minmax(0, 1fr);
-}
-
-.home-agents {
-  grid-column: span 2;
-  grid-row: span 2;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  padding: 14px;
-}
-
-.home-agents[data-busy="true"] {
-  gap: 8px;
-}
-
-.home-agents .big-clock {
-  font-size: 52px;
-  line-height: 1.1;
-  letter-spacing: -0.03em;
-  white-space: nowrap;
-}
-
-.home-agents .meta {
-  font-size: var(--text-md);
-}
-
-.home-agents .ghost {
-  font-weight: 500;
-}
-
-.home-agents-head {
-  align-items: center;
-  min-height: 22px;
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.home-agent {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 9px 12px 10px;
-  border-radius: 12px;
-  background: var(--inset);
-  text-align: left;
-}
-
-.home-agent:hover {
-  background: var(--well);
-}
-
-.home-agent .meta {
-  font-size: var(--text-sm);
-  font-weight: 500;
-}
-
-.home-agent .doing {
-  font-size: var(--text-sm);
-  color: var(--tint-blue);
-}
-
-.home-agent[data-agent="codex"] .doing {
-  color: var(--tint-violet);
-}
-
-.home-next,
-.home-music {
-  grid-column: span 2;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 0 16px;
-}
-
-.home-music {
-  padding-left: 14px;
-}
-
-.home-music[data-tinted="true"] {
-  background: linear-gradient(104deg, color-mix(in srgb, var(--art) 30%, transparent), color-mix(in srgb, var(--art) 12%, transparent) 60%, var(--well));
-}
-
-.home-music .artwork {
-  border-radius: 14px;
-}
-
-.home-music .no-art {
-  background: var(--inset);
-  color: var(--ink-2);
-}
-
-.home-music .no-art svg {
-  width: 22px;
-  height: 22px;
-}
-
-.home-music .tile-title {
-  max-width: 100%;
-}
-
-.next-ring {
-  position: relative;
-  width: 58px;
-  height: 58px;
+/* One card for what is happening now (D78). */
+.now {
   flex: none;
-  display: grid;
-  place-items: center;
-}
-
-.next-ring svg {
-  position: absolute;
-  inset: 0;
-  rotate: -90deg;
-}
-
-.next-ring circle {
-  fill: none;
-  stroke: var(--track);
-  stroke-width: 5;
-}
-
-.next-ring circle[data-arc="true"] {
-  stroke: var(--tint-amber);
-  stroke-linecap: round;
-}
-
-.next-ring b {
-  display: grid;
-  font-size: var(--text-lg);
-  font-weight: 700;
-  color: var(--ink-1);
-}
-
-.next-ring b > svg {
-  position: static;
-  rotate: none;
-  color: var(--tint-amber);
-}
-
-.home-next .tile-kicker {
-  font-size: var(--text-sm);
-  font-weight: 500;
-  color: var(--tint-amber);
-}
-
-.home-feed {
-  grid-column: span 3;
-  min-width: 0;
-  min-height: 0;
+  position: relative;
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 12px 12px 8px 14px;
-}
-
-.home-feed > .list {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-around;
-}
-
-.feed-row {
-  height: 32px;
-  gap: 10px;
-  padding: 0 2px;
-}
-
-.feed-idea {
-  background: var(--well-active);
-  color: var(--tint-amber);
-}
-
-.home-connect {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  gap: 14px;
-}
-
-.home-logos {
-  flex: none;
-  display: flex;
   gap: 6px;
-}
-
-.home-connect .meta {
-  font-size: var(--text-md);
-  line-height: 1.45;
-}
-
-.home-today {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
   padding: 14px 16px;
+  border-radius: 18px;
   text-align: left;
 }
 
-.home-today:hover {
+.now .row {
+  gap: 10px;
+}
+
+.now .label {
+  font-size: var(--text-md);
+  font-weight: 600;
+}
+
+button.now:hover {
   background: var(--well-hover);
 }
 
-.home-number {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  font-size: 44px;
-  font-weight: 700;
-  letter-spacing: -0.03em;
+.now[data-tone="working"] {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--state-working) 30%, transparent);
+}
+
+.now[data-tone="waiting"] {
+  background: radial-gradient(120% 160% at 0% 100%, color-mix(in srgb, var(--state-waiting) 22%, transparent), transparent 64%), var(--well);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--state-waiting) 30%, transparent);
+}
+
+.now[data-tone="waiting"] .doing {
+  color: var(--tint-amber);
+}
+
+/* A pulse runs along the bottom while an agent works, and stops when it stops. */
+.now-pulse {
+  position: relative;
+  height: 2px;
+  margin-top: 4px;
+  border-radius: 1px;
+  background: color-mix(in srgb, var(--state-working) 18%, transparent);
+  overflow: hidden;
+}
+
+.now-pulse i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 30%;
+  border-radius: 1px;
+  background: var(--state-working);
+  animation: now-travel 1.6s cubic-bezier(0.65, 0, 0.35, 1) infinite;
+}
+
+@keyframes now-travel {
+  from { translate: -100% 0; }
+  to { translate: 340% 0; }
+}
+
+:root[data-reduced] .now-pulse i {
+  animation: none;
+  translate: 0 0;
+}
+
+/* Music glows in the colour of its album. */
+.now-music[data-tinted="true"] {
+  background: radial-gradient(90% 140% at 0% 50%, color-mix(in srgb, var(--art) 30%, transparent), transparent 70%), var(--well);
+}
+
+.now-music .artwork {
+  border-radius: 10px;
+}
+
+/* The things to ask are one quiet line under Ask, not a row of chips. */
+.home .starters-row {
+  gap: 2px 18px;
+  flex-wrap: wrap;
+  overflow: visible;
+}
+
+.home .starter {
+  height: 24px;
+  padding: 0;
+  border-radius: 6px;
+  background: none;
+  box-shadow: none;
+  color: var(--ink-3);
+  font-weight: 500;
+}
+
+.home .starter svg {
+  display: none;
+}
+
+.home .starter:hover,
+.home .starter:focus-visible {
+  background: none;
   color: var(--ink-1);
 }
 
-/* Things to ask, under the ask box. The cards give up a little height for them. */
-.home:has(.starters) .bento {
-  grid-template-rows: 100px 100px minmax(0, 1fr);
+.home .starter-why {
+  top: 28px;
 }
 
 .starters {

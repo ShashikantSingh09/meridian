@@ -1,8 +1,9 @@
-import { spring } from "@meridian/design-system/motion";
-import { motion } from "motion/react";
-import { useEffect } from "react";
-import { Face } from "../island/faces";
+import { contentEnterReduced, pageEnter } from "@meridian/design-system/motion";
+import { AnimatePresence, motion, useIsPresent } from "motion/react";
+import { useEffect, useRef } from "react";
+import { useReduced } from "../island/faces";
 import { Clock, RecordingClock, greetingWord } from "../island/views";
+import { blurOn, watchFrames } from "../lib/frames";
 import { Icon, type IconName } from "../lib/icons";
 import { closePanel, dismissError, setTab, useApp, type Tab } from "../lib/store";
 import { Agents } from "./Agents";
@@ -56,18 +57,52 @@ function PanelError() {
   );
 }
 
+/** The tabs float in a capsule just outside the panel (D78). The open tab is a pill holding its name; the rest are
+ *  icons. Island.tsx places it, so it can sit outside the shape that clips the panel. */
+export function Capsule() {
+  const tab = useApp((s) => s.tab);
+  const running = useApp((s) => s.sessions.filter((x) => x.status === "running" || x.status === "waiting").length);
+  const needs = useApp((s) => s.cards.cards.length);
+  return (
+    <nav className="dock" aria-label="Sections">
+      {NAV.map((n) => (
+        <button key={n.tab} className="dock-item" aria-label={n.label} title={n.label} aria-current={tab === n.tab ? "page" : undefined} onClick={() => setTab(n.tab)}>
+          <Icon name={n.icon} size={18} />
+          <span className="dock-label" aria-hidden="true">{n.label}</span>
+          {n.tab === "agents" && running > 0 && <span className="badge tabular">{running}</span>}
+          {n.tab === "day" && needs > 0 && <span className="badge tabular" aria-hidden="true">{needs}</span>}
+        </button>
+      ))}
+    </nav>
+  );
+}
+
+type Enter = ReturnType<typeof pageEnter> | typeof contentEnterReduced;
+
+/** A page and its head. While it fades out under the next one it is out of reach: no focus, no clicks, and nothing
+ *  read aloud, so there is only ever one page to use. The ref is AnimatePresence's, for popLayout. */
+function PanelBody({ enter, children, ref }: { enter: Enter; children: React.ReactNode; ref?: React.Ref<HTMLDivElement> }) {
+  const present = useIsPresent();
+  return (
+    <motion.div ref={ref} className="panel-body" style={{ transformOrigin: "50% 0" }} initial={enter.initial} animate={enter.animate} exit={enter.exit} aria-hidden={!present || undefined} inert={!present}>
+      {children}
+    </motion.div>
+  );
+}
+
 export function Panel() {
   const tab = useApp((s) => s.tab);
-  const face = useApp((s) => s.settings.face);
-  const feeling = useApp((s) => s.feeling);
-  const running = useApp((s) => s.sessions.filter((x) => x.status === "running" || x.status === "waiting").length);
   const onboarded = useApp((s) => s.settings.onboarded);
   const wakeOn = useApp((s) => s.wake.state === "listening");
   const recording = useApp((s) => s.notes.notes.find((n) => n.id === s.notes.recording));
-  const needs = useApp((s) => s.cards.cards.length);
+  const speed = useApp((s) => s.settings.animationSpeed);
+  const reduced = useReduced();
   const Page = onboarded ? PAGES[tab] : Welcome;
+  const key = onboarded ? tab : "welcome";
   const title = !onboarded ? "Welcome" : tab === "home" ? greetingWord() : NAV.find((n) => n.tab === tab)?.label;
   const date = new Date().toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
+  const blur = !reduced && blurOn();
+  const enter = reduced ? contentEnterReduced : pageEnter(speed, blur);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -77,35 +112,37 @@ export function Panel() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
+  // A blurred page is watched while it arrives, and the blur goes if it costs frames.
+  const first = useRef(true);
+  useEffect(() => {
+    if (first.current) return void (first.current = false);
+    if (blur) watchFrames(400 / speed);
+  }, [key]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The old page and its head fade out in 90 ms as the new ones come out of the top edge, still blurred, so the panel
+  // is never empty while the island reshapes to them. The face is not here: Island.tsx draws it, so it can ride up
+  // from the resting pill.
   return (
     <div className="panel">
-      <header className="panel-head">
-        <Face id={face} mood={feeling ?? "rest"} />
-        <h1 className="grow truncate">{title}</h1>
-        {recording && <RecordingClock since={recording.startedAt} />}
-        {wakeOn && <span className="wake-dot-head" role="img" aria-label="Listening for a wake word" title="Listening for a wake word" />}
-        <span className="meta">{date}</span>
-        <Clock className="panel-time tabular" />
-        <button className="round" aria-label="Close" title="Close (Esc)" onClick={closePanel}>
-          <Icon name="close" size={15} />
-        </button>
-      </header>
-      <PanelError />
-      <motion.main key={onboarded ? tab : "welcome"} className="page" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}>
-        <Page />
-      </motion.main>
-      {onboarded && (
-        <nav className="dock" aria-label="Sections">
-          {NAV.map((n) => (
-            <button key={n.tab} className="dock-item" aria-label={n.label} title={n.label} aria-current={tab === n.tab ? "page" : undefined} onClick={() => setTab(n.tab)}>
-              {tab === n.tab && <motion.span layoutId="dock-pill" className="dock-pill" transition={spring.snap} />}
-              <Icon name={n.icon} size={19} />
-              {n.tab === "agents" && running > 0 && <span className="badge tabular">{running}</span>}
-              {n.tab === "day" && needs > 0 && <span className="badge tabular" aria-hidden="true">{needs}</span>}
+      <AnimatePresence mode="popLayout" initial={false}>
+        <PanelBody key={key} enter={enter}>
+          <header className="panel-head">
+            <span className="face-slot" aria-hidden="true" />
+            <h1 className="grow truncate">{title}</h1>
+            {recording && <RecordingClock since={recording.startedAt} />}
+            {wakeOn && <span className="wake-dot-head" role="img" aria-label="Listening for a wake word" title="Listening for a wake word" />}
+            <span className="meta">{date}</span>
+            <Clock className="panel-time tabular" />
+            <button className="round" aria-label="Close" title="Close (Esc)" onClick={closePanel}>
+              <Icon name="close" size={15} />
             </button>
-          ))}
-        </nav>
-      )}
+          </header>
+          <PanelError />
+          <main className="page">
+            <Page />
+          </main>
+        </PanelBody>
+      </AnimatePresence>
     </div>
   );
 }

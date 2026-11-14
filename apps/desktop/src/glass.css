@@ -39,32 +39,6 @@
   color: var(--head-ink);
 }
 
-/* The dock floats on the page rather than taking a strip of it. */
-.panel .page {
-  padding-bottom: 78px;
-}
-
-.dock {
-  position: absolute;
-  left: 50%;
-  bottom: 13px;
-  z-index: 2;
-  width: max-content;
-  height: auto;
-  padding: 5px;
-  gap: 2px;
-  transform: translateX(-50%);
-  border: 0;
-  border-radius: 27px;
-  background: var(--float);
-  box-shadow: var(--float-edge);
-  backdrop-filter: var(--frost);
-}
-
-.dock-pill {
-  background: var(--well-active);
-}
-
 /* Primary actions carry the accent. Nothing else does. */
 .solid,
 .round.solid {

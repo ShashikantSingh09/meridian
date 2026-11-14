@@ -5,12 +5,13 @@
 
 import { CLOSE_REST, closing, contentEnter, contentEnterReduced, instant, scaled, spring, type SpringName } from "@meridian/design-system/motion";
 import { AnimatePresence, animate, motion, useMotionValue, useTransform } from "motion/react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { bridge } from "../lib/bridge";
 import { lastMessage, stepLog } from "../lib/sessions";
+import { blurOn, watchFrames } from "../lib/frames";
 import { feel, openPanel, planUse, reportView, togglePanel, useApp } from "../lib/store";
-import { Panel } from "../panel/Panel";
-import { useReduced } from "./faces";
+import { Capsule, Panel } from "../panel/Panel";
+import { Face, useReduced } from "./faces";
 import { activeSessions, deriveView, geometryFor, stateToken, waitingApproval, type IslandView, type Snapshot } from "./machine";
 import { notchPath, pillPath, pillRadius } from "./notch";
 import {
@@ -52,6 +53,9 @@ const LAP_EVERY: Partial<Record<IslandView, number>> = { listening: 8000, thinki
 /** A request waiting for an answer taps a little more often. */
 const LAP_WAITING = 12_000;
 const LAP_MS: Partial<Record<IslandView, number>> = { thinking: 1800, notification: 1600, error: 1600 };
+/** Where the face sits in the panel's head: the head's left padding, and its height (styles.css, .panel-head). */
+const HEAD_PAD = 18;
+const HEAD_H = 52;
 /** Held, the face stays lifted for as long as the drag lasts. Let go, it squashes and settles. */
 const DRAG_HOLD_MS = 10 * 60_000;
 const DROP_MS = 550;
@@ -133,6 +137,9 @@ export function Island() {
   const sliver = useApp((s) => s.settings.islandAutoHide);
   const align = useApp((s) => s.settings.islandAlign);
   const tab = useApp((s) => s.tab);
+  const onboarded = useApp((s) => s.settings.onboarded);
+  const faceId = useApp((s) => s.settings.face);
+  const feeling = useApp((s) => s.feeling);
   const mediaOpen = useApp((s) => s.mediaOpen);
   const greeting = useApp((s) => s.greeting);
   const artTint = useApp((s) => s.artTint);
@@ -189,7 +196,8 @@ export function Island() {
     usage,
     sliver,
     actions: (snapshot.notices[0]?.actions?.length ?? 0) > 0 || snapshot.notices[0]?.eventId !== undefined,
-    tab,
+    // Before set-up the panel is the welcome, which has its own size and no tabs.
+    tab: onboarded ? tab : "welcome",
     mediaOpen: playerOpen,
     battery,
     voiceLong,
@@ -224,7 +232,14 @@ export function Island() {
     const push = () => {
       frame = 0;
       const box = el.current?.getBoundingClientRect();
-      if (box) void bridge.setIslandRect({ x: box.x, y: box.y, w: box.width, h: box.height });
+      if (!box) return;
+      // The tab capsule floats outside the shape, and the pointer has to reach it too.
+      const cap = el.current?.querySelector(".capsule")?.getBoundingClientRect();
+      const x = Math.min(box.left, cap?.left ?? box.left);
+      const y = Math.min(box.top, cap?.top ?? box.top);
+      const right = Math.max(box.right, cap?.right ?? box.right);
+      const bottom = Math.max(box.bottom, cap?.bottom ?? box.bottom);
+      void bridge.setIslandRect({ x, y, w: right - x, h: bottom - y });
     };
     // One message per frame however many values moved.
     const schedule = () => {
@@ -238,8 +253,10 @@ export function Island() {
     };
   }, [width, height]);
 
-  // Which spring moves the shape, so the content can wait for it.
-  const shapeSpring: SpringName = target.w * target.h > width.get() * height.get() ? "grow" : hovered ? "snap" : "shrink";
+  // Which spring moves the shape, so the content can wait for it. The resting pill swells under the pointer with a
+  // small wobble; everything else grows on the opening spring.
+  const settling = view === "idle" && hovered;
+  const shapeSpring: SpringName = target.w * target.h > width.get() * height.get() ? (settling ? "wobble" : "grow") : hovered ? "snap" : "shrink";
   // A card or the panel closing goes back up into the resting pill, floating or not, instead of fading where it is.
   const resting = view === "idle" && !opened;
   const pullsBack = resting && target.w * target.h < width.get() * height.get();
@@ -250,17 +267,48 @@ export function Island() {
       const controls = [animate(width, target.w, pull.width), animate(height, target.h, pull.height), animate(radius, target.r, pull.height)];
       return () => controls.forEach((c) => c.stop());
     }
-    const transition = reduced ? instant : scaled(grows ? spring.grow : hovered ? spring.snap : spring.shrink, speed);
+    const transition = reduced ? instant : scaled(grows ? (settling ? spring.wobble : spring.grow) : hovered ? spring.snap : spring.shrink, speed);
     const controls = [
       animate(width, target.w, transition),
       animate(height, target.h, transition),
       animate(radius, target.r, transition),
     ];
     return () => controls.forEach((c) => c.stop());
-  }, [target.w, target.h, target.r, reduced, hovered, resting, speed, width, height, radius]);
+  }, [target.w, target.h, target.r, reduced, hovered, settling, resting, speed, width, height, radius]);
 
-  const enter = reduced ? contentEnterReduced : contentEnter(shapeSpring, speed, place === "up", pullsBack ? CLOSE_REST : undefined);
+  const blur = !reduced && blurOn();
+  const enter = reduced ? contentEnterReduced : contentEnter(shapeSpring, speed, place === "up", pullsBack ? CLOSE_REST : undefined, blur);
   const expanded = view === "expanded";
+  const withTabs = expanded && onboarded;
+
+  // The face rides the shape's left edge from where it was in the island out to the panel's head, so it is carried by
+  // the morph and never slides across the title, and back in on the way out. The head keeps an empty slot for it
+  // (Panel.tsx); only the small step between the two spots is animated here.
+  const rideX = useMotionValue(0);
+  const rideY = useMotionValue(0);
+  const cameFrom = useRef<{ x: number; y: number } | null>(null);
+  useLayoutEffect(() => {
+    if (!expanded) return;
+    const box = el.current?.getBoundingClientRect();
+    const was = el.current?.querySelector(".island-content:not([data-panel]) .face")?.getBoundingClientRect();
+    if (!box || !was || reduced) {
+      cameFrom.current = null;
+      rideX.jump(0);
+      rideY.jump(0);
+      return;
+    }
+    const from = { x: was.left - box.left - HEAD_PAD, y: was.top - box.top - (HEAD_H - was.height) / 2 };
+    cameFrom.current = from;
+    // jump, not set: set would count the step as speed, and the spring would fling the face the wrong way first.
+    rideX.jump(from.x);
+    rideY.jump(from.y);
+    const go = scaled(spring.grow, speed);
+    const controls = [animate(rideX, 0, go), animate(rideY, 0, go)];
+    return () => controls.forEach((c) => c.stop());
+    // Only as the panel opens: on a tab change the slot moves with the shape.
+  }, [expanded]); // eslint-disable-line react-hooks/exhaustive-deps
+  const back = cameFrom.current;
+  const rideOut = closing(speed);
 
   // Press and move to drag it anywhere. Less than a few pixels is still a click.
   const down = (e: React.PointerEvent) => {
@@ -311,7 +359,10 @@ export function Island() {
       path.getAnimations().forEach((a) => a.cancel());
     };
   }, [lit, reduced, view, lapMs, lapEvery]);
-  const glow = view === "media" ? artTint ?? "#ff7a9c" : `var(${stateToken(view, snapshot)})`;
+  // The open panel glows in the colour of what is under way: an agent waiting for you, or at work.
+  const panelTone = expanded ? (waiting ? "--state-waiting" : active.length > 0 ? "--state-working" : null) : null;
+  const glowing = lit || panelTone !== null;
+  const glow = view === "media" ? artTint ?? "#ff7a9c" : `var(${panelTone ?? stateToken(view, snapshot)})`;
   // A waiting request looks the same either way, and swapping it would lose the answers so far.
   const opensOnHover =
     view === "idle" ||
@@ -325,6 +376,11 @@ export function Island() {
     ? "panel"
     : view + (opened && opensOnHover ? "-hover" : "") + (view === "media" && playerOpen ? "-open" : "") + (view === "here" ? `-${hereStep}` : view === "ask" ? `-${askPhase}` : view === "finish" ? `-${finish?.phase}-${finish?.ask?.id ?? finish?.end?.kind ?? finish?.card?.kind ?? ""}` : "");
 
+  // A blurred entrance is watched, and the blur goes for the session if it costs frames.
+  useEffect(() => {
+    if (blur) watchFrames(500 / speed);
+  }, [contentKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
   return (
     <motion.div
       ref={el}
@@ -334,6 +390,7 @@ export function Island() {
       data-place={place}
       data-dragging={dragging || undefined}
       data-small={target.h < 12}
+      data-glowing={glowing || undefined}
       style={{ width, height, "--glow": glow } as never}
       onClick={view === "idle" ? togglePanel : view === "note" ? () => openPanel("notes") : undefined}
       onClickCapture={(e) => {
@@ -348,6 +405,7 @@ export function Island() {
       onPointerUp={up}
       onPointerCancel={up}
     >
+      <motion.span className="island-glow" aria-hidden="true" style={{ borderBottomLeftRadius: corner, borderBottomRightRadius: corner, borderTopLeftRadius: topCorner, borderTopRightRadius: topCorner }} />
       <svg className="island-body" aria-hidden="true">
         <motion.path d={outline} />
       </svg>
@@ -371,14 +429,40 @@ export function Island() {
       <motion.div className="island-shape" style={{ borderBottomLeftRadius: corner, borderBottomRightRadius: corner, borderTopLeftRadius: topCorner, borderTopRightRadius: topCorner }}>
         <span className="island-tint" aria-hidden="true" />
         <AnimatePresence initial={false}>
-          <motion.div key={contentKey} className="island-content" style={{ width: target.w, height: target.h, transformOrigin: place === "up" ? "50% 100%" : "50% 0" }} initial={enter.initial} animate={enter.animate} exit={enter.exit}>
+          <motion.div key={contentKey} className="island-content" data-panel={expanded || undefined} style={{ width: target.w, height: target.h, transformOrigin: place === "up" ? "50% 100%" : "50% 0" }} initial={enter.initial} animate={enter.animate} exit={enter.exit}>
             {expanded ? <Panel /> : <CompactContent view={view} reduced={reduced} hovered={opened} sliver={sliver} mediaOpen={playerOpen} here={here} ask={ask} finish={finish} />}
           </motion.div>
+        </AnimatePresence>
+        <AnimatePresence>
+          {expanded && (
+            <motion.span
+              key="riding"
+              className="riding-face"
+              style={{ left: HEAD_PAD, height: HEAD_H, x: rideX, y: rideY }}
+              exit={back && !reduced ? { x: back.x, y: back.y, opacity: [1, 1, 0], transition: { ...rideOut.width, opacity: { duration: 0.32 / speed, times: [0, 0.8, 1] } } } : { opacity: 0, transition: { duration: 0.09 / speed } }}
+            >
+              <Face id={faceId} mood={feeling ?? "rest"} reduced={reduced} />
+            </motion.span>
+          )}
         </AnimatePresence>
         {!expanded && <ClosingLine view={view} />}
         {wakeOn && !expanded && <span className="wake-dot" role="img" aria-label="Listening for a wake word" title="Listening for a wake word" />}
         {snapshot.recording && !expanded && view !== "note" && <span className="note-dot" role="img" aria-label="Recording" title="Recording" />}
       </motion.div>
+      {/* The tabs float outside the shape so it does not clip them: under the panel, or above it at the bottom of the screen. */}
+      <AnimatePresence>
+        {withTabs && (
+          <motion.div
+            key="capsule"
+            className="capsule"
+            initial={reduced ? { opacity: 0 } : { opacity: 0, scale: 0.94, y: place === "up" ? 8 : -8, ...(blur ? { filter: "blur(6px)" } : {}) }}
+            animate={{ opacity: 1, scale: 1, y: 0, ...(blur ? { filter: "blur(0px)" } : {}), transition: { duration: 0.26 / speed, delay: reduced ? 0 : 0.12 / speed, ease: [0.16, 1, 0.3, 1] } }}
+            exit={{ opacity: 0, transition: { duration: 0.09 / speed, ease: [0.4, 0, 1, 1] } }}
+          >
+            <Capsule />
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }

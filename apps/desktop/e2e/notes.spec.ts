@@ -186,19 +186,20 @@ test.describe("Notes", () => {
   });
 });
 
-test("the dock is round, sits where the board puts it, and has Notes", async ({ page }) => {
+test("the tabs float in a capsule under the panel, the open one named, and Notes is there", async ({ page }) => {
   await page.getByRole("button", { name: "Notes", exact: true }).click();
-  // Measured once the panel has settled in, not while it is still arriving.
-  await expect
-    .poll(async () => {
-      const item = await page.getByRole("button", { name: "Notes", exact: true }).boundingBox();
-      return [item?.width, item?.height];
-    })
-    .toEqual([44, 44]);
   const dock = page.locator(".dock");
-  await expect(dock).toHaveCSS("padding", "5px");
-  await expect(dock).toHaveCSS("border-radius", "27px");
-  await expect(dock.locator(".dock-pill")).toHaveCSS("border-radius", "22px");
+  const notes = dock.getByRole("button", { name: "Notes", exact: true });
+  await expect(notes).toHaveAttribute("aria-current", "page");
+  await expect(dock).toHaveCSS("padding", "4px");
+  await expect(dock).toHaveCSS("border-radius", "22px");
+  await expect(notes).toHaveCSS("border-radius", "18px");
+  // Measured once the label has opened, not while it is still arriving: the open tab is wider than an icon.
+  await expect.poll(async () => (await notes.boundingBox())?.width ?? 0).toBeGreaterThan(70);
+  await expect.poll(async () => (await dock.getByRole("button", { name: "Home", exact: true }).boundingBox())?.width).toBe(36);
+  // Outside the shape: below the island's bottom edge.
+  const [island, capsule] = await Promise.all([page.locator(".island").boundingBox(), page.locator(".capsule").boundingBox()]);
+  expect(capsule!.y).toBeGreaterThanOrEqual(island!.y + island!.height);
   // Knowledge, a book between Notes and Notifications, is the ninth.
   await expect(dock.getByRole("button")).toHaveCount(9);
   await expect(page.locator(".wake-dot")).toHaveCount(0);

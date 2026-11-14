@@ -1655,7 +1655,8 @@ test.describe("panel", () => {
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page.getByRole("button", { name: "Island", exact: true }).click();
     await page.getByRole("button", { name: "Cat", exact: true }).click();
-    await expect(page.locator(".panel-head .face")).toHaveAttribute("data-face", "cat");
+    // The face in the panel's head rides in the island (D78), so it is not inside the head itself.
+    await expect(page.locator(".riding-face .face")).toHaveAttribute("data-face", "cat");
     await page.getByRole("button", { name: "Reduced" }).click();
     await expect(page.locator("html")).toHaveAttribute("data-motion", "reduced");
   });

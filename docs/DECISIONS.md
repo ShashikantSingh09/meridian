@@ -490,6 +490,32 @@ side by side in the real window before it counts as done.
 Apple-style glass, themes, limits and models, the assistant's name and personality, and wake words are on the canvas and held for review.
 Wake words would reverse the part of D51 that left them out, and only because the owner asked for them.
 
+## D78. The panel is the island grown: a size for each page, a tab capsule, and state colour as light
+
+Approved by the owner on 2026-11-14, from the "Alive: for your review" boards and the v0 board, after a side-by-side study of
+Coucou, TwoCode, Boring Notch, NotchNook Pro and Alcove. The island already moved as well as the best of them. What made Meridian
+look simple was the panel: one fixed box for every page, nine unlabelled icons in a dock no other island uses, a plain fade
+between pages, and almost no colour. So:
+
+1. Each page has its own size, and the island reshapes when the tab changes, on the opening spring if it grows and the closing
+   one if it shrinks. The window still never resizes.
+2. The dock leaves the panel and floats as a capsule just under it (above it when the island sits at the bottom). Other tabs are
+   icons; the one you are on is a pill with its icon and name. All nine tabs stay.
+3. Content arrives from the island's top edge: a short blur, 96 % size and a few pixels up, starting earlier than before because
+   the blur hides the part of the morph that is not yet finished. If frames drop while it plays, the app falls back to the old
+   fade for the rest of the session.
+4. State colour shows as light: a glow on the island's edge and a halo behind the face while something is under way, and an
+   amber wash on whatever needs the user.
+5. The face in the panel's head is carried there on the shape's left edge as the panel opens, and back as it closes, so
+   it never slides across the title. The resting pill squashes when pressed and swells with a small wobble under the pointer.
+6. Home is calmer: one card for what is happening now (an agent, a note being recorded, music, the next event), then Ask, then
+   the suggestions as one quiet line. The empty cards go. Providers stay one click away in Settings.
+7. The default theme's panel is plain black, without the violet and amber glow. The other themes keep theirs.
+
+**Gave up.** Sizes are fixed per page, not measured from the content, so the larger pages keep about the old size and only Home,
+Media and Notifications shrink. Blur costs a little on every content change, which is why it switches itself off when frames drop.
+Pages crossfade for 90 ms instead of strictly one after the other, because waiting left the panel black for a moment.
+
 ## D77. Finish this for me: experimental, and every step that commits waits for a click
 
 Asked by voice or on the island, Meridian finishes a task in the window in front, on the user's Claude plan through Claude Code. It is off

@@ -61,7 +61,7 @@ test("the morning line says how many things need you, once, and opens My Day", a
 
   // The same day, a second check finds the same, and the island stays quiet.
   await island(page).getByRole("button", { name: "See" }).click();
-  await expect(page.locator(".panel-head h1")).toHaveText("My day");
+  await expect(page.locator(".panel-body:not([aria-hidden]) .panel-head h1")).toHaveText("My day");
   await meridian(page, (m) => m.closePanel());
   await meridian(page, (_, mock) => mock.cardsDue());
   await expect.poll(() => meridian(page, (_, mock) => mock.cardChecks())).toBe(2);
@@ -83,7 +83,7 @@ test("pointed at, the morning line lists the three, and a line opens its card in
   await expect(island(page).getByRole("button", { name: /draft|plan|Remind|Gmail/ })).toHaveCount(0);
 
   await lines.nth(1).click();
-  await expect(page.locator(".panel-head h1")).toHaveText("My day");
+  await expect(page.locator(".panel-body:not([aria-hidden]) .panel-head h1")).toHaveText("My day");
   await expect(card(page, "Netflix renews tomorrow")).toHaveAttribute("data-focus", "true");
 });
 

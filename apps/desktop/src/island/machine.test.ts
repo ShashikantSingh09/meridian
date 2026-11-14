@@ -50,7 +50,18 @@ describe("a recording", () => {
     expect(geometryFor("note", { ...base, noteWriting: true })).toMatchObject({ w: 250, h: 46 });
     expect(geometryFor("notification", { ...base, noteReady: true })).toMatchObject({ w: 372, h: 46 });
     expect(geometryFor("error", { ...base, noteFailed: true })).toMatchObject({ w: 330, h: 46 });
-    expect(geometryFor("expanded", { ...base, tab: "notes" })).toMatchObject({ w: 820, h: 600 });
+    expect(geometryFor("expanded", { ...base, tab: "notes" })).toMatchObject({ w: 820, h: 540 });
+  });
+
+  it("gives each page its own size, so the island reshapes between tabs, and the welcome the most room", () => {
+    const base = { hovered: false, rows: 0, approval: false };
+    expect(geometryFor("expanded", { ...base, tab: "home" })).toMatchObject({ w: 720, h: 300 });
+    expect(geometryFor("expanded", { ...base, tab: "media" }).h).toBeLessThan(geometryFor("expanded", { ...base, tab: "chat" }).h);
+    expect(geometryFor("expanded", { ...base, tab: "welcome" })).toMatchObject({ w: 820, h: 600 });
+    // The tallest page leaves room in the 660 px window for the capsule: 10 px of gap and 44 of tabs.
+    for (const tab of ["home", "chat", "agents", "media", "day", "notes", "knowledge", "inbox", "settings"]) {
+      expect(geometryFor("expanded", { ...base, tab }).h + 10 + 44).toBeLessThanOrEqual(640);
+    }
   });
 });
 

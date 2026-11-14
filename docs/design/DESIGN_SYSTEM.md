@@ -36,7 +36,12 @@ The island is one opaque black shape hanging from the top edge of the display, l
    colour at 42%.
 5. **Shadow.** One soft layer, `--island-shadow`, to lift it off a light desktop.
 
-There is no glass, no tint and no light theme. See `docs/DECISIONS.md`, D27. Filters are avoided on anything that moves.
+There is no glass, no tint and no light theme. See `docs/DECISIONS.md`, D27. Filters are avoided on the shape itself; content
+may arrive from a short blur (D78).
+
+While something is under way, the shape glows in the state colour, and a halo sits behind the face. The open panel glows amber
+while an agent waits for you and blue while one works. The panel is the island grown: each page has its own size, and the tabs
+float in a black capsule just outside it, the open one a pill holding its name (D78).
 
 ## Typography
 
@@ -58,14 +63,19 @@ Tokens live in `packages/design-system/src/motion.ts`.
 |---|---|---|
 | `spring.grow` | Expanding | Response 0.42 s, damping 0.84: a hint of overshoot |
 | `spring.shrink` | Collapsing | Response 0.34 s, damping 1: no overshoot |
-| `spring.hover` | Hover growth, indicators | Response 0.28 s, damping 0.9 |
-| `contentEnter` | Content changing | 70 ms out, then 200 ms in |
+| `spring.snap` | Indicators, presses | Response 0.28 s, damping 0.89 |
+| `spring.wobble` | The resting pill under the pointer | Response 0.30 s, damping 0.7 |
+| `contentEnter` | Content changing | 90 ms out; in from an 8 px blur, 96 % and 6 px towards the edge, after 0.15 of the shape's spring |
+| `pageEnter` | Changing tab | Crossfades with the old page as the island reshapes |
 | `rowEnter` | Rows from a fetch | One after another, 35 ms apart |
 
 Rules:
 
 - Growth may overshoot. Shrinking never does: a panel that bounces while closing reads as a mistake.
-- Content fades at its final size, so text never reflows during a morph.
+- Content fades at its final size, so text never reflows during a morph. If the blur costs frames, it goes for the session
+  and the old fade takes over (`lib/frames.ts`).
+- The face is carried by the shape: into the panel's head on its left edge, and back.
+- A press squashes the resting pill to 95 %, and it springs back.
 - Old content leaves before new content arrives, so two lines of text are never readable on top of each other.
 - The island reacts to a resting pointer, not a passing one: 180 ms in, 240 ms out.
 - At launch the shape grows out of a dot at the screen's edge.

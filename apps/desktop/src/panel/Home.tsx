@@ -1,197 +1,110 @@
-// Home is a few live cards, each of which is either showing something real or
-// inviting the one step that would make it so. No sample data here, ever.
+// Home is calm (D78): one card for what is happening now, then Ask, then a quiet line of things to ask. The card
+// shows the first of: an agent that needs you or is at work, a note being recorded, a focus session, music
+// playing, the next event today. With none of those it says so, and offers Focus and a new session. No sample
+// data here, ever.
 
-import { rowEnter } from "@meridian/design-system/motion";
-import { motion } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { span, timeOf } from "../island/live";
-import { activeSessions } from "../island/machine";
+import { activeSessions, waitingApproval } from "../island/machine";
 import { Bars } from "../island/marks";
-import { Artwork, Clock, hostOf } from "../island/views";
+import { Artwork, RecordingClock } from "../island/views";
 import { Brand } from "../lib/brands";
 import { Icon } from "../lib/icons";
 import { ago } from "../lib/sessions";
 import { firstSeen, goingFrom, pickStarters } from "../lib/starters";
-import { assist, clearDraft, describeTime, endFocus, openLink, openPanel, openSettings, sendToEngine, setDraft, setTab, startFocus, timeToday, useApp } from "../lib/store";
+import { clearDraft, describeTime, endFocus, openPanel, sendToEngine, setDraft, setTab, startFocus, timeToday, useApp } from "../lib/store";
 import { startVoice } from "../lib/voice";
 
-const HOUR = 3_600_000;
-/** The length of the ring in the Next card, for a radius of 25. */
-const RING = 157;
-/** What the empty feed offers to connect. */
-const OFFERS = [
-  { id: "gmail", name: "Gmail" },
-  { id: "calendar", name: "Google Calendar" },
-  { id: "github", name: "GitHub" },
-  { id: "linear", name: "Linear" },
-];
-const cardEnter = (i: number) =>
-  ({ initial: { opacity: 0, y: 10, scale: 0.97 }, animate: { opacity: 1, y: 0, scale: 1 }, transition: { type: "spring", stiffness: 420, damping: 30, delay: i * 0.05 } }) as const;
+/** Only an event within this long is "now" enough for Home. */
+const SOON = 12 * 3_600_000;
 
-function CardActions() {
-  const focus = useApp((s) => s.focus);
-  return (
-    <div className="row">
-      {focus ? <button className="ghost" onClick={endFocus}>End focus</button> : <button className="ghost" onClick={() => startFocus()}>Focus for 25 min</button>}
-      <button className="ghost" onClick={() => setTab("agents")}>New task</button>
-    </div>
-  );
-}
-
-function AgentsCard() {
+function NowCard() {
   const sessions = useApp((s) => s.sessions);
-  const active = activeSessions(sessions);
+  const recording = useApp((s) => s.notes.notes.find((n) => n.id === s.notes.recording));
+  const focus = useApp((s) => s.focus);
+  const track = useApp((s) => (s.settings.mediaEnabled && s.media.current?.playing ? s.media.current : null));
+  const tint = useApp((s) => (s.media.current?.artwork ? s.artTint : null));
+  const next = useApp((s) => s.activity.next);
   const now = Date.now();
-  const date = new Date().toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" });
+  const active = activeSessions(sessions);
+  const waiting = waitingApproval(sessions);
+  const lead = waiting ?? active[0];
 
-  if (active.length === 0) {
+  if (lead) {
+    const others = active.length - 1;
     return (
-      <motion.section className="plate home-agents" {...cardEnter(0)}>
-        <Clock className="big-clock tabular" />
-        <span className="meta">{date}</span>
-        <span className="grow" />
-        <CardActions />
-      </motion.section>
+      <button className="plate now" data-tone={waiting ? "waiting" : "working"} onClick={() => setTab("agents")}>
+        <span className="row">
+          <Brand id={lead.agentId} name={lead.agent} size={16} />
+          <span className="label grow truncate">
+            {lead.project} <span className="meta">· {lead.agent}</span>
+          </span>
+          <span className="meta tabular">{others > 0 ? `and ${others} more · ` : ""}{ago(lead.startedAt, now)}</span>
+        </span>
+        <span className="doing truncate">{waiting ? `Needs you: ${waiting.approval?.summary ?? "a decision"}` : lead.activity || "Working"}</span>
+        {!waiting && <span className="now-pulse" aria-hidden="true"><i /></span>}
+      </button>
+    );
+  }
+  if (recording) {
+    return (
+      <button className="plate now" data-tone="recording" onClick={() => setTab("notes")}>
+        <span className="row">
+          <span className="label grow truncate">Recording a note</span>
+          <RecordingClock since={recording.startedAt} />
+        </span>
+        <span className="doing truncate">Meridian writes it up when you stop.</span>
+      </button>
+    );
+  }
+  if (focus) {
+    return (
+      <div className="plate now">
+        <span className="row">
+          <span className="label grow truncate">Focusing</span>
+          <span className="meta tabular">{span(Math.max(0, focus.endsAt - now))} left</span>
+          <button className="ghost" onClick={endFocus}>End focus</button>
+        </span>
+      </div>
+    );
+  }
+  if (track) {
+    return (
+      <button className="plate now now-music" data-tinted={tint !== null} style={tint ? ({ "--art": tint } as React.CSSProperties) : undefined} onClick={() => setTab("media")}>
+        <span className="row">
+          <Artwork src={track.artwork ?? null} size={44} />
+          <span className="grow stacked">
+            <span className="label truncate">{track.title || track.app}</span>
+            <span className="meta truncate">{track.artist || track.app}</span>
+          </span>
+          <Bars playing height={18} />
+        </span>
+      </button>
+    );
+  }
+  const at = next ? timeOf(next.startsAt) : null;
+  if (next && at !== null && at > now && at - now < SOON) {
+    return (
+      <button className="plate now" onClick={() => openPanel("day")}>
+        <span className="row">
+          <span className="label grow truncate">{next.title}</span>
+          <span className="meta tabular">in {span(at - now)}</span>
+        </span>
+        <span className="doing truncate">{next.startsAt ? (timeToday(next.startsAt) ?? describeTime(next.startsAt)) : "Today"}</span>
+      </button>
     );
   }
   return (
-    <motion.section className="plate home-agents" data-busy="true" {...cardEnter(0)}>
-      <button className="row text-button home-agents-head" onClick={() => setTab("agents")}>
-        <i className="live-dot" />
-        <span className="grow">{active.length} {active.length === 1 ? "agent" : "agents"} working</span>
-      </button>
-      {active.slice(0, 2).map((s) => (
-        <button key={s.id} className="home-agent" data-agent={s.agentId} onClick={() => setTab("agents")}>
-          <span className="row">
-            <Brand id={s.agentId} name={s.agent} size={15} />
-            <span className="label grow truncate">{s.agent}, {s.project}</span>
-            <span className="meta tabular">{ago(s.startedAt, now)}</span>
-          </span>
-          <span className="doing truncate">{s.activity || "Working"}</span>
-        </button>
-      ))}
-      <span className="grow" />
-      <CardActions />
-    </motion.section>
-  );
-}
-
-function NextCard() {
-  const next = useApp((s) => s.activity.next);
-  const accounts = useApp((s) => s.activity.accounts);
-  const at = next ? timeOf(next.startsAt) : null;
-  const left = at ? at - Date.now() : null;
-  const soon = left !== null && left > 0 && left < HOUR;
-  const fill = soon ? 1 - left! / HOUR : 0;
-  const minutes = soon ? Math.ceil(left! / 60_000) : null;
-  const when = next?.startsAt ? (timeToday(next.startsAt) ?? describeTime(next.startsAt)) : null;
-  const where = hostOf(next?.suggestedActions.find((a) => a.url)?.url ?? null);
-
-  return (
-    <motion.section className="plate home-next" {...cardEnter(1)}>
-      <span className="next-ring">
-        <svg aria-hidden="true" viewBox="0 0 58 58">
-          <circle cx="29" cy="29" r="25" />
-          {fill > 0 && <circle cx="29" cy="29" r="25" data-arc="true" strokeDasharray={RING} strokeDashoffset={RING * (1 - fill)} />}
-        </svg>
-        <b className="tabular">{minutes ?? <Icon name="calendar" size={18} />}</b>
+    <div className="plate now">
+      <span className="row">
+        <span className="grow stacked">
+          <span className="label">Nothing running</span>
+          <span className="meta">Start an agent, or ask anything below.</span>
+        </span>
+        <button className="ghost" onClick={() => startFocus()}>Focus for 25 min</button>
+        <button className="ghost" onClick={() => setTab("agents")}>New session</button>
       </span>
-      {next ? (
-        <button className="grow text-button stacked" onClick={() => openPanel("day")}>
-          <span className="tile-kicker">{left !== null && left > 0 ? `Next, in ${span(left)}` : "Next"}</span>
-          <span className="tile-title truncate">{next.title}</span>
-          <span className="meta truncate">{[when, where].filter(Boolean).join(", ")}</span>
-        </button>
-      ) : (
-        <button className="grow text-button stacked" onClick={() => openSettings("providers")}>
-          <span className="tile-kicker">Your day is clear</span>
-          <span className="tile-title truncate">{accounts.length === 0 ? "Connect a calendar" : "Nothing coming up"}</span>
-        </button>
-      )}
-    </motion.section>
-  );
-}
-
-function MusicCard() {
-  const track = useApp((s) => s.media.current);
-  const tint = useApp((s) => (s.media.current?.artwork ? s.artTint : null));
-  return (
-    <motion.section className="plate home-music" data-tinted={tint !== null} style={tint ? ({ "--art": tint } as React.CSSProperties) : undefined} {...cardEnter(2)}>
-      <Artwork src={track?.artwork ?? null} size={64} />
-      <button className="grow text-button stacked" onClick={() => setTab("media")}>
-        <span className="tile-title truncate">{track?.title || track?.app || "Nothing playing"}</span>
-        <span className="meta truncate">{track?.artist || (track ? track.app : "Any music app shows here")}</span>
-      </button>
-      {track && <Bars playing={track.playing} height={20} />}
-    </motion.section>
-  );
-}
-
-function Feed() {
-  const integrations = useApp((s) => s.integrations);
-  const digests = useApp((s) => s.digests);
-  const suggestions = useApp((s) => s.suggestions);
-  const connected = integrations.filter((i) => i.connected);
-  const rows = [
-    // What the screen turned up comes first, because it is about what is happening now.
-    ...suggestions.map((s) => ({
-      key: s.id,
-      title: s.title,
-      source: "On your screen",
-      mark: <span className="brand feed-idea" style={{ width: 22, height: 22 }}><Icon name="bulb" size={14} /></span>,
-      url: null as string | null,
-      open: () => assist(s, "Suggest a fix for this."),
-    })),
-    ...connected.flatMap((i) =>
-      (digests[i.id]?.items ?? []).slice(0, 2).map((item) => ({
-        key: i.id + item.key,
-        title: item.title,
-        source: i.name,
-        mark: <Brand id={i.id} name={i.name} size={22} />,
-        url: item.url,
-        open: item.url ? () => openLink(item.url!) : undefined,
-      })),
-    ),
-  ].slice(0, 3);
-
-  return (
-    <motion.section className="plate home-feed" {...cardEnter(3)}>
-      <h2>{suggestions.length > 0 ? "Suggestions" : "From your providers"}</h2>
-      {rows.length === 0 && connected.length === 0 && (
-        <div className="home-connect">
-          <span className="home-logos">{OFFERS.map((o) => <Brand key={o.id} id={o.id} name={o.name} size={26} />)}</span>
-          <span className="meta grow">Connect a provider to see your issues, mail and calendar here.</span>
-          <button className="ghost" onClick={() => openSettings("providers")}>Connect</button>
-        </div>
-      )}
-      {rows.length === 0 && connected.length > 0 && <p className="meta">Nothing fetched yet.</p>}
-      {rows.length > 0 && (
-        <ul className="list">
-          {rows.map((row, i) => (
-            <motion.li key={row.key} {...rowEnter(i)}>
-              <button className="feed-row" disabled={!row.open} title={row.url ? `Open on ${hostOf(row.url)}` : undefined} onClick={row.open}>
-                {row.mark}
-                <span className="label grow truncate">{row.title}</span>
-                <span className="meta">{row.source}</span>
-              </button>
-            </motion.li>
-          ))}
-        </ul>
-      )}
-    </motion.section>
-  );
-}
-
-function Today() {
-  const sessions = useApp((s) => s.sessions);
-  const midnight = new Date().setHours(0, 0, 0, 0);
-  const done = sessions.filter((s) => s.status === "completed" && (s.endedAt ?? 0) >= midnight).length;
-  return (
-    <motion.button className="plate home-today" {...cardEnter(4)} onClick={() => setTab("agents")}>
-      <span className="meta">Today</span>
-      <span className="home-number tabular">{done}</span>
-      <span className="meta">{done === 1 ? "task finished" : "tasks finished"}</span>
-    </motion.button>
+    </div>
   );
 }
 
@@ -254,13 +167,7 @@ export function Home() {
 
   return (
     <div className="home board">
-      <div className="bento">
-        <AgentsCard />
-        <NextCard />
-        <MusicCard />
-        <Feed />
-        <Today />
-      </div>
+      <NowCard />
       <form className="composer" onSubmit={submit}>
         <button type="button" className="round" aria-label="Talk" title="Talk. Or hold Ctrl Alt V anywhere." onClick={() => void startVoice("turn")}>
           <Icon name="mic" size={15} />

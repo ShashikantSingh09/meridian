@@ -5,10 +5,11 @@
   --accent: #2a84ea;
   --accent-ink: #fff;
   --accent-shine: linear-gradient(180deg, #2a84ea 0, #0a63c8 100%);
-  --sheet-top: #0b0c14;
-  --sheet-low: #10111c;
-  --glow-a: rgba(112, 86, 255, 0.2);
-  --glow-b: rgba(255, 164, 84, 0.13);
+  /* Plain black, like the island (D78). The other themes keep their colour. */
+  --sheet-top: #000;
+  --sheet-low: #050506;
+  --glow-a: transparent;
+  --glow-b: transparent;
   --float: linear-gradient(180deg, rgba(255, 255, 255, 0.16) 0, rgba(255, 255, 255, 0.07) 100%);
   --float-edge: inset 0 1px 0 rgba(255, 255, 255, 0.44), inset 0 -1px 0 rgba(255, 255, 255, 0.1), inset 1px 0 0 rgba(255, 255, 255, 0.12), inset -1px 0 0 rgba(255, 255, 255, 0.12), 0 0 0 0.5px rgba(0, 0, 0, 0.4), 0 10px 26px rgba(0, 0, 0, 0.32);
   --frost: blur(16px) saturate(200%) brightness(1.1);
@@ -53,8 +54,7 @@
 }
 
 /* Text and fills flip inside the panel only. The title row sits on black in every theme. */
-:root[data-theme="daylight"] .page,
-:root[data-theme="daylight"] .dock {
+:root[data-theme="daylight"] .page {
   color-scheme: light;
   --ink-1: #14161c;
   --ink-2: rgba(20, 22, 30, 0.74);
