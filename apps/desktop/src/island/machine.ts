@@ -177,7 +177,7 @@ export const EXPANDED: Geometry = { w: 820, h: 600, r: 32 };
 /** Each page gets the room it needs, and the island reshapes when the tab changes (D78). The window never
  *  resizes. The tab capsule floats outside the shape, so it is not counted here; the tallest page leaves it room. */
 const PANELS: Record<string, Geometry> = {
-  home: { w: 720, h: 300, r: 30 },
+  home: { w: 760, h: 470, r: 32 },
   chat: { w: 820, h: 540, r: 32 },
   agents: { w: 820, h: 540, r: 32 },
   media: { w: 720, h: 420, r: 30 },

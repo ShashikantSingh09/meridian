@@ -106,7 +106,7 @@ const RUN_WITHOUT_ASKING: [&str; 26] = [
 ];
 
 /// The faces the user can pick, by the names Settings uses.
-const FACES: [&str; 8] = ["soft", "googly", "visor", "smile", "pixel", "cat", "horizon", "moons"];
+const FACES: [&str; 9] = ["lantern", "soft", "googly", "visor", "smile", "pixel", "cat", "horizon", "moons"];
 
 /// Changes one of the few settings the assistant may change when asked, and says what it did. Anything
 /// that sends data out, signs in, or turns off a protection is not on the list.
@@ -214,7 +214,7 @@ fn tools() -> Value {
         tool("write_here", "Writes into the text box the user is typing in, in any app, such as a reply to the email or message on their screen. Meridian reads the box and the page itself, writes the words in, selected, and never sends them. Only when the user asks for it in their own words.", json!({ "instruction": text("What the user asked to have written, in their words, such as: say I'll send it today") }), &["instruction"]),
         tool("finish_this", "Finishes a task in the app or page in front of the user, step by step while they watch on the island: it fills boxes, picks, ticks and presses, and asks them before any submit, send, pay, book, upload, delete or new site. Only when the user asks for it in their own words. It is an experiment the user turns on in Settings, and it says so when it is off.", json!({ "task": text("The task, in the user's words, such as: finish this expense claim") }), &["task"]),
         tool("fill_form", "Fills in the form in front of the user, in a browser or an app: Meridian reads the boxes, puts in the user's details itself, marks what is left for them, and never submits. Also for a value the user gives for a box of a form just filled, such as notice period 60 days. Only when the user asks for it in their own words.", json!({ "instruction": text("What the user said, in their words, such as: fill this in with my work details") }), &["instruction"]),
-        tool("change_setting", "Changes one of Meridian's own settings: face (soft, googly, visor, smile, pixel, cat, horizon, moons), sounds, show_clock, show_battery, wake_words, keep_talking (keeps listening after its name), pause_monitoring (on or off), or island_position (left, center, right).", json!({ "setting": { "type": "string", "enum": ["face", "sounds", "show_clock", "show_battery", "wake_words", "keep_talking", "island_position", "pause_monitoring"] }, "value": text("The new value") }), &["setting", "value"]),
+        tool("change_setting", "Changes one of Meridian's own settings: face (lantern, soft, googly, visor, smile, pixel, cat, horizon, moons), sounds, show_clock, show_battery, wake_words, keep_talking (keeps listening after its name), pause_monitoring (on or off), or island_position (left, center, right).", json!({ "setting": { "type": "string", "enum": ["face", "sounds", "show_clock", "show_battery", "wake_words", "keep_talking", "island_position", "pause_monitoring"] }, "value": text("The new value") }), &["setting", "value"]),
         tool("check_updates", "Looks for a newer version of Meridian. It cannot install one: the user presses Update now in Settings, Updates.", json!({}), &[]),
         tool("pc_status", "Gives the current date and time, and whether the PC is on battery.", json!({}), &[]),
         tool("stop_listening", "Ends a spoken conversation after this reply, for when the user has said they are finished.", json!({}), &[]),

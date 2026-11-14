@@ -35,7 +35,7 @@ import {
   type SessionDetail,
 } from "../lib/store";
 import { actionOf, asking, changedFiles, limitName, clock, lastMessage, needsFirst, planSteps, spent, stageLine, stepLog, stepsOf, thisTurn, todoStep, todoWindow, turnStart, worked, type LoggedStep } from "../lib/sessions";
-import { Face, type Mood } from "./faces";
+import { Face, useReduced, type Mood } from "./faces";
 import { AskRow } from "./here";
 import type { LineSegment } from "./line";
 import { focusActivity } from "./live";
@@ -506,9 +506,12 @@ function StartAgentCard({ sessionId, approval, panel }: { sessionId: string; app
 /** One session among others: its project, and the stage it is at. */
 function SessionLine({ session }: { session: SessionDetail }) {
   const { text, kind } = stageLine(session);
+  const face = useApp((s) => s.settings.face);
+  const reduced = useReduced();
+  // A small character per agent, in its own state, so which one needs you shows before it reads (D80).
   return (
-    <button className="stage-row" data-kind={kind} onClick={() => openSession(session.id)}>
-      <AgentMark agent={session.agent} size={18} live={false} />
+    <button className="stage-row" data-kind={kind} title={session.agent} onClick={() => openSession(session.id)}>
+      <span className="row-face"><Face id={face} mood={kind === "needs" ? "needs" : "working"} scale={0.62} reduced={reduced} /></span>
       <span className="label grow">{session.project}</span>
       <span className="stage-now truncate">{text}</span>
     </button>

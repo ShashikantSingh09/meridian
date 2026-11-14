@@ -2,8 +2,16 @@
 
 ## The idea: a face, and a shape that breathes
 
-The island's character is now a face. See `docs/DECISIONS.md`, D34. The section below describes the line of light, which
-remains only for listening.
+The island's character is now a face. See `docs/DECISIONS.md`, D34. Since D80 the default face is **Lantern**: Soft eyes
+inside a body made of the island, dark glass with a lit rim, lit from inside in the mood's state colour (`--c` on `.face`),
+with its eyes tinted the same way and a soft glow round it instead of the halo. It is 34 by 29 px on the island and zooms for
+Home (2.2) and a session in Agents (1.3). It moves as D70 says: a mood plays once and settles.
+
+Home is live tiles (D80): every `.tile` has a lit top edge and lifts 2 px under the pointer; `.tile-k` is the small capital label
+and `.tile-big` the 42 px number. Colour comes from what a tile shows, never decoration: the state, the album (`--art`), the
+calendar ring in `--state-listening`.
+
+The section below describes the line of light, which remains only for listening.
 
 ### The line of light
 

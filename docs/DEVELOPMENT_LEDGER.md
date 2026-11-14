@@ -1,5 +1,22 @@
 # Development ledger
 
+## 2026-11-14: Lantern, and the Compete boards built (D80)
+
+The owner said 0.8.1 still looked behind Coucou, TwoCode, NotchNook Pro, Boring Notch and Alcove. A new canvas page, "Compete: for
+your review", put 0.8.1 next to them with honest scores, then drew three characters, ten island states and a richer panel. The
+owner chose Lantern and asked for all three boards to be built.
+
+- `island/faces.tsx`, `faces.css`: Lantern face, default in `types.ts` and `settings.rs`; `actions.rs` lists it for voice.
+  `store.ts` moves Soft eyes to Lantern once (`meridian.metLantern` in local storage).
+- `panel/Home.tsx`, `pages.css`: tiles for Now, Time, Next and Music. Home is 760 by 470 in `machine.ts`; the header drops
+  its date and clock on Home.
+- `panel/Media.tsx`: Now playing label, art-coloured bars and shadow, a big round play key.
+- `panel/Agents.tsx`, `styles.css`: the session's character, state light and three big numbers.
+- `island/views.tsx`, `stages.css`: big worked time on the working pill; a small character per agent row.
+- `lib/mock.ts`: the sample track has gradient art, so the browser build shows art and its colour.
+
+Not built: segmented progress and a progress ring, which need a step total no agent gives.
+
 ## 2026-11-14: Eight React Bits components (D79)
 
 Fetched with `npm run react-bits` and wired in as the design system's table lists. What it took:

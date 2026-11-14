@@ -55,7 +55,7 @@ describe("a recording", () => {
 
   it("gives each page its own size, so the island reshapes between tabs, and the welcome the most room", () => {
     const base = { hovered: false, rows: 0, approval: false };
-    expect(geometryFor("expanded", { ...base, tab: "home" })).toMatchObject({ w: 720, h: 300 });
+    expect(geometryFor("expanded", { ...base, tab: "home" })).toMatchObject({ w: 760, h: 470 });
     expect(geometryFor("expanded", { ...base, tab: "media" }).h).toBeLessThan(geometryFor("expanded", { ...base, tab: "chat" }).h);
     expect(geometryFor("expanded", { ...base, tab: "welcome" })).toMatchObject({ w: 820, h: 600 });
     // The tallest page leaves room in the 660 px window for the capsule: 10 px of gap and 44 of tabs.

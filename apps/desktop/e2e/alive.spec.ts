@@ -20,8 +20,19 @@ test.beforeEach(async ({ page }) => {
   await expect(island(page)).toHaveAttribute("data-view", "expanded");
 });
 
+test("a session in Agents shows its character in its state, and how long, how many steps and how many lines", async ({ page }) => {
+  await meridian(page, (m) => m.startSession({ agent: "claude-code", cwd: "C:\\Projects\\shop", prompt: "Fix the cart", model: null }));
+  await page.locator(".now").click();
+  await page.locator(".session-row, .list-row, button").filter({ hasText: "shop" }).first().click();
+  const stats = page.locator(".session-stats");
+  await expect(stats).toContainText(/Working for|Worked for/);
+  await expect(stats).toContainText("Steps");
+  await expect(stats).toContainText("Lines changed");
+  await expect(page.locator(".session .session-face .face")).toHaveAttribute("data-mood", /working|needs/);
+});
+
 test("the island reshapes to each page, and the capsule follows its bottom edge", async ({ page }) => {
-  await expect.poll(() => size(page)).toEqual([720, 300]);
+  await expect.poll(() => size(page)).toEqual([760, 470]);
   await tab(page, "Chat").click();
   await expect.poll(() => size(page)).toEqual([820, 540]);
   await tab(page, "Media").click();
@@ -52,7 +63,12 @@ test("the open panel glows in the state colour while an agent works or waits, an
   await expect(tab(page, "Agents")).toHaveAttribute("aria-current", "page");
 });
 
-test("Home is one card, Ask and a line of things to ask, without the old cards", async ({ page }) => {
+test("Home is live tiles (D80): now with the character, the time, the next event and music, then Ask", async ({ page }) => {
+  await expect(page.locator(".home .tile")).toHaveCount(4);
+  await expect(page.locator(".home .now .face")).toHaveAttribute("data-face", "lantern");
+  await expect(page.locator(".home .time-tile")).toContainText(/\d:\d\d/);
+  await expect(page.locator(".home .next-tile")).toContainText("Nothing else today");
+  await expect(page.locator(".home .music-tile")).toContainText("Nothing playing");
   await expect(page.locator(".home .now")).toHaveCount(1);
   await expect(page.getByRole("textbox", { name: "Ask anything" })).toBeVisible();
   await expect(page.locator(".bento, .home-feed, .home-today, .big-clock")).toHaveCount(0);

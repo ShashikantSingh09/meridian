@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
 import { bridge } from "../lib/bridge";
 import { Icon } from "../lib/icons";
-import { ago, blocksOf, changedFiles, doing, groupSessions, lastActive, limitName, limitStop, memoryUsed, modelName, recentLines, resetLabel, tileState, type FileChange, type Step } from "../lib/sessions";
+import { ago, blocksOf, changedFiles, clock, doing, groupSessions, lastActive, limitName, limitStop, memoryUsed, modelName, recentLines, resetLabel, stepsOf, tileState, worked, type FileChange, type Step } from "../lib/sessions";
 import { cancelSession, clearAgentFocus, clearFinished, focusTerminal, sendToSession, startSession, useApp, type SessionDetail, openSettings } from "../lib/store";
 import { AgentMark } from "../island/marks";
 import { ApprovalCard } from "../island/views";
+import { Face, useReduced, type Mood } from "../island/faces";
+import { Roll } from "../island/roll";
 import { LogLine, StepRow, useFollow } from "./LogLine";
 import type { AgentId } from "../lib/types";
 import { Spot } from "./Spot";
@@ -66,7 +68,47 @@ function Changes({ files }: { files: FileChange[] }) {
   );
 }
 
+/** How the session feels, for its character and the light at the top of the page. */
+function moodOf(session: SessionDetail): Mood {
+  if (session.approval) return "needs";
+  if (session.status === "failed") return "error";
+  if (session.status === "completed") return "done";
+  return LIVE.includes(session.status) ? "working" : "rest";
+}
+
+/** Three numbers to read at a glance (D80): how long it has worked, how many steps, how many lines it changed. */
+function Numbers({ session, files }: { session: SessionDetail; files: FileChange[] }) {
+  const live = LIVE.includes(session.status);
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    if (!live) return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [live]);
+  const added = files.reduce((n, f) => n + f.added, 0);
+  const removed = files.reduce((n, f) => n + f.removed, 0);
+  return (
+    <div className="session-stats">
+      <div className="stat">
+        <Roll className="stat-big" text={clock(worked(session, now))} still />
+        <span className="tile-k">{live ? "Working for" : "Worked for"}</span>
+      </div>
+      <div className="stat">
+        <Roll className="stat-big" text={String(stepsOf(session.log).length)} />
+        <span className="tile-k">Steps</span>
+      </div>
+      <div className="stat">
+        <span className="stat-big tabular"><span className="change-added">+{added}</span> <span className="change-removed">−{removed}</span></span>
+        <span className="tile-k">Lines changed</span>
+      </div>
+    </div>
+  );
+}
+
 function Session({ session, view, setView }: { session: SessionDetail; view: View; setView: (view: View) => void }) {
+  const face = useApp((s) => s.settings.face);
+  const reduced = useReduced();
+  const mood = moodOf(session);
   const watching = useApp((s) => s.watching);
   const limit = useApp((s) => limitStop(session, s.limits[session.agentId]?.windows, Date.now()));
   const live = LIVE.includes(session.status);
@@ -90,9 +132,10 @@ function Session({ session, view, setView }: { session: SessionDetail; view: Vie
   };
 
   return (
-    <div className="session">
+    <div className="session" data-mood={mood}>
       <header className="session-head">
         <div className="row">
+          <span className="session-face" aria-hidden="true"><Face id={face} mood={mood} scale={1.3} reduced={reduced} /></span>
           <span className="stacked grow">
             <span className="label truncate" title={session.title}>{session.title || session.project}</span>
             <span className="meta truncate">{session.project}, {doing(session)}</span>
@@ -122,6 +165,7 @@ function Session({ session, view, setView }: { session: SessionDetail; view: Vie
           {model && <span className="session-fact"><AgentMark agent={session.agent} size={13} live={false} />{model}</span>}
           {numbers && <span className="meta truncate session-numbers" title="How full this conversation is, and what it has used">{numbers}</span>}
         </div>
+        <Numbers session={session} files={files} />
       </header>
 
       {session.watched && !watching && (

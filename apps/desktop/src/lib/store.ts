@@ -2088,10 +2088,23 @@ export function showPreview(name: string | null) {
 
 // ── Boot ────────────────────────────────────────────────────────────────────
 
+/** Lantern became Meridian's face in 0.9.0 (D80). Soft eyes was the default before, so whoever has it moves
+ *  to Lantern once; choosing Soft eyes again afterwards sticks. */
+function meetLantern() {
+  try {
+    if (localStorage.getItem("meridian.metLantern")) return;
+    localStorage.setItem("meridian.metLantern", "1");
+  } catch {
+    return;
+  }
+  if (state.settings.face === "soft") void updateSettings({ face: "lantern" });
+}
+
 export async function boot() {
   const [settings, providers, agents] = await Promise.all([bridge.getSettings(), bridge.listProviders(), bridge.detectAgents()]);
   applyAppearance(settings);
   set({ settings, providers, agents });
+  meetLantern();
   restoreHistory();
   void refreshLocal();
   void refreshActivity();

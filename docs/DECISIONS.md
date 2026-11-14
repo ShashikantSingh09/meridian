@@ -490,6 +490,36 @@ side by side in the real window before it counts as done.
 Apple-style glass, themes, limits and models, the assistant's name and personality, and wake words are on the canvas and held for review.
 Wake words would reverse the part of D51 that left them out, and only because the owner asked for them.
 
+## D80. Lantern is Meridian's character
+
+The owner chose Lantern on 2026-11-14 from the "Compete: for your review" boards, over Pearl and Wisp. The boards put 0.8.1 next to
+Coucou, TwoCode, NotchNook Pro, Boring Notch and Alcove: it moved as well as they did, but its character was two white pills with no
+body, where Mochi and Robo read as companions.
+
+Lantern keeps today's two eyes and gives them a body made of the island: dark glass with a lit rim, the mood's colour glowing
+inside it and in its eyes, and a soft glow of that colour behind it. The colour is light, not paint, which is how Apple's island
+shows state. It draws the moods Soft eyes draws.
+
+The boards loop every mood so it can be seen at once. In the app Lantern follows D70: a mood plays once and settles, blinks and
+heartbeats come from timers, and nothing moves for ever.
+
+It is a face like the others, so Settings, Island still offers them all, and it is now the default. Soft eyes was the default
+before, so whoever has it moves to Lantern once, on the first start after updating; choosing Soft eyes again sticks.
+
+The owner then asked for the island and panel boards on the same page to be built too:
+
+- **Home is live tiles.** Now runs down the left with the character large, in the mood of what is happening; beside it the time
+  at 42 px, the next event today as a ring that empties over its last hour, and music lit by its album's colour. Each tile
+  opens its page and lifts a little under the pointer. Home grows to 760 by 470 to hold them, and the things to ask stay one line.
+- **Media** leads with larger art whose colour lights its shadow, the label and the bars, and a big round play key.
+- **Agents** puts the character and the session's state colour at the top of a session, with three big numbers: how long it
+  has worked, how many steps, and the lines it changed.
+- **The island**: the time an agent has worked is the large number on the working pill, and each row of the list of agents
+  has a small character in that agent's state instead of its mark.
+
+**Gave up.** The boards' segmented progress and the ring round the agent's mark need to know how many steps a run will take,
+which no agent says, so they are not built. The island's music preview in Settings has no album art, so it still shows a note.
+
 ## D79. Eight React Bits components, each in one place
 
 Approved by the owner on 2026-11-14 from the "React Bits: for your review" boards. Each is React Bits' own component, in its

@@ -391,7 +391,8 @@ const sampleTrack: Track = {
   canNext: true,
   canPrevious: true,
   canSeek: true,
-  artwork: null,
+  // A plain gradient standing in for album art, so the browser build shows art and its colour.
+  artwork: "data:image/svg+xml," + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120"><defs><linearGradient id="a" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff9466"/><stop offset=".5" stop-color="#e2574c"/><stop offset="1" stop-color="#6b2f3e"/></linearGradient><radialGradient id="b" cx=".8" cy=".9" r=".6"><stop offset="0" stop-color="#1f5c5a"/><stop offset="1" stop-color="#1f5c5a" stop-opacity="0"/></radialGradient></defs><rect width="120" height="120" fill="url(#a)"/><rect width="120" height="120" fill="url(#b)"/></svg>'),
 };
 let track = { ...sampleTrack };
 let styleProfile: StyleProfile | null = null;

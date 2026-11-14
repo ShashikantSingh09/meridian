@@ -260,7 +260,7 @@ impl Default for Settings {
             show_next_meeting: true,
             sounds: true,
             onboarded: false,
-            face: "soft".into(),
+            face: "lantern".into(),
             voice_provider: "windows".into(),
             voice_id: None,
             voice_hearing: "local".into(),

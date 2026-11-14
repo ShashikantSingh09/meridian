@@ -800,7 +800,7 @@ export const defaultSettings: Settings = {
   showNextMeeting: true,
   sounds: true,
   onboarded: false,
-  face: "soft",
+  face: "lantern",
   fill: {
     on: false,
     key: "ctrl-alt-f",

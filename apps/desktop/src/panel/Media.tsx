@@ -10,7 +10,7 @@ export function Media() {
   const players = media.sessions.length > 1;
 
   return (
-    <div className="media-page board">
+    <div className="media-page board" data-tinted={Boolean(track?.artwork && tint)} style={track?.artwork && tint ? ({ "--art": tint } as React.CSSProperties) : undefined}>
       <section className="media-stage">
         {track?.artwork && tint && <i className="media-glow" style={{ "--art": tint } as React.CSSProperties} aria-hidden="true" />}
         {track ? (
@@ -21,11 +21,12 @@ export function Media() {
               <span className="artwork no-art media-art"><Icon name="music" size={54} /></span>
             )}
             <div className="media-info">
+              <span className="tile-k media-from">{track.playing ? "Now playing" : "Paused"} · {track.app}</span>
               <div className="row">
                 <p className="media-title truncate grow" title={track.title}>{track.title || track.app}</p>
                 <Bars playing={track.playing} height={20} />
               </div>
-              <p className="meta truncate">{[track.artist, track.album, track.app].filter(Boolean).join(", ")}</p>
+              <p className="meta truncate">{[track.artist, track.album].filter(Boolean).join(", ") || track.app}</p>
               <Progress />
               <Transport track={track} size={26} />
             </div>

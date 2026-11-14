@@ -347,12 +347,12 @@ test("a flight shows a countdown, and opens to the route when pointed at", async
 });
 
 test("the face can be changed, and an unknown one falls back", async ({ page }) => {
-  await expect(page.locator(".island .face")).toHaveAttribute("data-face", "soft");
+  await expect(page.locator(".island .face")).toHaveAttribute("data-face", "lantern");
   const set = (face: string) => page.evaluate((f) => (window as never as { __meridian: { updateSettings(p: object): Promise<void> } }).__meridian.updateSettings({ face: f }), face);
   await set("cat");
   await expect(page.locator(".island .face")).toHaveAttribute("data-face", "cat");
   await set("from-a-newer-version");
-  await expect(page.locator(".island .face")).toHaveAttribute("data-face", "soft");
+  await expect(page.locator(".island .face")).toHaveAttribute("data-face", "lantern");
 });
 
 test("the island can sit left or right, and stays on screen", async ({ page }) => {
@@ -445,18 +445,18 @@ test("every face draws every mood", async ({ page }) => {
   await page.getByRole("button", { name: "Island", exact: true }).click();
   const faces = page.locator(".face-grid .face");
   const each = (name: string) => faces.evaluateAll((els, n) => els.map((el) => el.getAttribute(n)), name);
-  await expect(faces).toHaveCount(8);
-  expect(await each("data-face")).toEqual(["soft", "googly", "visor", "smile", "pixel", "cat", "horizon", "moons"]);
+  await expect(faces).toHaveCount(9);
+  expect(await each("data-face")).toEqual(["lantern", "soft", "googly", "visor", "smile", "pixel", "cat", "horizon", "moons"]);
   const drawn = ["rest", "listen", "think", "speak", "heard", "notice", "working", "needs", "done", "error", "drag", "sleepy", "asleep"];
-  // Only soft eyes draws these. The others show the nearest mood they have.
+  // Only Lantern and Soft eyes draw these. The others show the nearest mood they have.
   const borrowed: Record<string, string> = { music: "rest", curious: "rest", wink: "done", love: "done", dizzy: "error" };
   for (const mood of [...drawn, ...Object.keys(borrowed)]) {
     await page.evaluate((m) => (window as never as { __meridian: { feel(m: string, ms: number): void } }).__meridian.feel(m, 60_000), mood);
     const shown = borrowed[mood] ?? mood;
-    await expect.poll(() => each("data-mood")).toEqual([mood, ...Array<string>(7).fill(shown)]);
+    await expect.poll(() => each("data-mood")).toEqual([mood, mood, ...Array<string>(7).fill(shown)]);
     // Something is drawn, at a size that can be seen.
     const seen = await faces.evaluateAll((els) => els.map((el) => { const b = el.getBoundingClientRect(); return el.children.length > 0 && b.width >= 8 && b.height >= 2; }));
-    expect(seen, mood).toEqual(Array(8).fill(true));
+    expect(seen, mood).toEqual(Array(9).fill(true));
   }
 });
 

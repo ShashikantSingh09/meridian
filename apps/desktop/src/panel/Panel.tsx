@@ -151,8 +151,9 @@ export function Panel() {
             <h1 className="grow truncate">{greet ? <BlurText as="span" text={title} animateBy="words" trigger="load" delay={90} stepDuration={0.3} blur={8} distance={8} /> : title}</h1>
             {recording && <RecordingClock since={recording.startedAt} />}
             {wakeOn && <span className="wake-dot-head" role="img" aria-label="Listening for a wake word" title="Listening for a wake word" />}
-            <span className="meta">{date}</span>
-            <Clock className="panel-time tabular" />
+            {/* Home shows the time and date large, in its own tile. */}
+            {tab !== "home" && <span className="meta">{date}</span>}
+            {tab !== "home" && <Clock className="panel-time tabular" />}
             <button className="round" aria-label="Close" title="Close (Esc)" onClick={closePanel}>
               <Icon name="close" size={15} />
             </button>

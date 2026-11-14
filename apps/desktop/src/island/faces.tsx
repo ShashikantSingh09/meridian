@@ -16,7 +16,7 @@ export function useReduced() {
 type Drawn = "rest" | "listen" | "think" | "speak" | "heard" | "notice" | "working" | "needs" | "done" | "error" | "drag" | "sleepy" | "asleep";
 export type Mood = Drawn | "music" | "curious" | "wink" | "love" | "dizzy";
 
-/** Soft eyes draws every mood. The other faces use the nearest one they have. */
+/** Soft eyes and Lantern draw every mood. The other faces use the nearest one they have. */
 const NEAREST: Partial<Record<Mood, Drawn>> = { music: "rest", curious: "rest", wink: "done", love: "done", dizzy: "error" };
 
 const COLORS: Record<Drawn, string> = {
@@ -134,6 +134,7 @@ export interface FaceDef {
 }
 
 export const FACES: FaceDef[] = [
+  { id: "lantern", name: "Lantern", note: "Soft eyes in a body of dark glass, lit from inside by its mood.", draw: () => <><Eye><i className="shape s-oval" /></Eye><Eye><i className="shape s-oval" /></Eye></> },
   { id: "soft", name: "Soft eyes", note: "Calm glowing eyes that change shape with mood.", draw: () => <><Eye><i className="shape s-oval" /></Eye><Eye><i className="shape s-oval" /></Eye></> },
   { id: "googly", name: "Googly eyes", note: "Round eyes that follow you. The funniest one.", draw: () => <><Eye><span className="shape g-ball"><i className="g-pupil" /></span></Eye><Eye><span className="shape g-ball"><i className="g-pupil g-right" /></span></Eye></> },
   { id: "visor", name: "Robot visor", note: "One bar of light that moves in steps, like a machine.", draw: () => <span className="v-bar"><i className="v-light" /></span> },
@@ -191,8 +192,9 @@ export function Face({ id, mood, scale = 1, reduced: asked }: { id: string; mood
   const setting = useReduced();
   const reduced = asked ?? setting;
   const face = faceById(id);
-  const shown = face.id === "soft" ? mood : (NEAREST[mood] ?? mood);
-  const color = face.id === "soft" ? COLORS[shown === "sleepy" || shown === "asleep" ? shown : "rest"] : COLORS[shown as Drawn];
+  // Soft eyes and Lantern draw every mood. Soft eyes stay white; Lantern lights up in the mood's colour.
+  const shown = face.id === "soft" || face.id === "lantern" ? mood : (NEAREST[mood] ?? mood);
+  const color = face.id === "soft" ? COLORS[shown === "sleepy" || shown === "asleep" ? shown : "rest"] : COLORS[(NEAREST[shown] ?? shown) as Drawn];
 
   // Before the first paint, so a one-shot never flashes its end pose.
   useLayoutEffect(() => {
